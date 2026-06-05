@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Mic, Send } from "lucide-react";
 import { getScenario } from "../data/scenarios";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
 import { postChat, type ChatMessage } from "../lib/api";
+import { useSession } from "../store/session";
 import { Buddy, type BuddyMood } from "../components/Buddy";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { cn } from "../lib/utils";
@@ -30,6 +31,15 @@ export default function Conversation() {
   const [booting, setBooting] = useState(true); // fetching the opener
   const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+  const setSession = useSession((s) => s.setSession);
+  const hasUserTurn = messages.some((m) => m.role === "user");
+
+  function finish() {
+    if (!id) return;
+    setSession(id, messages);
+    navigate(`/report/${id}`);
+  }
 
   // Fetch the scene opener once.
   useEffect(() => {
@@ -92,16 +102,27 @@ export default function Conversation() {
       <header className="mx-auto flex w-full max-w-2xl shrink-0 items-center justify-between gap-3 px-5 pt-6">
         <Link
           to="/"
-          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
         >
-          <ArrowLeft className="h-4 w-4" /> 结束
+          <ArrowLeft className="h-4 w-4" /> 返回
         </Link>
-        <span
-          className="truncate rounded-full px-4 py-2 text-sm font-bold shadow-soft"
-          style={{ background: t.soft, color: t.deep }}
-        >
-          {scenario ? `${scenario.titleZh} · ${scenario.title}` : "Practice"}
-        </span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className="truncate rounded-full px-4 py-2 text-sm font-bold shadow-soft"
+            style={{ background: t.soft, color: t.deep }}
+          >
+            {scenario ? `${scenario.titleZh} · ${scenario.title}` : "Practice"}
+          </span>
+          {hasUserTurn && (
+            <button
+              type="button"
+              onClick={finish}
+              className="shrink-0 rounded-full bg-coral px-4 py-2 text-sm font-bold text-primary-fg shadow-pop transition-transform active:translate-y-0.5"
+            >
+              看小结
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="mx-auto mt-3 flex w-full max-w-2xl shrink-0 flex-col items-center px-5 text-center">
