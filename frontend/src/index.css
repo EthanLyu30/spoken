@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg: #f4efe6;
+    --surface: #fbf8f1;
+    --surface-alt: #ece5d6;
+    --primary: #6e1a1f;
+    --primary-fg: #fbf8f1;
+    --accent: #ff5a1f;
+    --text: #1c1a17;
+    --muted: #7a7264;
+    --border: #d8cfbe;
+    --success: #2f6b4f;
+    --warning: #c98a12;
+    --danger: #b23a2e;
+    --radius: 0.25rem;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background font-body text-ink;
+    font-optical-sizing: auto;
+    line-height: 1.65;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display;
+    font-optical-sizing: auto;
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+  }
+
+  ::selection {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  /* Editorial focus ring — never the default browser blue. */
+  :focus-visible {
+    outline: none;
+    @apply ring-2 ring-accent ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer components {
+  /* Space Grotesk metadata eyebrow / kicker. */
+  .eyebrow {
+    @apply font-meta uppercase text-primary;
+    font-size: 0.6875rem;
+    letter-spacing: 0.16em;
+    font-weight: 500;
+  }
+
+  /* Tabular numerals so scores/timers/axes never jitter. */
+  .tabnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Magazine-clipping card resting on the page. */
+  .clip {
+    @apply bg-surface border border-border shadow-clip;
+    border-radius: var(--radius);
+  }
+
+  /* Signal-orange highlighter behind text. Animates via background-size so the
+     text always stays on top (no z-index tricks). */
+  .hl {
+    background-image: linear-gradient(var(--accent), var(--accent));
+    background-repeat: no-repeat;
+    background-position: 0 88%;
+    background-size: 0% 0.5em;
+    transition: background-size 220ms ease-out;
+  }
+  .hl.is-on,
+  .group:hover .hl {
+    background-size: 100% 0.5em;
+  }
+  .hl-static {
+    background-size: 100% 0.5em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
