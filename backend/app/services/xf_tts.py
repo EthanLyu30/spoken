@@ -30,7 +30,7 @@ class XfTtsClient:
         self,
         text: str,
         *,
-        vcn: str = "xiaoyan",
+        vcn: str = "x5_enus_flossie_flow",
         aue: str = "lame",  # lame -> mp3; raw -> 16k PCM
     ) -> bytes:
         s = self._s

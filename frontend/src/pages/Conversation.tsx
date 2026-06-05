@@ -100,7 +100,7 @@ export default function Conversation() {
 
   async function speak(text: string) {
     try {
-      const url = await fetchTtsUrl(text);
+      const url = await fetchTtsUrl(text, id);
       let audio = audioRef.current;
       if (!audio) {
         audio = new Audio();

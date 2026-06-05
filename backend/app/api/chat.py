@@ -39,7 +39,7 @@ async def chat(
 
     messages = build_messages(scenario, req.messages)
     try:
-        reply = await client.chat(messages)
+        reply = await client.chat(messages, temperature=0.85)
     except DeepSeekError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
