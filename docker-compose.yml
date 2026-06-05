@@ -1,0 +1,26 @@
+# One-command startup:  docker compose up --build
+# Then open http://localhost:5173  (frontend proxies /api to the backend).
+services:
+  backend:
+    build: ./backend
+    env_file:
+      - path: ./backend/.env            # copy from backend/.env.example for full features
+        required: false                 # optional, so a fresh clone still boots (chat needs the key)
+    environment:
+      DATABASE_URL: sqlite:////data/spoken.db
+    volumes:
+      - backend-data:/data              # persist the SQLite database
+    ports:
+      - "8000:8000"                     # http://localhost:8000/docs
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"                       # http://localhost:5173
+    restart: unless-stopped
+
+volumes:
+  backend-data:

@@ -112,6 +112,19 @@ npm run dev
 
 打开 <http://localhost:5173>，进入任意场景即可与 Pip 用英文文字对话（需后端在运行且已配置 `DEEPSEEK_API_KEY`）。后端测试：`cd backend && pip install -r requirements-dev.txt && pytest`。
 
+### 🐳 Docker 一键启动
+
+```bash
+copy backend\.env.example backend\.env     # Windows；macOS/Linux: cp backend/.env.example backend/.env
+#   填入 DEEPSEEK_API_KEY（与 XF_*）
+
+docker compose up --build
+```
+
+- 前端： <http://localhost:5173>（nginx 静态托管，并把 `/api` 反向代理到后端服务）
+- 后端 API 文档： <http://localhost:8000/docs>
+- SQLite 数据持久化在名为 `backend-data` 的卷中
+
 ### 🔑 环境变量
 
 后端需要以下密钥（写入 `backend/.env`，**切勿提交到仓库**）：

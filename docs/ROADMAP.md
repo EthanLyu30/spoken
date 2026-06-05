@@ -12,7 +12,7 @@
 ### M1 · 骨架可运行
 - [x] **PR**：后端 FastAPI 骨架（健康检查、配置、目录结构、`requirements.txt`、`.env.example`）
 - [x] **PR**：前端 React+TS+Vite 骨架（Tailwind、shadcn/ui、路由、API 客户端）
-- [ ] **PR**：Docker Compose 一键启动 + 运行文档
+- [x] **PR**：Docker Compose 一键启动 + 运行文档
 
 ### M2 · 场景与对话基础
 - [x] **PR**：场景数据与选择页（面试 / 点餐 / 会议，含角色设定）— 选择页见 PR#2，后端场景目录见本 PR
