@@ -140,3 +140,18 @@ export function getSessions(signal?: AbortSignal): Promise<SessionSummary[]> {
 export function getSession(id: number, signal?: AbortSignal): Promise<SessionDetail> {
   return request<SessionDetail>(`/api/sessions/${id}`, { signal });
 }
+
+/**
+ * Fetch MP3 audio for a line of Pip's speech as an object URL.
+ * The caller is responsible for revoking the URL when done.
+ */
+export async function fetchTtsUrl(text: string, signal?: AbortSignal): Promise<string> {
+  const res = await fetch(`${BASE_URL}/api/tts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+    signal,
+  });
+  if (!res.ok) throw new Error(`tts failed: ${res.status}`);
+  return URL.createObjectURL(await res.blob());
+}
