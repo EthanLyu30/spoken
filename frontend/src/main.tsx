@@ -2,10 +2,9 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 
-// Self-hosted editorial typefaces (bundled — reliable without external CDNs).
-import "@fontsource-variable/fraunces";
-import "@fontsource-variable/newsreader";
-import "@fontsource-variable/space-grotesk";
+// Self-hosted rounded typefaces (bundled — reliable without external CDNs).
+import "@fontsource-variable/fredoka";
+import "@fontsource-variable/nunito";
 
 import App from "./App";
 import "./index.css";

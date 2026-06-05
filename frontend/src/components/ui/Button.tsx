@@ -1,8 +1,8 @@
 import { forwardRef, type ButtonHTMLAttributes } from "react";
 import { cn } from "../../lib/utils";
 
-type Variant = "primary" | "outline" | "ghost";
-type Size = "sm" | "md";
+type Variant = "primary" | "soft" | "ghost";
+type Size = "sm" | "md" | "lg";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
@@ -10,14 +10,16 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variants: Record<Variant, string> = {
-  primary: "bg-primary text-primary-fg hover:opacity-90",
-  outline: "border border-border bg-surface text-ink hover:border-primary hover:text-primary",
-  ghost: "text-ink hover:bg-surface-alt",
+  primary:
+    "bg-coral text-primary-fg shadow-pop hover:brightness-105 active:translate-y-[2px] active:shadow-pressed",
+  soft: "border-2 border-border bg-surface text-ink shadow-soft hover:-translate-y-0.5 active:translate-y-0",
+  ghost: "text-ink hover:bg-surface-2",
 };
 
 const sizes: Record<Size, string> = {
-  sm: "h-8 px-3 text-xs",
-  md: "h-10 px-4 text-sm",
+  sm: "h-9 px-4 text-sm",
+  md: "h-12 px-6 text-base",
+  lg: "h-14 px-8 text-lg",
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
@@ -28,7 +30,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     <button
       ref={ref}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded font-meta font-medium uppercase tracking-wide transition-colors disabled:pointer-events-none disabled:opacity-50",
+        "inline-flex select-none items-center justify-center gap-2 rounded-full font-display font-semibold transition-all duration-150 disabled:pointer-events-none disabled:opacity-50",
         variants[variant],
         sizes[size],
         className,

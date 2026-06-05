@@ -4,14 +4,15 @@
 
 ## 设计系统
 
-视觉方案为 **「Signal — The Language Journal」**（语言学习日志 / 编辑杂志风）：
+视觉方案为 **「Pip — 你的口语陪练伙伴」**（温暖圆润 / 角色陪伴 / 闯关成长）：
 
-- 暖纸背景 `#F4EFE6` · 牛血红主色 `#6E1A1F` · 信号橙高亮 `#FF5A1F`
-- 双衬线排版：Fraunces（标题）+ Newsreader（正文）+ Space Grotesk（元信息）
-- 拉丁字体经 `@fontsource` 随应用打包（国内无需依赖外部 CDN）；中文走系统字体兜底
-- 设计理念：对话时收敛为安静的「阅读室」、只有麦克风发光；报告页展开杂志式的量化反馈
+- 暖桃奶油背景 `#FFF3E6` · 珊瑚主色 `#FF6F5E` · 嫩芽绿 `#41C08C`，配一组糖果色点缀
+- 圆润排版：**Fredoka**（标题）+ **Nunito**（正文），经 `@fontsource` 随应用打包（国内无需外部 CDN），中文走系统圆体兜底
+- 原创角色 **Pip**（`components/Buddy.tsx`）：头顶嫩芽的珊瑚色小家伙，会眨眼、聆听（听你说话时泛起涟漪）、说话（嘴巴开合）、庆祝（撒星星）
+- 游戏化：等级 / XP 进度 / 连续天数 / 每日目标环；首页把场景排成一条「闯关地图」
+- 柔软的黏土质感阴影 + 漂浮色块 + 颗粒噪点背景，整体大圆角、可挤压（按钮按下回弹）
 
-所有色彩令牌由 `src/index.css` 的 CSS 变量统一驱动，`tailwind.config.js` 映射为 Tailwind 颜色。
+所有色彩令牌由 `src/index.css` 的 CSS 变量统一驱动，`tailwind.config.js` 映射为 Tailwind 颜色；每个场景的糖果配色见 `src/lib/theme.ts`。
 
 ## 环境要求
 
@@ -43,11 +44,11 @@ frontend/
 ├── src/
 │   ├── main.tsx            # 入口（路由、字体、全局样式）
 │   ├── App.tsx             # 路由表
-│   ├── index.css           # 设计令牌 + 全局样式 + 编辑风工具类
-│   ├── pages/              # Home / Conversation / Report
-│   ├── components/         # Masthead / ScenarioCard / BackendStatus / ui
-│   ├── data/               # 场景样例数据（后续由后端提供）
-│   └── lib/                # api 客户端、设计令牌、工具函数、图标
+│   ├── index.css           # 设计令牌 + 全局样式 + 角色动画关键帧
+│   ├── pages/              # Home（闯关地图）/ Conversation（对话）/ Report（小结）
+│   ├── components/         # Buddy / BuddyHero / ScenarioCard / PlayfulBackground / ui
+│   ├── data/               # 场景样例 + 学习进度样例（后续由后端提供）
+│   └── lib/                # api 客户端、设计令牌、场景配色、工具函数、图标
 ├── tailwind.config.js
 └── vite.config.ts
 ```

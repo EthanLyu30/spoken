@@ -4,19 +4,36 @@
 
 @layer base {
   :root {
-    --bg: #f4efe6;
-    --surface: #fbf8f1;
-    --surface-alt: #ece5d6;
-    --primary: #6e1a1f;
-    --primary-fg: #fbf8f1;
-    --accent: #ff5a1f;
-    --text: #1c1a17;
-    --muted: #7a7264;
-    --border: #d8cfbe;
-    --success: #2f6b4f;
-    --warning: #c98a12;
-    --danger: #b23a2e;
-    --radius: 0.25rem;
+    /* Surfaces — warm peach paper */
+    --bg: #fff3e6;
+    --surface: #fffdf9;
+    --surface-2: #fff6ec;
+    /* Ink */
+    --ink: #43302b;
+    --muted: #b0897a;
+    --border: #f1ddc6;
+    /* Brand + candy accents */
+    --coral: #ff6f5e;
+    --coral-deep: #ec5440;
+    --coral-fg: #fff7f3;
+    --tangerine: #ff9f45;
+    --sunny: #ffc94d;
+    --leaf: #41c08c;
+    --leaf-deep: #2fa274;
+    --sky: #57b7e8;
+    --berry: #ff7aa2;
+    --grape: #8a7bf0;
+    --danger: #f0607a;
+    /* Shape */
+    --radius: 1.5rem;
+    --radius-sm: 1rem;
+    /* Soft toy shadows (claymorphism) */
+    --shadow-soft: 0 10px 24px -14px rgba(120, 72, 40, 0.45);
+    --shadow-pop: 0 16px 36px -18px rgba(120, 72, 40, 0.55),
+      0 2px 0 rgba(255, 255, 255, 0.55) inset;
+    --shadow-pressed: 0 4px 10px -8px rgba(120, 72, 40, 0.5);
+    --shadow-sticker: 0 1px 0 rgba(255, 255, 255, 0.7) inset,
+      0 14px 30px -18px rgba(120, 72, 40, 0.5);
   }
 
   html {
@@ -26,9 +43,14 @@
   }
 
   body {
-    @apply bg-background font-body text-ink;
-    font-optical-sizing: auto;
-    line-height: 1.65;
+    @apply bg-bg font-body text-ink;
+    background-image:
+      radial-gradient(1100px 680px at 10% -10%, #ffe4c4 0%, transparent 55%),
+      radial-gradient(880px 600px at 100% 0%, #ffd7e2 0%, transparent 50%),
+      radial-gradient(820px 720px at 50% 125%, #d6f2e4 0%, transparent 55%);
+    background-attachment: fixed;
+    font-weight: 500;
+    line-height: 1.6;
   }
 
   h1,
@@ -36,59 +58,68 @@
   h3,
   h4 {
     @apply font-display;
-    font-optical-sizing: auto;
+    font-weight: 600;
     line-height: 1.05;
-    letter-spacing: -0.015em;
+    letter-spacing: -0.01em;
   }
 
   ::selection {
-    background: var(--accent);
-    color: #fff;
+    background: var(--sunny);
+    color: var(--ink);
   }
 
-  /* Editorial focus ring — never the default browser blue. */
+  /* Soft, friendly focus ring — never the default browser blue. */
   :focus-visible {
     outline: none;
-    @apply ring-2 ring-accent ring-offset-2 ring-offset-background;
+    box-shadow: 0 0 0 4px rgba(255, 111, 94, 0.35);
+    border-radius: 0.9rem;
   }
 }
 
 @layer components {
-  /* Space Grotesk metadata eyebrow / kicker. */
   .eyebrow {
-    @apply font-meta uppercase text-primary;
-    font-size: 0.6875rem;
-    letter-spacing: 0.16em;
-    font-weight: 500;
+    @apply font-display uppercase text-coral-deep;
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    font-weight: 600;
   }
 
-  /* Tabular numerals so scores/timers/axes never jitter. */
   .tabnum {
     font-variant-numeric: tabular-nums;
   }
 
-  /* Magazine-clipping card resting on the page. */
-  .clip {
-    @apply bg-surface border border-border shadow-clip;
+  /* Chunky soft card. */
+  .card {
+    @apply border border-border bg-surface;
     border-radius: var(--radius);
+    box-shadow: var(--shadow-soft);
   }
 
-  /* Signal-orange highlighter behind text. Animates via background-size so the
-     text always stays on top (no z-index tricks). */
-  .hl {
-    background-image: linear-gradient(var(--accent), var(--accent));
-    background-repeat: no-repeat;
-    background-position: 0 88%;
-    background-size: 0% 0.5em;
-    transition: background-size 220ms ease-out;
+  /* Speech bubble (Pip / user). The tail is a rotated square pseudo-element. */
+  .bubble {
+    position: relative;
+    border-radius: 1.4rem;
   }
-  .hl.is-on,
-  .group:hover .hl {
-    background-size: 100% 0.5em;
-  }
-  .hl-static {
-    background-size: 100% 0.5em;
-  }
+}
+
+/* SVG eye: blink scales from its own center. */
+.eye {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.mouth {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Grain overlay for atmosphere. */
+.noise {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 @media (prefers-reduced-motion: reduce) {
