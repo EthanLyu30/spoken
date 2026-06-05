@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     app_name: str = "Spoken"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # Persistence
+    database_url: str = "sqlite:///./spoken.db"
+
     # iFlytek (科大讯飞)
     xf_app_id: str = ""
     xf_api_key: str = ""
