@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Mic, Send, Volume2, VolumeX } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, Send, Square, Volume2, VolumeX } from "lucide-react";
 import { getScenario } from "../data/scenarios";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
-import { postChat, fetchTtsUrl, type ChatMessage } from "../lib/api";
+import { postChat, fetchTtsUrl, postAsr, type ChatMessage } from "../lib/api";
 import { useSession } from "../store/session";
+import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { Buddy, type BuddyMood } from "../components/Buddy";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { cn } from "../lib/utils";
@@ -31,10 +32,13 @@ export default function Conversation() {
   const [booting, setBooting] = useState(true); // fetching the opener
   const [error, setError] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const lastSpokenRef = useRef(-1);
+  const recorderRef = useRef<ActiveRecorder | null>(null);
   const navigate = useNavigate();
   const setSession = useSession((s) => s.setSession);
   const hasUserTurn = messages.some((m) => m.role === "user");
@@ -85,11 +89,12 @@ export default function Conversation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, muted]);
 
-  // Stop audio + free the blob URL on unmount.
+  // Stop audio / recording + free the blob URL on unmount.
   useEffect(() => {
     return () => {
       audioRef.current?.pause();
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+      recorderRef.current?.stop().catch(() => undefined);
     };
   }, []);
 
@@ -126,6 +131,35 @@ export default function Conversation() {
       setError("发送失败，请确认后端在运行后重试。");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleMic() {
+    if (transcribing || booting) return;
+    if (recording) {
+      setRecording(false);
+      const rec = recorderRef.current;
+      recorderRef.current = null;
+      if (!rec) return;
+      setTranscribing(true);
+      setError(null);
+      try {
+        const text = (await postAsr(await rec.stop())).trim();
+        if (text) setInput((prev) => (prev ? `${prev} ${text}` : text));
+        else setError("没听清，再说一次试试？");
+      } catch {
+        setError("语音识别失败，请检查麦克风权限或后端，或直接打字。");
+      } finally {
+        setTranscribing(false);
+      }
+    } else {
+      setError(null);
+      try {
+        recorderRef.current = await startRecording();
+        setRecording(true);
+      } catch {
+        setError("无法使用麦克风，请允许权限后重试，或直接打字。");
+      }
     }
   }
 
@@ -205,13 +239,23 @@ export default function Conversation() {
         <div className="flex items-center gap-2 rounded-full border border-border bg-surface p-2 shadow-pop">
           <button
             type="button"
-            disabled
-            title="语音输入即将上线"
-            aria-label="语音输入即将上线"
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-muted opacity-60"
-            style={{ background: "var(--surface-2)" }}
+            onClick={handleMic}
+            disabled={transcribing || booting}
+            aria-label={recording ? "结束录音" : "开始录音"}
+            title={recording ? "结束录音" : "用英文说"}
+            className={cn(
+              "grid h-11 w-11 shrink-0 place-items-center rounded-full text-white shadow-soft transition-transform active:scale-95 disabled:opacity-50",
+              recording && "animate-pulse",
+            )}
+            style={{ background: recording ? "var(--danger)" : t.base }}
           >
-            <Mic className="h-5 w-5" />
+            {transcribing ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : recording ? (
+              <Square className="h-4 w-4" />
+            ) : (
+              <Mic className="h-5 w-5" />
+            )}
           </button>
           <input
             value={input}
@@ -219,14 +263,22 @@ export default function Conversation() {
             onKeyDown={(e) => {
               if (e.key === "Enter") send();
             }}
-            placeholder={booting ? "正在连接…" : "用英文打字回复 Pip…"}
-            disabled={booting}
+            placeholder={
+              recording
+                ? "正在聆听…点停止结束"
+                : transcribing
+                  ? "识别中…"
+                  : booting
+                    ? "正在连接…"
+                    : "用英文打字回复 Pip…"
+            }
+            disabled={booting || recording || transcribing}
             className="min-w-0 flex-1 bg-transparent px-2 text-ink outline-none placeholder:text-muted"
           />
           <button
             type="button"
             onClick={send}
-            disabled={loading || booting || !input.trim()}
+            disabled={loading || booting || recording || transcribing || !input.trim()}
             aria-label="发送"
             className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-white shadow-soft transition-transform active:scale-95 disabled:opacity-40"
             style={{ background: t.base }}
@@ -234,7 +286,7 @@ export default function Conversation() {
             <Send className="h-5 w-5" strokeWidth={2.4} />
           </button>
         </div>
-        <p className="mt-2 text-center text-xs text-muted">语音输入即将上线，现在先用文字和 Pip 对话</p>
+        <p className="mt-2 text-center text-xs text-muted">点麦克风用英文说，或直接打字（麦克风为测试版）</p>
       </footer>
     </div>
   );

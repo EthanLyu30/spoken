@@ -155,3 +155,16 @@ export async function fetchTtsUrl(text: string, signal?: AbortSignal): Promise<s
   if (!res.ok) throw new Error(`tts failed: ${res.status}`);
   return URL.createObjectURL(await res.blob());
 }
+
+/** Transcribe 16 kHz mono PCM via the backend (iFlytek ASR). */
+export async function postAsr(pcm: ArrayBuffer, signal?: AbortSignal): Promise<string> {
+  const res = await fetch(`${BASE_URL}/api/asr`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: pcm,
+    signal,
+  });
+  if (!res.ok) throw new Error(`asr failed: ${res.status}`);
+  const data = (await res.json()) as { text: string };
+  return data.text;
+}
