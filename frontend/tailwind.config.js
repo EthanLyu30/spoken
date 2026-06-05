@@ -1,55 +1,109 @@
 /** @type {import('tailwindcss').Config} */
-// "Signal — The Language Journal" design system.
-// All color tokens are driven by CSS variables defined in src/index.css so the
-// editorial palette has a single source of truth.
+// "Pip" playful-buddy design system. All color tokens are CSS variables defined
+// in src/index.css so the warm palette has a single source of truth.
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        background: "var(--bg)",
-        surface: {
-          DEFAULT: "var(--surface)",
-          alt: "var(--surface-alt)",
-        },
-        primary: {
-          DEFAULT: "var(--primary)",
-          fg: "var(--primary-fg)",
-        },
-        accent: "var(--accent)",
-        ink: "var(--text)",
+        // Surfaces (warm peach paper)
+        bg: "var(--bg)",
+        surface: "var(--surface)",
+        "surface-2": "var(--surface-2)",
+        // Ink
+        ink: "var(--ink)",
         muted: "var(--muted)",
         border: "var(--border)",
-        success: "var(--success)",
-        warning: "var(--warning)",
+        // Brand + candy accents
+        primary: "var(--coral)",
+        "primary-fg": "var(--coral-fg)",
+        coral: "var(--coral)",
+        "coral-deep": "var(--coral-deep)",
+        tangerine: "var(--tangerine)",
+        sunny: "var(--sunny)",
+        leaf: "var(--leaf)",
+        "leaf-deep": "var(--leaf-deep)",
+        sky: "var(--sky)",
+        berry: "var(--berry)",
+        grape: "var(--grape)",
+        // Semantic (mapped onto the candy palette)
+        success: "var(--leaf)",
+        warning: "var(--sunny)",
         danger: "var(--danger)",
       },
       fontFamily: {
-        display: ['"Fraunces Variable"', "Fraunces", '"Noto Serif SC"', "serif"],
-        body: ['"Newsreader Variable"', "Newsreader", '"Noto Serif SC"', "serif"],
-        meta: ['"Space Grotesk Variable"', '"Space Grotesk"', "ui-monospace", "monospace"],
-        sc: ['"PingFang SC"', '"Microsoft YaHei"', '"Noto Sans SC"', "sans-serif"],
+        display: [
+          '"Fredoka Variable"',
+          '"Fredoka"',
+          '"PingFang SC"',
+          '"Hiragino Sans GB"',
+          '"Microsoft YaHei"',
+          "sans-serif",
+        ],
+        body: [
+          '"Nunito Variable"',
+          '"Nunito"',
+          '"PingFang SC"',
+          '"Hiragino Sans GB"',
+          '"Microsoft YaHei"',
+          "sans-serif",
+        ],
       },
       borderRadius: {
         DEFAULT: "var(--radius)",
-        sm: "calc(var(--radius) * 0.5)",
+        soft: "var(--radius-sm)",
+        chunk: "1.75rem",
+        huge: "2.5rem",
       },
       boxShadow: {
-        clip: "0 1px 0 rgba(28,26,23,0.04), 0 8px 24px -16px rgba(110,26,31,0.18)",
-        mic: "0 0 48px -10px rgba(255,90,31,0.45)",
-      },
-      maxWidth: {
-        reading: "42rem",
-        page: "78rem",
+        soft: "var(--shadow-soft)",
+        pop: "var(--shadow-pop)",
+        pressed: "var(--shadow-pressed)",
+        sticker: "var(--shadow-sticker)",
       },
       keyframes: {
-        "fade-up": {
-          "0%": { opacity: "0", transform: "translateY(8px)" },
-          "100%": { opacity: "1", transform: "translateY(0)" },
+        bob: {
+          "0%,100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-7px)" },
+        },
+        blink: {
+          "0%,92%,100%": { transform: "scaleY(1)" },
+          "95%": { transform: "scaleY(0.08)" },
+        },
+        talk: {
+          "0%,100%": { transform: "scaleY(0.45)" },
+          "50%": { transform: "scaleY(1)" },
+        },
+        floaty: {
+          "0%,100%": { transform: "translate(0,0)" },
+          "50%": { transform: "translate(0,-22px)" },
+        },
+        rise: {
+          "0%": { opacity: "0", transform: "translateY(16px) scale(0.96)" },
+          "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
+        pulsering: {
+          "0%": { transform: "scale(0.85)", opacity: "0.5" },
+          "100%": { transform: "scale(1.7)", opacity: "0" },
+        },
+        sparkle: {
+          "0%,100%": { transform: "scale(0.5) rotate(0deg)", opacity: "0.25" },
+          "50%": { transform: "scale(1) rotate(25deg)", opacity: "1" },
+        },
+        wiggle: {
+          "0%,100%": { transform: "rotate(-3deg)" },
+          "50%": { transform: "rotate(3deg)" },
         },
       },
       animation: {
-        "fade-up": "fade-up 250ms ease-out both",
+        bob: "bob 3.4s ease-in-out infinite",
+        blink: "blink 5s ease-in-out infinite",
+        talk: "talk 0.32s ease-in-out infinite",
+        floaty: "floaty 9s ease-in-out infinite",
+        rise: "rise 0.6s cubic-bezier(0.34,1.56,0.64,1) both",
+        pulsering: "pulsering 1.8s ease-out infinite",
+        sparkle: "sparkle 2.6s ease-in-out infinite",
+        wiggle: "wiggle 0.5s ease-in-out infinite",
       },
     },
   },

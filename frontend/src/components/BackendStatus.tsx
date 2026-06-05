@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { getHealth } from "../lib/api";
-import { cn } from "../lib/utils";
 
 type State = "checking" | "online" | "offline";
 
@@ -23,20 +22,20 @@ export function BackendStatus() {
   }, []);
 
   const dot: Record<State, string> = {
-    checking: "bg-warning",
-    online: "bg-success",
-    offline: "bg-danger",
+    checking: "var(--sunny)",
+    online: "var(--leaf)",
+    offline: "var(--danger)",
   };
   const label: Record<State, string> = {
     checking: "连接后端…",
     online: `后端已连接${app ? ` · ${app}` : ""}`,
-    offline: "后端未运行 · 启动 backend 后刷新",
+    offline: "后端未运行 · 启动后刷新",
   };
 
   return (
-    <span className="inline-flex items-center gap-2">
-      <span className={cn("h-1.5 w-1.5 rounded-full", dot[state])} />
-      <span className="eyebrow !text-muted">{label[state]}</span>
+    <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 shadow-soft">
+      <span className="h-2 w-2 rounded-full" style={{ background: dot[state] }} />
+      <span className="text-xs font-semibold text-muted">{label[state]}</span>
     </span>
   );
 }

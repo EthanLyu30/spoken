@@ -4,17 +4,22 @@
  * src/index.css — this is the JS mirror of the same single source of truth.
  */
 export const tokens = {
-  bg: "#f4efe6",
-  surface: "#fbf8f1",
-  surfaceAlt: "#ece5d6",
-  primary: "#6e1a1f",
-  accent: "#ff5a1f",
-  text: "#1c1a17",
-  muted: "#7a7264",
-  border: "#d8cfbe",
-  success: "#2f6b4f",
-  warning: "#c98a12",
-  danger: "#b23a2e",
+  bg: "#fff3e6",
+  surface: "#fffdf9",
+  surface2: "#fff6ec",
+  ink: "#43302b",
+  muted: "#b0897a",
+  border: "#f1ddc6",
+  coral: "#ff6f5e",
+  tangerine: "#ff9f45",
+  sunny: "#ffc94d",
+  leaf: "#41c08c",
+  sky: "#57b7e8",
+  berry: "#ff7aa2",
+  grape: "#8a7bf0",
+  success: "#41c08c",
+  warning: "#ffc94d",
+  danger: "#f0607a",
 } as const;
 
 export type Tokens = typeof tokens;

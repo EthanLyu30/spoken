@@ -1,88 +1,89 @@
+import { type CSSProperties } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight } from "lucide-react";
-import { cn } from "../lib/utils";
+import { ArrowRight, Clock3, Star } from "lucide-react";
+import { type Scenario } from "../data/scenarios";
 import { scenarioIcons } from "../lib/icons";
-import { difficultyLabel, type Scenario } from "../data/scenarios";
-
-function DifficultyDots({ value }: { value: number }) {
-  return (
-    <span className="flex items-center gap-1" aria-label={`难度 ${value} / 5`}>
-      {Array.from({ length: 5 }).map((_, i) => (
-        <span
-          key={i}
-          className={cn(
-            "h-1.5 w-1.5 rounded-full",
-            i < value ? "bg-primary" : "bg-border",
-          )}
-        />
-      ))}
-    </span>
-  );
-}
+import { themeFor } from "../lib/theme";
+import { xpReward } from "../data/progress";
+import { cn } from "../lib/utils";
 
 interface ScenarioCardProps {
   scenario: Scenario;
-  index: number;
-  featured?: boolean;
+  /** 1-based stop number on the journey path. */
+  stop: number;
+  className?: string;
+  style?: CSSProperties;
 }
 
-export function ScenarioCard({ scenario, index, featured }: ScenarioCardProps) {
+export function ScenarioCard({ scenario, stop, className, style }: ScenarioCardProps) {
   const Icon = scenarioIcons[scenario.icon];
-  const num = String(index).padStart(2, "0");
-  const href = `/practice/${scenario.id}`;
-
-  if (featured) {
-    return (
-      <Link
-        to={href}
-        className="group relative block overflow-hidden rounded bg-primary p-7 text-primary-fg shadow-clip transition-transform duration-200 hover:-translate-y-0.5 md:p-9"
-      >
-        <Icon className="pointer-events-none absolute -right-6 -top-8 h-44 w-44 text-primary-fg opacity-10" />
-        <span className="eyebrow !text-accent">Featured · 今日推荐</span>
-        <h2 className="mt-4 text-4xl md:text-5xl">
-          <span className="hl-static">{scenario.title}</span>
-        </h2>
-        <p className="mt-2 font-sc text-lg text-primary-fg opacity-80">
-          {scenario.titleZh} · {scenario.subtitle}
-        </p>
-        <p className="mt-5 max-w-md text-primary-fg opacity-90">{scenario.goal}</p>
-        <div className="mt-7 flex flex-wrap items-center gap-x-5 gap-y-3">
-          <span className="inline-flex h-11 items-center gap-2 rounded-full bg-accent px-5 font-meta text-sm uppercase tracking-wide text-surface">
-            开始练习 <ArrowRight className="h-4 w-4" />
-          </span>
-          <span className="eyebrow !text-primary-fg opacity-70">
-            {difficultyLabel(scenario.difficulty)} · {scenario.minutes} min
-          </span>
-        </div>
-      </Link>
-    );
-  }
+  const t = themeFor(scenario.id);
+  const xp = xpReward(scenario.difficulty, scenario.minutes);
 
   return (
     <Link
-      to={href}
-      className="group block rounded border border-border bg-surface p-5 shadow-clip transition-transform duration-200 hover:-translate-y-0.5 hover:border-primary"
+      to={`/practice/${scenario.id}`}
+      style={style}
+      className={cn(
+        "group block rounded-chunk border border-border bg-surface p-5 shadow-soft transition-all duration-200 hover:-translate-y-1 hover:shadow-pop active:translate-y-0",
+        className,
+      )}
     >
-      <div className="flex items-center justify-between">
-        <span className="eyebrow">
-          {num} · {scenario.category} · {scenario.categoryZh}
+      <div className="flex items-start gap-4">
+        <span
+          className="relative grid h-14 w-14 shrink-0 place-items-center rounded-2xl"
+          style={{ background: t.soft, color: t.deep }}
+        >
+          <Icon className="h-7 w-7" strokeWidth={2.4} />
+          <span
+            className="absolute -left-2 -top-2 grid h-6 w-6 place-items-center rounded-full text-xs font-bold text-white shadow-soft"
+            style={{ background: t.base }}
+          >
+            {stop}
+          </span>
         </span>
-        <Icon className="h-4 w-4 text-muted" />
-      </div>
-      <h3 className="mt-3 text-2xl">
-        <span className="hl">{scenario.title}</span>
-      </h3>
-      <p className="mt-1 font-sc text-sm text-muted">{scenario.subtitle}</p>
-      <div className="my-4 border-t border-border" />
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <DifficultyDots value={scenario.difficulty} />
-          <span className="eyebrow !text-muted">{scenario.minutes} 分钟</span>
+        <div className="min-w-0 flex-1">
+          <span className="text-[0.66rem] font-bold uppercase tracking-wide" style={{ color: t.deep }}>
+            {scenario.category} · {scenario.categoryZh}
+          </span>
+          <h3 className="mt-0.5 truncate font-display text-xl font-semibold text-ink">{scenario.title}</h3>
+          <p className="truncate text-sm text-muted">
+            {scenario.titleZh} · {scenario.subtitle}
+          </p>
         </div>
-        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-surface transition-transform duration-200 group-hover:translate-x-0.5">
-          <ArrowRight className="h-4 w-4" />
+      </div>
+
+      <div className="mt-4 flex items-center justify-between">
+        <div className="flex items-center gap-3 text-xs font-semibold text-muted">
+          <Stars value={scenario.difficulty} color={t.base} />
+          <span className="inline-flex items-center gap-1">
+            <Clock3 className="h-3.5 w-3.5" />
+            {scenario.minutes} min
+          </span>
+          <span
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-bold"
+            style={{ background: t.soft, color: t.deep }}
+          >
+            +{xp} XP
+          </span>
+        </div>
+        <span
+          className="grid h-9 w-9 place-items-center rounded-full text-white transition-transform group-hover:translate-x-0.5"
+          style={{ background: t.base }}
+        >
+          <ArrowRight className="h-4 w-4" strokeWidth={2.6} />
         </span>
       </div>
     </Link>
+  );
+}
+
+function Stars({ value, color }: { value: number; color: string }) {
+  return (
+    <span className="flex items-center gap-0.5" aria-label={`难度 ${value} / 5`}>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <Star key={i} className="h-3.5 w-3.5" strokeWidth={0} fill={i < value ? color : "#ead9c2"} />
+      ))}
+    </span>
   );
 }
