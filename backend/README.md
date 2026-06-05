@@ -43,6 +43,10 @@ uvicorn app.main:app --reload
 | `GET` | `/api/scenarios` | 场景列表（后端为唯一数据源） |
 | `GET` | `/api/scenarios/{id}` | 单个场景详情（含开场白） |
 | `POST` | `/api/chat` | 一轮场景化角色扮演对话（DeepSeek 驱动） |
+| `POST` | `/api/feedback` | 课后小结：结构化评分 / 纠错 / 建议（DeepSeek 驱动） |
+| `POST` | `/api/sessions` | 保存一次完成的对话（含评分） |
+| `GET` | `/api/sessions` | 历史会话列表 |
+| `GET` | `/api/sessions/{id}` | 单次会话详情（对话 + 评分） |
 
 `POST /api/chat` 接收场景 id 与历史消息，返回 AI 陪练的下一句话。历史为空时直接返回脚本化开场白（不调用模型）；有用户消息时调用 DeepSeek，因此需要在 `.env` 中配置 `DEEPSEEK_API_KEY`。
 
@@ -59,6 +63,8 @@ curl -s http://127.0.0.1:8000/api/chat \
 ```
 
 设计上对话走**快路径**：系统提示要求 AI 全程角色扮演、回复简短口语化、不在对话中纠错（纠错与评测属于后续里程碑的慢路径）。
+
+会话持久化使用 SQLite（默认 `spoken.db`，可用 `DATABASE_URL` 覆盖）；`/api/sessions` 用于保存与回看历史，是能力趋势的基础。
 
 ## 测试
 
@@ -80,13 +86,19 @@ backend/
 │   ├── api/
 │   │   ├── health.py      # 健康检查
 │   │   ├── scenarios.py   # 场景目录接口
-│   │   └── chat.py        # 对话接口
+│   │   ├── chat.py        # 对话接口
+│   │   ├── feedback.py    # 课后小结接口
+│   │   └── sessions.py    # 会话历史接口
 │   ├── data/
 │   │   └── scenarios.py   # 场景定义（含角色设定，唯一数据源）
+│   ├── db.py              # SQLAlchemy 引擎 / 会话 / 依赖
+│   ├── models/            # ORM 模型（Session / Turn / Score）
 │   ├── schemas/           # Pydantic 请求/响应模型
 │   └── services/
 │       ├── deepseek.py    # DeepSeek 异步客户端
-│       └── dialogue.py    # 系统提示 / 消息编排
+│       ├── dialogue.py    # 系统提示 / 消息编排
+│       ├── feedback.py    # 课后小结提示与结构化解析
+│       └── sessions.py    # 会话持久化
 ├── tests/                 # pytest 用例
 ├── requirements.txt
 ├── requirements-dev.txt
