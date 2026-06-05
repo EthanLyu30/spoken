@@ -118,3 +118,24 @@ Score  (id, turn_id, pron_accuracy, pron_fluency, pron_completeness,
 | 对话 / 纠错 / 总结 | DeepSeek | 国内可达，结构化输出能力强，性价比高 |
 | 后端 | FastAPI | 原生异步 + WebSocket，AI/音频生态完善 |
 | 存储 | SQLite | 零配置，评委可一键复现 |
+
+## 8. 当前实现进度（与本设计的对应）
+
+本设计是目标蓝图；当前已落地的是「文本对话闭环」，语音与评测按里程碑推进。
+
+**✅ 已实现**
+
+| 设计中的模块 | 实际落地 |
+|---|---|
+| 场景目录（角色设定） | `backend/app/data/scenarios.py` + `app/api/scenarios.py`（`GET /api/scenarios`） |
+| 对话 LLM（快路） | `backend/app/services/deepseek.py` + `services/dialogue.py` + `app/api/chat.py`（`POST /api/chat`，文本版） |
+| 前端对话 | `frontend/src/pages/Conversation.tsx` → `/api/chat`；首页 `Home.tsx` 闯关地图；`Report.tsx` 报告占位 |
+| 设计系统 | 自研「Pip」陪伴式 UI（`components/Buddy.tsx` 等） |
+
+**🚧 规划中（保留上文设计）**
+
+- 实时语音：WebSocket 编排（`ws_manager`、`api/conversation.py`）、麦克风采集与 VAD 断句。
+- 讯飞接入：`services/asr_xf.py`（ASR）、`tts_xf.py`（TTS）、`pron_xf.py`（发音评测）。
+- 慢路评测与持久化：`api/assessment.py`、`models/`（Session / Turn / Score）、`api/reports.py`（课后总结与趋势）。
+
+> 说明：文本 MVP 阶段对话用 `api/chat.py`（HTTP）实现；上语音时再引入上文的 WebSocket 编排（`api/conversation.py`）。
