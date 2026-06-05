@@ -1,11 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Loader2, Mic, Send, Square, Volume2, VolumeX } from "lucide-react";
+import {
+  ArrowLeft,
+  Loader2,
+  Mic,
+  Phone,
+  PhoneOff,
+  Send,
+  Square,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import { getScenario } from "../data/scenarios";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
 import { postChat, fetchTtsUrl, postAsr, type ChatMessage } from "../lib/api";
 import { useSession } from "../store/session";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
+import { startVoiceCall, type CallPhase, type VoiceCall } from "../lib/call";
 import { Buddy, type BuddyMood } from "../components/Buddy";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { cn } from "../lib/utils";
@@ -24,27 +35,38 @@ export default function Conversation() {
   const scenario = scenarioId ? getScenario(scenarioId) : undefined;
   const id = scenario?.id ?? "";
   const t = themeFor(id);
-  const fallbackOpener = (id && localOpeners[id]) || "Hi! Whenever you're ready, just type below.";
+  const fallbackOpener = (id && localOpeners[id]) || "Hi! Whenever you're ready, just say hello.";
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false); // awaiting Pip's reply
+  const [loading, setLoading] = useState(false); // awaiting Pip's reply (text)
   const [booting, setBooting] = useState(true); // fetching the opener
   const [error, setError] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [callPhase, setCallPhase] = useState<CallPhase | null>(null);
+
   const endRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const lastSpokenRef = useRef(-1);
   const recorderRef = useRef<ActiveRecorder | null>(null);
+  const callRef = useRef<VoiceCall | null>(null);
+  const messagesRef = useRef<ChatMessage[]>(messages);
+
   const navigate = useNavigate();
   const setSession = useSession((s) => s.setSession);
   const hasUserTurn = messages.some((m) => m.role === "user");
+  const inCall = callPhase !== null;
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   function finish() {
     if (!id) return;
+    callRef.current?.end();
     setSession(id, messages);
     navigate(`/report/${id}`);
   }
@@ -76,44 +98,50 @@ export default function Conversation() {
   // Keep the latest message in view.
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  }, [messages, loading, callPhase]);
 
-  // Speak Pip's newest line (best-effort; browsers may block autoplay until a gesture).
+  // Auto-speak Pip's newest line. In call mode the call drives speech itself.
   useEffect(() => {
     const idx = messages.length - 1;
     if (idx < 0 || messages[idx].role !== "assistant" || idx <= lastSpokenRef.current) {
       return;
     }
     lastSpokenRef.current = idx;
-    if (!muted) void speak(messages[idx].content);
+    if (callPhase) return;
+    if (!muted) void playTts(messages[idx].content);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, muted]);
+  }, [messages, muted, callPhase]);
 
-  // Stop audio / recording + free the blob URL on unmount.
+  // Stop audio / recording / call + free the blob URL on unmount.
   useEffect(() => {
     return () => {
       audioRef.current?.pause();
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
       recorderRef.current?.stop().catch(() => undefined);
+      callRef.current?.end();
     };
   }, []);
 
-  async function speak(text: string) {
-    try {
-      const url = await fetchTtsUrl(text, id);
-      let audio = audioRef.current;
-      if (!audio) {
-        audio = new Audio();
-        audioRef.current = audio;
-      }
-      audio.pause();
-      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = url;
-      audio.src = url;
-      await audio.play();
-    } catch {
-      /* autoplay blocked or TTS unavailable — ignore */
-    }
+  // Play a line of Pip's speech; resolves when playback finishes.
+  function playTts(text: string): Promise<void> {
+    return new Promise((resolve) => {
+      fetchTtsUrl(text, id)
+        .then((url) => {
+          let audio = audioRef.current;
+          if (!audio) {
+            audio = new Audio();
+            audioRef.current = audio;
+          }
+          audio.pause();
+          if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+          audioUrlRef.current = url;
+          audio.src = url;
+          audio.onended = () => resolve();
+          audio.onerror = () => resolve();
+          void audio.play().catch(() => resolve());
+        })
+        .catch(() => resolve());
+    });
   }
 
   async function send() {
@@ -134,8 +162,9 @@ export default function Conversation() {
     }
   }
 
+  // Push-to-talk: record one clip, transcribe into the input box.
   async function handleMic() {
-    if (transcribing || booting) return;
+    if (transcribing || booting || inCall) return;
     if (recording) {
       setRecording(false);
       const rec = recorderRef.current;
@@ -163,12 +192,65 @@ export default function Conversation() {
     }
   }
 
-  const mood: BuddyMood = loading ? "talking" : booting ? "idle" : "listening";
-  const status = loading
-    ? "Pip 正在想怎么回答…"
-    : booting
-      ? "正在连接 Pip…"
-      : "Pip 在听你说，打字告诉它吧";
+  // Hands-free call mode: listen -> ASR -> reply -> speak -> repeat.
+  async function startCall() {
+    if (!id || booting || inCall) return;
+    setError(null);
+    try {
+      callRef.current = await startVoiceCall({
+        onPhase: (p) => setCallPhase(p),
+        transcribe: (pcm) => postAsr(pcm),
+        respond: async (userText) => {
+          const next: ChatMessage[] = [
+            ...messagesRef.current,
+            { role: "user", content: userText },
+          ];
+          setMessages(next);
+          const r = await postChat(id, next);
+          setMessages((m) => [...m, { role: "assistant", content: r.reply }]);
+          return r.reply;
+        },
+        speak: (text) => playTts(text),
+        onError: (msg) => setError(msg),
+      });
+      setCallPhase("listening");
+    } catch {
+      setError("无法开始通话，请允许麦克风权限，或用打字 / 按住说话。");
+    }
+  }
+
+  function endCall() {
+    callRef.current?.end();
+    callRef.current = null;
+    setCallPhase(null);
+    audioRef.current?.pause();
+  }
+
+  const stageMood: BuddyMood =
+    callPhase === "speaking"
+      ? "talking"
+      : callPhase === "thinking"
+        ? "idle"
+        : callPhase === "listening"
+          ? "listening"
+          : loading
+            ? "talking"
+            : booting
+              ? "idle"
+              : "listening";
+
+  const stageStatus =
+    callPhase === "speaking"
+      ? "Pip 在说…"
+      : callPhase === "thinking"
+        ? "Pip 正在想…"
+        : callPhase === "listening"
+          ? "在听你说…（说完停顿一下我就接话）"
+          : loading
+            ? "Pip 正在想怎么回答…"
+            : booting
+              ? "正在连接 Pip…"
+              : "和 Pip 聊聊吧 — 打字、按住说话，或开始通话";
 
   return (
     <div className="flex h-screen flex-col">
@@ -212,8 +294,8 @@ export default function Conversation() {
       </header>
 
       <div className="mx-auto mt-3 flex w-full max-w-2xl shrink-0 flex-col items-center px-5 text-center">
-        <Buddy mood={mood} size={112} color={t.base} />
-        <p className="mt-1 font-display text-base font-semibold text-ink">{status}</p>
+        <Buddy mood={stageMood} size={callPhase ? 124 : 112} color={t.base} />
+        <p className="mt-1 font-display text-base font-semibold text-ink">{stageStatus}</p>
       </div>
 
       <main className="mx-auto w-full min-h-0 max-w-2xl flex-1 space-y-3 overflow-y-auto px-5 py-4">
@@ -223,10 +305,10 @@ export default function Conversation() {
             role={m.role}
             text={m.content}
             theme={t}
-            onSpeak={m.role === "assistant" ? () => speak(m.content) : undefined}
+            onSpeak={m.role === "assistant" ? () => void playTts(m.content) : undefined}
           />
         ))}
-        {loading && <TypingBubble theme={t} />}
+        {(loading || callPhase === "thinking") && <TypingBubble theme={t} />}
         {error && (
           <p className="mx-auto w-fit rounded-full bg-[#ffe8e3] px-4 py-2 text-center text-xs font-semibold text-[#e6503d]">
             {error}
@@ -236,57 +318,90 @@ export default function Conversation() {
       </main>
 
       <footer className="mx-auto w-full max-w-2xl shrink-0 px-5 pb-6 pt-2">
-        <div className="flex items-center gap-2 rounded-full border border-border bg-surface p-2 shadow-pop">
-          <button
-            type="button"
-            onClick={handleMic}
-            disabled={transcribing || booting}
-            aria-label={recording ? "结束录音" : "开始录音"}
-            title={recording ? "结束录音" : "用英文说"}
-            className={cn(
-              "grid h-11 w-11 shrink-0 place-items-center rounded-full text-white shadow-soft transition-transform active:scale-95 disabled:opacity-50",
-              recording && "animate-pulse",
-            )}
-            style={{ background: recording ? "var(--danger)" : t.base }}
-          >
-            {transcribing ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : recording ? (
-              <Square className="h-4 w-4" />
-            ) : (
-              <Mic className="h-5 w-5" />
-            )}
-          </button>
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") send();
-            }}
-            placeholder={
-              recording
-                ? "正在聆听…点停止结束"
-                : transcribing
-                  ? "识别中…"
-                  : booting
-                    ? "正在连接…"
-                    : "用英文打字回复 Pip…"
-            }
-            disabled={booting || recording || transcribing}
-            className="min-w-0 flex-1 bg-transparent px-2 text-ink outline-none placeholder:text-muted"
-          />
-          <button
-            type="button"
-            onClick={send}
-            disabled={loading || booting || recording || transcribing || !input.trim()}
-            aria-label="发送"
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-white shadow-soft transition-transform active:scale-95 disabled:opacity-40"
-            style={{ background: t.base }}
-          >
-            <Send className="h-5 w-5" strokeWidth={2.4} />
-          </button>
-        </div>
-        <p className="mt-2 text-center text-xs text-muted">点麦克风用英文说，或直接打字（麦克风为测试版）</p>
+        {inCall ? (
+          <div className="flex flex-col items-center gap-2">
+            <button
+              type="button"
+              onClick={endCall}
+              className="inline-flex items-center gap-2 rounded-full px-6 py-3 font-display font-bold text-white shadow-pop transition-transform active:translate-y-0.5"
+              style={{ background: "var(--danger)" }}
+            >
+              <PhoneOff className="h-5 w-5" /> 结束通话
+            </button>
+            <p className="text-xs text-muted">
+              {callPhase === "listening"
+                ? "开口说英文，说完停顿一下我就接话"
+                : callPhase === "thinking"
+                  ? "Pip 正在思考…"
+                  : "Pip 正在说…"}
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 rounded-full border border-border bg-surface p-2 shadow-pop">
+              <button
+                type="button"
+                onClick={handleMic}
+                disabled={transcribing || booting}
+                aria-label={recording ? "结束录音" : "开始录音"}
+                title={recording ? "结束录音" : "按一下说，再按结束"}
+                className={cn(
+                  "grid h-11 w-11 shrink-0 place-items-center rounded-full text-white shadow-soft transition-transform active:scale-95 disabled:opacity-50",
+                  recording && "animate-pulse",
+                )}
+                style={{ background: recording ? "var(--danger)" : t.base }}
+              >
+                {transcribing ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : recording ? (
+                  <Square className="h-4 w-4" />
+                ) : (
+                  <Mic className="h-5 w-5" />
+                )}
+              </button>
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") send();
+                }}
+                placeholder={
+                  recording
+                    ? "正在聆听…点停止结束"
+                    : transcribing
+                      ? "识别中…"
+                      : booting
+                        ? "正在连接…"
+                        : "用英文打字回复 Pip…"
+                }
+                disabled={booting || recording || transcribing}
+                className="min-w-0 flex-1 bg-transparent px-2 text-ink outline-none placeholder:text-muted"
+              />
+              <button
+                type="button"
+                onClick={send}
+                disabled={loading || booting || recording || transcribing || !input.trim()}
+                aria-label="发送"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-white shadow-soft transition-transform active:scale-95 disabled:opacity-40"
+                style={{ background: t.base }}
+              >
+                <Send className="h-5 w-5" strokeWidth={2.4} />
+              </button>
+            </div>
+            <div className="mt-2 flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={startCall}
+                disabled={booting}
+                className="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-bold text-white shadow-soft transition-transform hover:-translate-y-0.5 disabled:opacity-50"
+                style={{ background: t.base }}
+              >
+                <Phone className="h-3.5 w-3.5" /> 通话模式
+              </button>
+              <span className="text-xs text-muted">免提连续对话（测试版）</span>
+            </div>
+          </>
+        )}
       </footer>
     </div>
   );

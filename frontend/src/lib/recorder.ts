@@ -45,7 +45,7 @@ export async function startRecording(): Promise<ActiveRecorder> {
   };
 }
 
-function flatten(chunks: Float32Array[]): Float32Array {
+export function flatten(chunks: Float32Array[]): Float32Array {
   let len = 0;
   for (const c of chunks) len += c.length;
   const out = new Float32Array(len);
@@ -57,7 +57,7 @@ function flatten(chunks: Float32Array[]): Float32Array {
   return out;
 }
 
-function resampleTo16k(input: Float32Array, inRate: number): Float32Array {
+export function resampleTo16k(input: Float32Array, inRate: number): Float32Array {
   if (inRate === 16000 || input.length === 0) return input;
   const ratio = inRate / 16000;
   const outLen = Math.round(input.length / ratio);
@@ -72,7 +72,7 @@ function resampleTo16k(input: Float32Array, inRate: number): Float32Array {
   return out;
 }
 
-function floatToPcm16(input: Float32Array): ArrayBuffer {
+export function floatToPcm16(input: Float32Array): ArrayBuffer {
   const buf = new ArrayBuffer(input.length * 2);
   const view = new DataView(buf);
   for (let i = 0; i < input.length; i++) {
