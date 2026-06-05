@@ -145,11 +145,15 @@ export function getSession(id: number, signal?: AbortSignal): Promise<SessionDet
  * Fetch MP3 audio for a line of Pip's speech as an object URL.
  * The caller is responsible for revoking the URL when done.
  */
-export async function fetchTtsUrl(text: string, signal?: AbortSignal): Promise<string> {
+export async function fetchTtsUrl(
+  text: string,
+  scenarioId?: string,
+  signal?: AbortSignal,
+): Promise<string> {
   const res = await fetch(`${BASE_URL}/api/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, scenario_id: scenarioId }),
     signal,
   });
   if (!res.ok) throw new Error(`tts failed: ${res.status}`);

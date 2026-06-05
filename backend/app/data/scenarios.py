@@ -202,3 +202,21 @@ def get_public(scenario_id: str) -> ScenarioPublic | None:
     """A single client-facing scenario payload, or ``None`` if unknown."""
     scenario = _BY_ID.get(scenario_id)
     return scenario.public() if scenario else None
+
+
+# Each scenario partner gets a distinct native-English iFlytek voice for
+# character (all verified available on the app). Falls back to the default.
+DEFAULT_VOICE = "x5_enus_flossie_flow"
+_VOICES: dict[str, str] = {
+    "interview": "henry",  # Alex, male, professional
+    "cafe": "x5_enus_flossie_flow",  # cheerful barista
+    "standup": "x4_enus_luna_formal",  # Sam, teammate
+    "airport": "x4_enus_laura_education",  # check-in agent
+    "doctor": "x3_enus_emma_assist",  # Dr. Lee, gentle
+    "party": "x4_lindsey_formal",  # Sam, friendly guest
+}
+
+
+def voice_for(scenario_id: str | None) -> str:
+    """The iFlytek voice (vcn) for a scenario, or the default."""
+    return _VOICES.get(scenario_id or "", DEFAULT_VOICE)

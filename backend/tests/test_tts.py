@@ -10,8 +10,10 @@ client = TestClient(app)
 class _StubTts:
     def __init__(self, audio: bytes = b"ID3fake-mp3-bytes") -> None:
         self.audio = audio
+        self.vcn: str | None = None
 
-    async def synthesize(self, text, **_kwargs):
+    async def synthesize(self, text, *, vcn=None, **_kwargs):
+        self.vcn = vcn
         return self.audio
 
 
@@ -22,6 +24,17 @@ def test_tts_returns_audio():
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "audio/mpeg"
         assert resp.content == b"ID3fake-mp3-bytes"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_tts_uses_scenario_voice():
+    stub = _StubTts()
+    app.dependency_overrides[get_tts_client] = lambda: stub
+    try:
+        resp = client.post("/api/tts", json={"text": "hi", "scenario_id": "interview"})
+        assert resp.status_code == 200
+        assert stub.vcn == "henry"
     finally:
         app.dependency_overrides.clear()
 
