@@ -13,5 +13,8 @@ websockets>=12.0
 # Persistence
 SQLAlchemy>=2.0
 
-# NOTE: service-specific deps (iFlytek SDK, DeepSeek/OpenAI client, silero-vad)
-# are added in the PRs that introduce those features.
+# HTTP client (DeepSeek chat-completions API)
+httpx>=0.27
+
+# NOTE: remaining service-specific deps (iFlytek SDK, silero-vad) are added in
+# the PRs that introduce those features.

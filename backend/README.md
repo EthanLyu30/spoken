@@ -35,18 +35,62 @@ uvicorn app.main:app --reload
 - 健康检查： <http://127.0.0.1:8000/api/health> → `{"status":"ok","app":"Spoken"}`
 - 交互式 API 文档： <http://127.0.0.1:8000/docs>
 
+## API
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| `GET` | `/api/health` | 健康检查 |
+| `GET` | `/api/scenarios` | 场景列表（后端为唯一数据源） |
+| `GET` | `/api/scenarios/{id}` | 单个场景详情（含开场白） |
+| `POST` | `/api/chat` | 一轮场景化角色扮演对话（DeepSeek 驱动） |
+
+`POST /api/chat` 接收场景 id 与历史消息，返回 AI 陪练的下一句话。历史为空时直接返回脚本化开场白（不调用模型）；有用户消息时调用 DeepSeek，因此需要在 `.env` 中配置 `DEEPSEEK_API_KEY`。
+
+```bash
+# 开场白（无需 API Key）
+curl -s http://127.0.0.1:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"scenario_id":"cafe","messages":[]}'
+
+# 一轮对话（需要 DEEPSEEK_API_KEY）
+curl -s http://127.0.0.1:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"scenario_id":"cafe","messages":[{"role":"user","content":"Can I get a latte?"}]}'
+```
+
+设计上对话走**快路径**：系统提示要求 AI 全程角色扮演、回复简短口语化、不在对话中纠错（纠错与评测属于后续里程碑的慢路径）。
+
+## 测试
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+测试使用 FastAPI `TestClient`，通过依赖覆盖打桩 DeepSeek 客户端，**无需网络或真实 API Key** 即可运行。
+
 ## 目录结构
 
 ```
 backend/
 ├── app/
-│   ├── main.py          # FastAPI 入口、CORS、路由注册
+│   ├── main.py            # FastAPI 入口、CORS、路由注册
 │   ├── core/
-│   │   └── config.py    # 环境变量 / 设置
-│   └── api/
-│       └── health.py    # 健康检查
+│   │   └── config.py      # 环境变量 / 设置
+│   ├── api/
+│   │   ├── health.py      # 健康检查
+│   │   ├── scenarios.py   # 场景目录接口
+│   │   └── chat.py        # 对话接口
+│   ├── data/
+│   │   └── scenarios.py   # 场景定义（含角色设定，唯一数据源）
+│   ├── schemas/           # Pydantic 请求/响应模型
+│   └── services/
+│       ├── deepseek.py    # DeepSeek 异步客户端
+│       └── dialogue.py    # 系统提示 / 消息编排
+├── tests/                 # pytest 用例
 ├── requirements.txt
+├── requirements-dev.txt
 └── .env.example
 ```
 
-> 业务模块（场景、对话、ASR/TTS、评测、报告）会随后续 PR 加入，详见根目录 `docs/ROADMAP.md`。
+> 语音链路（ASR/TTS）、发音评测与报告等功能随后续 PR 加入，详见根目录 `docs/ROADMAP.md`。
