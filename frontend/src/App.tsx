@@ -1,0 +1,15 @@
+import { Routes, Route, Navigate } from "react-router-dom";
+import Home from "./pages/Home";
+import Conversation from "./pages/Conversation";
+import Report from "./pages/Report";
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/practice/:scenarioId" element={<Conversation />} />
+      <Route path="/report/:sessionId" element={<Report />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
