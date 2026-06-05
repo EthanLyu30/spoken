@@ -1,12 +1,14 @@
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Mic } from "lucide-react";
+import { ArrowLeft, Mic, Send } from "lucide-react";
 import { getScenario } from "../data/scenarios";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
-import { Buddy } from "../components/Buddy";
+import { postChat, type ChatMessage } from "../lib/api";
+import { Buddy, type BuddyMood } from "../components/Buddy";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { cn } from "../lib/utils";
 
-const openers: Record<string, string> = {
+const localOpeners: Record<string, string> = {
   interview: "Hi, thanks for coming in! Could you tell me a little about yourself?",
   cafe: "Hi there, welcome in! What can I get started for you today?",
   standup: "Morning! What did you work on yesterday?",
@@ -15,28 +17,79 @@ const openers: Record<string, string> = {
   party: "Hey! I don't think we've met yet — how do you know everyone here?",
 };
 
-interface Turn {
-  who: "pip" | "you";
-  text: string;
-}
-
 export default function Conversation() {
   const { scenarioId } = useParams();
   const scenario = scenarioId ? getScenario(scenarioId) : undefined;
-  const t = themeFor(scenario?.id ?? "");
-  const opener = (scenario && openers[scenario.id]) || "Hi! Tap the mic whenever you're ready.";
+  const id = scenario?.id ?? "";
+  const t = themeFor(id);
+  const fallbackOpener = (id && localOpeners[id]) || "Hi! Whenever you're ready, just type below.";
 
-  const turns: Turn[] = [
-    { who: "pip", text: opener },
-    { who: "you", text: "Hi! Sure, let's do it." },
-    { who: "pip", text: "Awesome — take your time, I'm listening." },
-  ];
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false); // awaiting Pip's reply
+  const [booting, setBooting] = useState(true); // fetching the opener
+  const [error, setError] = useState<string | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  // Fetch the scene opener once.
+  useEffect(() => {
+    const ctrl = new AbortController();
+    setBooting(true);
+    setError(null);
+    if (!id) {
+      setMessages([{ role: "assistant", content: fallbackOpener }]);
+      setBooting(false);
+      return;
+    }
+    postChat(id, [], ctrl.signal)
+      .then((r) => setMessages([{ role: "assistant", content: r.reply }]))
+      .catch(() => {
+        if (ctrl.signal.aborted) return;
+        setMessages([{ role: "assistant", content: fallbackOpener }]);
+        setError("后端未连接，先看看界面。启动后端后刷新即可与 Pip 对话。");
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setBooting(false);
+      });
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  // Keep the latest message in view.
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  async function send() {
+    const text = input.trim();
+    if (!text || loading || booting || !id) return;
+    const next: ChatMessage[] = [...messages, { role: "user", content: text }];
+    setMessages(next);
+    setInput("");
+    setError(null);
+    setLoading(true);
+    try {
+      const r = await postChat(id, next);
+      setMessages((m) => [...m, { role: "assistant", content: r.reply }]);
+    } catch {
+      setError("发送失败，请确认后端在运行后重试。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const mood: BuddyMood = loading ? "talking" : booting ? "idle" : "listening";
+  const status = loading
+    ? "Pip 正在想怎么回答…"
+    : booting
+      ? "正在连接 Pip…"
+      : "Pip 在听你说，打字告诉它吧";
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex h-screen flex-col">
       <PlayfulBackground />
 
-      <header className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3 px-5 pt-6">
+      <header className="mx-auto flex w-full max-w-2xl shrink-0 items-center justify-between gap-3 px-5 pt-6">
         <Link
           to="/"
           className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
@@ -51,40 +104,73 @@ export default function Conversation() {
         </span>
       </header>
 
-      <div className="mx-auto mt-4 flex w-full max-w-2xl flex-col items-center px-5 text-center">
-        <Buddy mood="listening" size={132} color={t.base} />
-        <p className="mt-2 font-display text-lg font-semibold text-ink">Pip 在听你说…</p>
-        <p className="text-sm text-muted">Pip is listening — just start talking</p>
+      <div className="mx-auto mt-3 flex w-full max-w-2xl shrink-0 flex-col items-center px-5 text-center">
+        <Buddy mood={mood} size={112} color={t.base} />
+        <p className="mt-1 font-display text-base font-semibold text-ink">{status}</p>
       </div>
 
-      <main className="mx-auto w-full max-w-2xl flex-1 space-y-3 px-5 py-6">
-        {turns.map((turn, i) => (
-          <Bubble key={i} turn={turn} theme={t} />
+      <main className="mx-auto w-full min-h-0 max-w-2xl flex-1 space-y-3 overflow-y-auto px-5 py-4">
+        {messages.map((m, i) => (
+          <Bubble key={i} role={m.role} text={m.content} theme={t} />
         ))}
+        {loading && <TypingBubble theme={t} />}
+        {error && (
+          <p className="mx-auto w-fit rounded-full bg-[#ffe8e3] px-4 py-2 text-center text-xs font-semibold text-[#e6503d]">
+            {error}
+          </p>
+        )}
+        <div ref={endRef} />
       </main>
 
-      <footer className="sticky bottom-0 mx-auto flex w-full max-w-2xl flex-col items-center gap-2 px-5 pb-8 pt-2">
-        <button
-          type="button"
-          className="relative grid h-20 w-20 place-items-center rounded-full text-white shadow-pop transition-transform active:scale-95"
-          style={{ background: t.base }}
-          aria-label="按住说话"
-        >
-          <span
-            className="absolute h-full w-full animate-pulsering rounded-full"
-            style={{ background: t.base, opacity: 0.3 }}
+      <footer className="mx-auto w-full max-w-2xl shrink-0 px-5 pb-6 pt-2">
+        <div className="flex items-center gap-2 rounded-full border border-border bg-surface p-2 shadow-pop">
+          <button
+            type="button"
+            disabled
+            title="语音输入即将上线"
+            aria-label="语音输入即将上线"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-muted opacity-60"
+            style={{ background: "var(--surface-2)" }}
+          >
+            <Mic className="h-5 w-5" />
+          </button>
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") send();
+            }}
+            placeholder={booting ? "正在连接…" : "用英文打字回复 Pip…"}
+            disabled={booting}
+            className="min-w-0 flex-1 bg-transparent px-2 text-ink outline-none placeholder:text-muted"
           />
-          <Mic className="relative h-8 w-8" strokeWidth={2.4} />
-        </button>
-        <p className="text-sm font-semibold text-ink">按住说话 · Hold to speak</p>
-        <p className="text-xs text-muted">语音功能开发中，先感受一下界面 · Voice coming soon</p>
+          <button
+            type="button"
+            onClick={send}
+            disabled={loading || booting || !input.trim()}
+            aria-label="发送"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-white shadow-soft transition-transform active:scale-95 disabled:opacity-40"
+            style={{ background: t.base }}
+          >
+            <Send className="h-5 w-5" strokeWidth={2.4} />
+          </button>
+        </div>
+        <p className="mt-2 text-center text-xs text-muted">语音输入即将上线，现在先用文字和 Pip 对话</p>
       </footer>
     </div>
   );
 }
 
-function Bubble({ turn, theme }: { turn: Turn; theme: ScenarioTheme }) {
-  const isPip = turn.who === "pip";
+function Bubble({
+  role,
+  text,
+  theme,
+}: {
+  role: "user" | "assistant";
+  text: string;
+  theme: ScenarioTheme;
+}) {
+  const isPip = role === "assistant";
   return (
     <div className={cn("flex", isPip ? "justify-start" : "justify-end")}>
       <div
@@ -101,7 +187,26 @@ function Bubble({ turn, theme }: { turn: Turn; theme: ScenarioTheme }) {
         <p className="text-[0.66rem] font-bold uppercase tracking-wide opacity-70">
           {isPip ? "Pip" : "You"}
         </p>
-        <p className="mt-0.5 leading-snug">{turn.text}</p>
+        <p className="mt-0.5 leading-snug">{text}</p>
+      </div>
+    </div>
+  );
+}
+
+function TypingBubble({ theme }: { theme: ScenarioTheme }) {
+  return (
+    <div className="flex justify-start">
+      <div
+        className="flex items-center gap-1.5 rounded-3xl rounded-tl-md px-5 py-4 shadow-soft"
+        style={{ background: theme.soft }}
+      >
+        {["0s", "0.15s", "0.3s"].map((d) => (
+          <span
+            key={d}
+            className="h-2 w-2 animate-bob rounded-full"
+            style={{ background: "var(--muted)", animationDuration: "0.9s", animationDelay: d }}
+          />
+        ))}
       </div>
     </div>
   );

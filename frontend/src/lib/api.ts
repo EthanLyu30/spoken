@@ -26,3 +26,32 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return request<HealthResponse>("/api/health", { signal });
 }
+
+export type ChatRole = "user" | "assistant";
+
+export interface ChatMessage {
+  role: ChatRole;
+  content: string;
+}
+
+export interface ChatResponse {
+  scenario_id: string;
+  reply: string;
+  opening: boolean;
+}
+
+/**
+ * One role-play turn. Pass the conversation so far; an empty list asks the
+ * backend for the scripted scene opener (no model call).
+ */
+export function postChat(
+  scenarioId: string,
+  messages: ChatMessage[],
+  signal?: AbortSignal,
+): Promise<ChatResponse> {
+  return request<ChatResponse>("/api/chat", {
+    method: "POST",
+    body: JSON.stringify({ scenario_id: scenarioId, messages }),
+    signal,
+  });
+}
