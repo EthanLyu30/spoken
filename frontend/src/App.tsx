@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Home from "./pages/Home";
 import Conversation from "./pages/Conversation";
 import Report from "./pages/Report";
+import Progress from "./pages/Progress";
 
 export default function App() {
   return (
@@ -9,6 +10,7 @@ export default function App() {
       <Route path="/" element={<Home />} />
       <Route path="/practice/:scenarioId" element={<Conversation />} />
       <Route path="/report/:sessionId" element={<Report />} />
+      <Route path="/progress" element={<Progress />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

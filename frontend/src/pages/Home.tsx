@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { Flame } from "lucide-react";
 import { BuddyHero } from "../components/BuddyHero";
 import { ScenarioCard } from "../components/ScenarioCard";
@@ -27,13 +28,21 @@ export default function Home() {
 
       <header className="mx-auto flex w-full max-w-5xl items-center justify-between px-5 pt-6 sm:px-8">
         <Wordmark />
-        <StatChip
-          icon={<Flame className="h-4 w-4" />}
-          value={userProgress.streakDays}
-          label="天连续"
-          tint="#fff0dd"
-          fg="#e07f1c"
-        />
+        <div className="flex items-center gap-2 sm:gap-3">
+          <Link
+            to="/progress"
+            className="rounded-full border border-border bg-surface px-4 py-2 text-sm font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
+          >
+            我的进度
+          </Link>
+          <StatChip
+            icon={<Flame className="h-4 w-4" />}
+            value={userProgress.streakDays}
+            label="天连续"
+            tint="#fff0dd"
+            fg="#e07f1c"
+          />
+        </div>
       </header>
 
       <main className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-8">

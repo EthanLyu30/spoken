@@ -96,3 +96,47 @@ export function postFeedback(
     signal,
   });
 }
+
+export interface SessionSummary {
+  id: number;
+  scenario_id: string;
+  overall: number;
+  created_at: string;
+}
+
+export interface SessionDetail extends SessionSummary {
+  summary: string;
+  tip: string;
+  scores: SkillScore[];
+  messages: ChatMessage[];
+}
+
+export interface SaveSessionPayload {
+  scenario_id: string;
+  messages: ChatMessage[];
+  overall: number;
+  summary: string;
+  tip: string;
+  scores: SkillScore[];
+}
+
+/** Persist a finished session (transcript + feedback) for history/trends. */
+export function postSession(
+  payload: SaveSessionPayload,
+  signal?: AbortSignal,
+): Promise<SessionDetail> {
+  return request<SessionDetail>("/api/sessions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+/** Recent sessions, newest first. */
+export function getSessions(signal?: AbortSignal): Promise<SessionSummary[]> {
+  return request<SessionSummary[]>("/api/sessions", { signal });
+}
+
+export function getSession(id: number, signal?: AbortSignal): Promise<SessionDetail> {
+  return request<SessionDetail>(`/api/sessions/${id}`, { signal });
+}

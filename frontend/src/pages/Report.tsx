@@ -7,13 +7,16 @@ import { ProgressBar } from "../components/ui/ProgressBar";
 import { Button } from "../components/ui/Button";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { useSession } from "../store/session";
-import { postFeedback, type FeedbackResponse } from "../lib/api";
+import { postFeedback, postSession, type FeedbackResponse } from "../lib/api";
 import { getScenario } from "../data/scenarios";
 
 const SCORE_COLORS = ["#ff6f5e", "#ff9f45", "#41c08c", "#57b7e8"];
 
 const backLink =
   "inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5";
+
+// Dedupe saves across StrictMode remounts / re-renders.
+const savedSignatures = new Set<string>();
 
 export default function Report() {
   const scenarioId = useSession((s) => s.scenarioId);
@@ -34,7 +37,20 @@ export default function Report() {
     setError(null);
     postFeedback(scenarioId, messages, ctrl.signal)
       .then((f) => {
-        if (myId === reqId.current) setFeedback(f);
+        if (myId !== reqId.current) return;
+        setFeedback(f);
+        const sig = `${scenarioId}|${messages.length}|${f.overall}`;
+        if (!savedSignatures.has(sig)) {
+          savedSignatures.add(sig);
+          postSession({
+            scenario_id: scenarioId,
+            messages,
+            overall: f.overall,
+            summary: f.summary,
+            tip: f.tip,
+            scores: f.scores,
+          }).catch(() => undefined);
+        }
       })
       .catch(() => {
         if (!ctrl.signal.aborted && myId === reqId.current)
@@ -204,8 +220,13 @@ export default function Report() {
                   <RotateCcw className="h-5 w-5" /> 再来一局
                 </Button>
               </Link>
-              <Link to="/">
+              <Link to="/progress">
                 <Button size="lg" variant="soft">
+                  查看进度
+                </Button>
+              </Link>
+              <Link to="/">
+                <Button size="lg" variant="ghost">
                   回首页
                 </Button>
               </Link>
