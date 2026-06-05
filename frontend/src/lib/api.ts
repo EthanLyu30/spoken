@@ -55,3 +55,44 @@ export function postChat(
     signal,
   });
 }
+
+export interface SkillScore {
+  key: string;
+  label_en: string;
+  label_zh: string;
+  score: number;
+}
+
+export interface Correction {
+  original: string;
+  suggestion: string;
+  note: string;
+}
+
+export interface Phrase {
+  text: string;
+  note: string;
+}
+
+export interface FeedbackResponse {
+  scenario_id: string;
+  overall: number;
+  summary: string;
+  scores: SkillScore[];
+  corrections: Correction[];
+  phrases: Phrase[];
+  tip: string;
+}
+
+/** Post-session feedback on a text conversation (scores, corrections, tips). */
+export function postFeedback(
+  scenarioId: string,
+  messages: ChatMessage[],
+  signal?: AbortSignal,
+): Promise<FeedbackResponse> {
+  return request<FeedbackResponse>("/api/feedback", {
+    method: "POST",
+    body: JSON.stringify({ scenario_id: scenarioId, messages }),
+    signal,
+  });
+}

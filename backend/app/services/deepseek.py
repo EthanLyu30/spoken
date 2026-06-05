@@ -31,19 +31,22 @@ class DeepSeekClient:
         *,
         temperature: float = 0.7,
         max_tokens: int = 300,
+        response_format: dict | None = None,
     ) -> str:
         settings = self._settings
         if not settings.deepseek_api_key:
             raise DeepSeekError("DEEPSEEK_API_KEY is not configured")
 
         url = f"{settings.deepseek_base_url.rstrip('/')}/chat/completions"
-        payload = {
+        payload: dict = {
             "model": settings.deepseek_model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": False,
         }
+        if response_format is not None:
+            payload["response_format"] = response_format
         headers = {
             "Authorization": f"Bearer {settings.deepseek_api_key}",
             "Content-Type": "application/json",

@@ -7,7 +7,7 @@ Run locally with:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import chat, health, scenarios
+from app.api import chat, feedback, health, scenarios
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -30,6 +30,7 @@ app.add_middleware(
 app.include_router(health.router, prefix="/api")
 app.include_router(scenarios.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
+app.include_router(feedback.router, prefix="/api")
 
 
 @app.get("/")
