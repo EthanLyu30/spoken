@@ -1,47 +1,25 @@
 """科大讯飞 在线语音合成 (TTS) over WebSocket.
 
-Builds the HMAC-SHA256 handshake URL iFlytek requires, streams the synthesised
-audio frames back and concatenates them into a single audio blob.
+Streams the synthesised audio frames back and concatenates them into a single
+audio blob. The HMAC handshake lives in ``xf_auth``.
 """
 
 from __future__ import annotations
 
 import base64
-import hashlib
-import hmac
 import json
-from datetime import datetime, timezone
-from email.utils import format_datetime
-from urllib.parse import urlencode
 
 import websockets
 
 from app.core.config import Settings, get_settings
+from app.services.xf_auth import build_auth_url
 
 _HOST = "tts-api.xfyun.cn"
 _PATH = "/v2/tts"
-_URL = f"wss://{_HOST}{_PATH}"
 
 
 class XfTtsError(RuntimeError):
     """Raised when an iFlytek TTS request cannot be completed."""
-
-
-def _auth_url(api_key: str, api_secret: str) -> str:
-    date = format_datetime(datetime.now(timezone.utc), usegmt=True)
-    signature_origin = f"host: {_HOST}\ndate: {date}\nGET {_PATH} HTTP/1.1"
-    signature = base64.b64encode(
-        hmac.new(
-            api_secret.encode(), signature_origin.encode(), hashlib.sha256
-        ).digest()
-    ).decode()
-    authorization_origin = (
-        f'api_key="{api_key}", algorithm="hmac-sha256", '
-        f'headers="host date request-line", signature="{signature}"'
-    )
-    authorization = base64.b64encode(authorization_origin.encode()).decode()
-    query = urlencode({"authorization": authorization, "date": date, "host": _HOST})
-    return f"{_URL}?{query}"
 
 
 class XfTtsClient:
@@ -53,13 +31,13 @@ class XfTtsClient:
         text: str,
         *,
         vcn: str = "xiaoyan",
-        aue: str = "lame",  # lame -> mp3
+        aue: str = "lame",  # lame -> mp3; raw -> 16k PCM
     ) -> bytes:
         s = self._s
         if not (s.xf_app_id and s.xf_api_key and s.xf_api_secret):
             raise XfTtsError("iFlytek credentials are not configured")
 
-        url = _auth_url(s.xf_api_key, s.xf_api_secret)
+        url = build_auth_url(_HOST, _PATH, s.xf_api_key, s.xf_api_secret)
         frame = {
             "common": {"app_id": s.xf_app_id},
             "business": {

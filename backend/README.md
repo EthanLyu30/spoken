@@ -48,6 +48,7 @@ uvicorn app.main:app --reload
 | `GET` | `/api/sessions` | 历史会话列表 |
 | `GET` | `/api/sessions/{id}` | 单次会话详情（对话 + 评分） |
 | `POST` | `/api/tts` | 文本转语音（讯飞），返回 mp3，让 Pip 朗读 |
+| `POST` | `/api/asr` | 语音转文本（讯飞），上传 16k 单声道 PCM，返回转写 |
 
 `POST /api/chat` 接收场景 id 与历史消息，返回 AI 陪练的下一句话。历史为空时直接返回脚本化开场白（不调用模型）；有用户消息时调用 DeepSeek，因此需要在 `.env` 中配置 `DEEPSEEK_API_KEY`。
 
@@ -90,7 +91,8 @@ backend/
 │   │   ├── chat.py        # 对话接口
 │   │   ├── feedback.py    # 课后小结接口
 │   │   ├── sessions.py    # 会话历史接口
-│   │   └── tts.py         # 语音合成接口
+│   │   ├── tts.py         # 语音合成接口
+│   │   └── asr.py         # 语音识别接口
 │   ├── data/
 │   │   └── scenarios.py   # 场景定义（含角色设定，唯一数据源）
 │   ├── db.py              # SQLAlchemy 引擎 / 会话 / 依赖
@@ -101,7 +103,9 @@ backend/
 │       ├── dialogue.py    # 系统提示 / 消息编排
 │       ├── feedback.py    # 课后小结提示与结构化解析
 │       ├── sessions.py    # 会话持久化
-│       └── xf_tts.py      # 讯飞语音合成 (TTS)
+│       ├── xf_auth.py     # 讯飞 WebSocket 鉴权
+│       ├── xf_tts.py      # 讯飞语音合成 (TTS)
+│       └── xf_asr.py      # 讯飞语音听写 (ASR)
 ├── tests/                 # pytest 用例
 ├── requirements.txt
 ├── requirements-dev.txt
