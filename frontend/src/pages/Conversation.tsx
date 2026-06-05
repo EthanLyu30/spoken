@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Mic, Send } from "lucide-react";
+import { ArrowLeft, Mic, Send, Volume2, VolumeX } from "lucide-react";
 import { getScenario } from "../data/scenarios";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
-import { postChat, type ChatMessage } from "../lib/api";
+import { postChat, fetchTtsUrl, type ChatMessage } from "../lib/api";
 import { useSession } from "../store/session";
 import { Buddy, type BuddyMood } from "../components/Buddy";
 import { PlayfulBackground } from "../components/PlayfulBackground";
@@ -30,7 +30,11 @@ export default function Conversation() {
   const [loading, setLoading] = useState(false); // awaiting Pip's reply
   const [booting, setBooting] = useState(true); // fetching the opener
   const [error, setError] = useState<string | null>(null);
+  const [muted, setMuted] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+  const lastSpokenRef = useRef(-1);
   const navigate = useNavigate();
   const setSession = useSession((s) => s.setSession);
   const hasUserTurn = messages.some((m) => m.role === "user");
@@ -70,6 +74,43 @@ export default function Conversation() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  // Speak Pip's newest line (best-effort; browsers may block autoplay until a gesture).
+  useEffect(() => {
+    const idx = messages.length - 1;
+    if (idx < 0 || messages[idx].role !== "assistant" || idx <= lastSpokenRef.current) {
+      return;
+    }
+    lastSpokenRef.current = idx;
+    if (!muted) void speak(messages[idx].content);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, muted]);
+
+  // Stop audio + free the blob URL on unmount.
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+    };
+  }, []);
+
+  async function speak(text: string) {
+    try {
+      const url = await fetchTtsUrl(text);
+      let audio = audioRef.current;
+      if (!audio) {
+        audio = new Audio();
+        audioRef.current = audio;
+      }
+      audio.pause();
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = url;
+      audio.src = url;
+      await audio.play();
+    } catch {
+      /* autoplay blocked or TTS unavailable — ignore */
+    }
+  }
+
   async function send() {
     const text = input.trim();
     if (!text || loading || booting || !id) return;
@@ -100,12 +141,23 @@ export default function Conversation() {
       <PlayfulBackground />
 
       <header className="mx-auto flex w-full max-w-2xl shrink-0 items-center justify-between gap-3 px-5 pt-6">
-        <Link
-          to="/"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
-        >
-          <ArrowLeft className="h-4 w-4" /> 返回
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
+          >
+            <ArrowLeft className="h-4 w-4" /> 返回
+          </Link>
+          <button
+            type="button"
+            onClick={() => setMuted((m) => !m)}
+            aria-label={muted ? "开启朗读" : "关闭朗读"}
+            title={muted ? "开启朗读" : "关闭朗读"}
+            className="grid h-10 w-10 place-items-center rounded-full border border-border bg-surface text-ink shadow-soft transition-transform hover:-translate-y-0.5"
+          >
+            {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+          </button>
+        </div>
         <div className="flex min-w-0 items-center gap-2">
           <span
             className="truncate rounded-full px-4 py-2 text-sm font-bold shadow-soft"
@@ -132,7 +184,13 @@ export default function Conversation() {
 
       <main className="mx-auto w-full min-h-0 max-w-2xl flex-1 space-y-3 overflow-y-auto px-5 py-4">
         {messages.map((m, i) => (
-          <Bubble key={i} role={m.role} text={m.content} theme={t} />
+          <Bubble
+            key={i}
+            role={m.role}
+            text={m.content}
+            theme={t}
+            onSpeak={m.role === "assistant" ? () => speak(m.content) : undefined}
+          />
         ))}
         {loading && <TypingBubble theme={t} />}
         {error && (
@@ -186,10 +244,12 @@ function Bubble({
   role,
   text,
   theme,
+  onSpeak,
 }: {
   role: "user" | "assistant";
   text: string;
   theme: ScenarioTheme;
+  onSpeak?: () => void;
 }) {
   const isPip = role === "assistant";
   return (
@@ -209,6 +269,16 @@ function Bubble({
           {isPip ? "Pip" : "You"}
         </p>
         <p className="mt-0.5 leading-snug">{text}</p>
+        {isPip && onSpeak && (
+          <button
+            type="button"
+            onClick={onSpeak}
+            aria-label="朗读"
+            className="mt-1.5 inline-flex items-center gap-1 text-[0.66rem] font-bold uppercase tracking-wide opacity-60 transition-opacity hover:opacity-100"
+          >
+            <Volume2 className="h-3.5 w-3.5" /> 朗读
+          </button>
+        )}
       </div>
     </div>
   );
