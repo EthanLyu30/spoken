@@ -6,7 +6,7 @@ import { Wordmark } from "../components/Wordmark";
 import { BackendStatus } from "../components/BackendStatus";
 import { StatChip } from "../components/StatChip";
 import { PlayfulBackground } from "../components/PlayfulBackground";
-import { scenarios } from "../data/scenarios";
+import { chapters, getScenario, scenarios, type Scenario } from "../data/scenarios";
 import { userProgress } from "../data/progress";
 
 function greetingFor(d: Date): string {
@@ -65,7 +65,23 @@ export default function Home() {
             </span>
           </div>
 
-          <JourneyPath scenarios={scenarios} />
+          <div className="space-y-12">
+            {chapters.map((ch) => {
+              const items = ch.ids
+                .map((cid) => getScenario(cid))
+                .filter((s): s is Scenario => Boolean(s));
+              if (items.length === 0) return null;
+              return (
+                <div key={ch.title}>
+                  <div className="mb-1 flex items-baseline gap-2">
+                    <h3 className="font-display text-xl font-semibold text-ink">{ch.titleZh}</h3>
+                    <span className="text-sm font-semibold text-muted">{ch.title}</span>
+                  </div>
+                  <JourneyPath scenarios={items} />
+                </div>
+              );
+            })}
+          </div>
         </section>
       </main>
 

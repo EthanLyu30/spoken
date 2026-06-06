@@ -4,7 +4,22 @@ from app.main import app
 
 client = TestClient(app)
 
-EXPECTED_IDS = {"interview", "cafe", "standup", "airport", "doctor", "party"}
+EXPECTED_IDS = {
+    "interview",
+    "cafe",
+    "standup",
+    "airport",
+    "doctor",
+    "party",
+    "restaurant",
+    "shopping",
+    "hotel",
+    "directions",
+    "presentation",
+    "networking",
+    "phone",
+    "friend",
+}
 
 
 def test_list_scenarios_returns_catalogue():
