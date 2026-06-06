@@ -263,9 +263,15 @@ export async function postAsr(pcm: ArrayBuffer, signal?: AbortSignal): Promise<s
   return data.text;
 }
 
+export interface PhonemeScore {
+  label: string;
+  ok: boolean;
+}
+
 export interface WordScore {
   word: string;
   score: number;
+  phonemes?: PhonemeScore[];
 }
 
 export interface PronunciationResult {
