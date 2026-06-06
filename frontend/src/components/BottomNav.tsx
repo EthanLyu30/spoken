@@ -14,8 +14,11 @@ const items = [
 /** Fixed bottom tab bar shown on the main pages. */
 export function BottomNav() {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface shadow-[0_-8px_24px_-18px_rgba(120,72,40,0.5)]">
-      <div className="mx-auto flex max-w-md items-stretch justify-around px-2 py-1.5">
+    <nav
+      aria-label="主导航"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_-18px_rgba(120,72,40,0.5)]"
+    >
+      <div className="mx-auto flex max-w-md items-stretch justify-around px-1 py-1.5">
         {items.map((it) => (
           <NavLink
             key={it.to}
@@ -23,12 +26,12 @@ export function BottomNav() {
             end={it.end}
             className={({ isActive }) =>
               cn(
-                "flex flex-1 flex-col items-center gap-0.5 rounded-2xl py-1.5 text-xs font-bold transition-colors",
+                "flex flex-1 flex-col items-center gap-0.5 rounded-2xl px-1 py-1.5 text-[0.7rem] font-bold transition-colors",
                 isActive ? "text-coral" : "text-muted hover:text-ink",
               )
             }
           >
-            <it.icon className="h-5 w-5" />
+            <it.icon className="h-5 w-5 shrink-0" />
             {it.label}
           </NavLink>
         ))}
