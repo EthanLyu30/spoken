@@ -9,6 +9,7 @@ import { Ring } from "../components/ui/Ring";
 import {
   getInterviewQuestions,
   postAsr,
+  savePractice,
   scoreInterview,
   type InterviewScore,
 } from "../lib/api";
@@ -116,7 +117,9 @@ export default function Interview() {
     setPhase("scoring");
     try {
       const items = questions.map((q, i) => ({ question: q, answer: allAnswers[i] ?? "" }));
-      setResult(await scoreInterview(items));
+      const res = await scoreInterview(items);
+      setResult(res);
+      savePractice("interview", res.overall, "限时问答").catch(() => undefined);
       setPhase("results");
     } catch {
       setError("评分失败，请确认后端在运行后重试。");

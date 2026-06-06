@@ -5,27 +5,34 @@ import { Buddy } from "./Buddy";
 import { Ring } from "./ui/Ring";
 import { ProgressBar } from "./ui/ProgressBar";
 import { StatChip } from "./StatChip";
-import { getWords } from "../lib/api";
-import { userProgress } from "../data/progress";
+import { getStats, getWords, type Stats } from "../lib/api";
 
 interface BuddyHeroProps {
   greeting: string;
 }
 
-/** Home hero: Pip greets the learner, with level / XP / streak / daily goal. */
+/** Home hero: Pip greets the learner, with real level / XP / streak / daily goal. */
 export function BuddyHero({ greeting }: BuddyHeroProps) {
-  const p = userProgress;
-  const xpPct = (p.xp / p.xpToNext) * 100;
-  const goalPct = (p.todayMinutes / p.goalMinutes) * 100;
+  const [stats, setStats] = useState<Stats | null>(null);
   const [wordCount, setWordCount] = useState<number | null>(null);
 
   useEffect(() => {
     const ctrl = new AbortController();
+    getStats(ctrl.signal).then(setStats).catch(() => undefined);
     getWords(ctrl.signal)
       .then((ws) => setWordCount(ws.filter((w) => w.kind !== "sentence").length))
       .catch(() => undefined);
     return () => ctrl.abort();
   }, []);
+
+  const level = stats?.level ?? 1;
+  const xp = stats?.xp ?? 0;
+  const xpNext = stats?.xp_to_next ?? 250;
+  const streak = stats?.streak_days ?? 0;
+  const todayCount = stats?.today_count ?? 0;
+  const todayGoal = stats?.today_goal ?? 3;
+  const xpPct = (xp / xpNext) * 100;
+  const goalPct = Math.min(100, (todayCount / todayGoal) * 100);
 
   return (
     <section className="relative overflow-hidden rounded-huge border border-border bg-surface p-6 shadow-pop md:p-9">
@@ -50,28 +57,28 @@ export function BuddyHero({ greeting }: BuddyHeroProps) {
           <div className="flex items-center gap-4">
             <Ring pct={goalPct} color="var(--leaf)" size={84}>
               <div className="text-center">
-                <div className="font-display text-lg font-bold leading-none tabnum text-ink">{p.todayMinutes}</div>
-                <div className="text-[0.6rem] font-bold uppercase text-muted">/ {p.goalMinutes}m</div>
+                <div className="font-display text-lg font-bold leading-none tabnum text-ink">{todayCount}</div>
+                <div className="text-[0.6rem] font-bold uppercase text-muted">/ {todayGoal} 次</div>
               </div>
             </Ring>
             <div className="flex-1">
               <div className="mb-1.5 flex items-end justify-between">
-                <span className="font-display text-lg font-semibold text-ink">Lv.{p.level}</span>
+                <span className="font-display text-lg font-semibold text-ink">Lv.{level}</span>
                 <span className="text-xs font-semibold tabnum text-muted">
-                  {p.xp} / {p.xpToNext} XP
+                  {xp} / {xpNext} XP
                 </span>
               </div>
               <ProgressBar value={xpPct} color="var(--tangerine)" />
-              <p className="mt-1.5 text-xs text-muted">距离下一级还差 {p.xpToNext - p.xp} XP</p>
+              <p className="mt-1.5 text-xs text-muted">距离下一级还差 {Math.max(0, xpNext - xp)} XP</p>
             </div>
           </div>
 
           <div className="flex flex-wrap gap-2.5">
-            <StatChip icon={<Flame className="h-4 w-4" />} value={p.streakDays} label="天连续" tint="#fff0dd" fg="#e07f1c" />
+            <StatChip icon={<Flame className="h-4 w-4" />} value={streak} label="天连续" tint="#fff0dd" fg="#e07f1c" />
             <Link to="/words" className="transition-transform hover:-translate-y-0.5" aria-label="打开生词本">
               <StatChip
                 icon={<Sparkles className="h-4 w-4" />}
-                value={wordCount ?? p.wordsLearned}
+                value={wordCount ?? 0}
                 label="收集词"
                 tint="#e6f4fc"
                 fg="#2c8fc6"

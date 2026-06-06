@@ -306,6 +306,52 @@ export function scoreInterview(
   });
 }
 
+export interface PracticeRecord {
+  id: number;
+  kind: string;
+  score: number;
+  title: string;
+  created_at: string;
+}
+
+export interface Stats {
+  streak_days: number;
+  today_count: number;
+  today_goal: number;
+  level: number;
+  xp: number;
+  xp_to_next: number;
+  total_sessions: number;
+  total_practice: number;
+  words_count: number;
+}
+
+/** Save one practice result (pronunciation score / timed-Q&A result). */
+export function savePractice(
+  kind: string,
+  score: number,
+  title = "",
+  detail = "",
+  signal?: AbortSignal,
+): Promise<PracticeRecord> {
+  return request<PracticeRecord>("/api/practice", {
+    method: "POST",
+    body: JSON.stringify({ kind, score, title, detail }),
+    signal,
+  });
+}
+
+export function getPractice(kind?: string, limit = 100, signal?: AbortSignal): Promise<PracticeRecord[]> {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (kind) q.set("kind", kind);
+  return request<PracticeRecord[]>(`/api/practice?${q.toString()}`, { signal });
+}
+
+/** Real activity stats: streak, level/XP, today vs goal, totals. */
+export function getStats(signal?: AbortSignal): Promise<Stats> {
+  return request<Stats>("/api/stats", { signal });
+}
+
 export interface Word {
   id: number;
   text: string;
