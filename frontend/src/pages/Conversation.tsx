@@ -17,7 +17,7 @@ import {
 import { getScenario } from "../data/scenarios";
 import { scenarioIcons } from "../lib/icons";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
-import { postChat, postAsr, postHint, type ChatMessage } from "../lib/api";
+import { postChat, postAsr, postHint, streamChat, type ChatMessage } from "../lib/api";
 import { speakText, type Speaking } from "../lib/speech";
 import { useSession } from "../store/session";
 import { useCustomScene } from "../store/custom";
@@ -52,6 +52,7 @@ export default function Conversation() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false); // awaiting Pip's reply (text)
+  const [streaming, setStreaming] = useState(false); // reply is streaming in
   const [booting, setBooting] = useState(true); // fetching the opener
   const [error, setError] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
@@ -123,17 +124,19 @@ export default function Conversation() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading, callPhase]);
 
-  // Auto-speak Pip's newest line. In call mode the call drives speech itself.
+  // Auto-speak Pip's newest line once it's complete. In call mode the call
+  // drives speech itself; while a reply is streaming we wait for the full text.
   useEffect(() => {
     const idx = messages.length - 1;
     if (idx < 0 || messages[idx].role !== "assistant" || idx <= lastSpokenRef.current) {
       return;
     }
+    if (!messages[idx].content || streaming) return;
     lastSpokenRef.current = idx;
     if (callPhase) return;
     if (!muted) void playTts(messages[idx].content);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, muted, callPhase]);
+  }, [messages, muted, callPhase, streaming]);
 
   // Stop audio / recording / call on unmount.
   useEffect(() => {
@@ -152,6 +155,19 @@ export default function Conversation() {
     return s.done;
   }
 
+  function setLastAssistant(content: string) {
+    setMessages((m) => {
+      const c = [...m];
+      for (let i = c.length - 1; i >= 0; i--) {
+        if (c[i].role === "assistant") {
+          c[i] = { role: "assistant", content };
+          break;
+        }
+      }
+      return c;
+    });
+  }
+
   async function send() {
     const text = input.trim();
     if (!text || loading || booting || !id) return;
@@ -160,11 +176,34 @@ export default function Conversation() {
     setInput("");
     setError(null);
     setLoading(true);
+    const custom = isCustom ? customScene ?? undefined : undefined;
+    let started = false;
+    const onText = (t: string) => {
+      if (!started) {
+        started = true;
+        setStreaming(true);
+        setMessages((m) => [...m, { role: "assistant", content: t }]);
+      } else {
+        setLastAssistant(t);
+      }
+    };
     try {
-      const r = await postChat(id, next, undefined, isCustom ? customScene ?? undefined : undefined);
-      setMessages((m) => [...m, { role: "assistant", content: r.reply }]);
+      // Stream the reply token-by-token for lower perceived latency.
+      const full = await streamChat(id, next, onText, undefined, custom);
+      setStreaming(false);
+      if (started) setLastAssistant(full);
+      else setMessages((m) => [...m, { role: "assistant", content: full }]);
     } catch {
-      setError("发送失败，请确认后端在运行后重试。");
+      // Streaming unavailable -> fall back to the plain endpoint.
+      try {
+        const r = await postChat(id, next, undefined, custom);
+        setStreaming(false);
+        if (started) setLastAssistant(r.reply);
+        else setMessages((m) => [...m, { role: "assistant", content: r.reply }]);
+      } catch {
+        setStreaming(false);
+        setError("发送失败，请确认后端在运行后重试。");
+      }
     } finally {
       setLoading(false);
     }
@@ -352,7 +391,7 @@ export default function Conversation() {
             onSpeak={m.role === "assistant" ? () => void playTts(m.content) : undefined}
           />
         ))}
-        {(loading || callPhase === "thinking") && <TypingBubble theme={t} />}
+        {((loading && !streaming) || callPhase === "thinking") && <TypingBubble theme={t} />}
         {error && (
           <p className="mx-auto w-fit rounded-full bg-[#ffe8e3] px-4 py-2 text-center text-xs font-semibold text-[#e6503d]">
             {error}
