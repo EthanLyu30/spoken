@@ -19,6 +19,7 @@ import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { startVoiceCall, type CallPhase, type VoiceCall } from "../lib/call";
 import { Buddy, type BuddyMood } from "../components/Buddy";
 import { PlayfulBackground } from "../components/PlayfulBackground";
+import { PronounceButton } from "../components/PronounceButton";
 import { cn } from "../lib/utils";
 
 const localOpeners: Record<string, string> = {
@@ -436,15 +437,20 @@ function Bubble({
           {isPip ? "Pip" : "You"}
         </p>
         <p className="mt-0.5 leading-snug">{text}</p>
-        {isPip && onSpeak && (
-          <button
-            type="button"
-            onClick={onSpeak}
-            aria-label="朗读"
-            className="mt-1.5 inline-flex items-center gap-1 text-[0.66rem] font-bold uppercase tracking-wide opacity-60 transition-opacity hover:opacity-100"
-          >
-            <Volume2 className="h-3.5 w-3.5" /> 朗读
-          </button>
+        {isPip && (
+          <div className="mt-1.5 flex flex-col gap-1">
+            {onSpeak && (
+              <button
+                type="button"
+                onClick={onSpeak}
+                aria-label="朗读"
+                className="inline-flex w-fit items-center gap-1 text-[0.66rem] font-bold uppercase tracking-wide opacity-60 transition-opacity hover:opacity-100"
+              >
+                <Volume2 className="h-3.5 w-3.5" /> 朗读
+              </button>
+            )}
+            <PronounceButton text={text} />
+          </div>
         )}
       </div>
     </div>
