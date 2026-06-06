@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Flame, Sparkles, Wand2 } from "lucide-react";
 import { BuddyHero } from "../components/BuddyHero";
+import { DailyScenePick } from "../components/DailyScenePick";
 import { JourneyPath } from "../components/JourneyPath";
 import { Wordmark } from "../components/Wordmark";
 import { BackendStatus } from "../components/BackendStatus";
@@ -47,6 +48,8 @@ export default function Home() {
         <div className="animate-rise">
           <BuddyHero greeting={greeting} />
         </div>
+
+        <DailyScenePick />
 
         <section className="mt-12">
           <p className="eyebrow">Your journey · 闯关地图</p>

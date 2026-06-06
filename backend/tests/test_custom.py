@@ -41,6 +41,29 @@ def test_custom_scenario_builds_scene():
         app.dependency_overrides.clear()
 
 
+def test_scenario_suggestion_returns_scene():
+    app.dependency_overrides[get_client] = lambda: _Stub(json.dumps(_SCENE))
+    try:
+        resp = client.get("/api/scenario-suggestion")
+        assert resp.status_code == 200
+        assert resp.json()["partner_role"].startswith("Dana")
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_scenario_suggestion_service_error_503():
+    class _Boom:
+        async def chat(self, messages, **_kwargs):
+            raise DeepSeekError("nope")
+
+    app.dependency_overrides[get_client] = lambda: _Boom()
+    try:
+        resp = client.get("/api/scenario-suggestion")
+        assert resp.status_code == 503
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_custom_scenario_bad_json_502():
     app.dependency_overrides[get_client] = lambda: _Stub("not json")
     try:

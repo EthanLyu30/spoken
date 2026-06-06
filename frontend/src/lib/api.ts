@@ -62,6 +62,11 @@ export function createCustomScene(
   });
 }
 
+/** A fresh, ready-to-play scene to feature as the day's recommendation. */
+export function getScenarioSuggestion(signal?: AbortSignal): Promise<CustomScene> {
+  return request<CustomScene>("/api/scenario-suggestion", { signal });
+}
+
 /**
  * One role-play turn. Pass the conversation so far; an empty list asks the
  * backend for the scripted scene opener (no model call). Pass `custom` to
