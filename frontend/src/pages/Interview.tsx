@@ -154,8 +154,7 @@ export default function Interview() {
             <p className="eyebrow mt-2">Timed Q&A · 限时问答</p>
             <h1 className="mt-1 font-display text-2xl font-semibold text-ink">模拟托福口语 · 独立题</h1>
             <p className="mx-auto mt-2 max-w-md text-sm text-muted">
-              共 4 题，每题 45 秒即兴作答。系统按托福口语评分标准给分，并给出高分范例答案。
-              全程用英文开口说，越自然越好！
+              共 4 题（真实托福独立题题库 + AI 场景题），每题 45 秒即兴作答。系统按托福口语评分标准给分，并给出高分范例答案。全程用英文开口说，越自然越好！
             </p>
             <div className="mt-5">
               <Button size="lg" onClick={begin}>

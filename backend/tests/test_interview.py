@@ -17,21 +17,41 @@ class _Stub:
         return self.payload
 
 
-def test_interview_questions():
-    payload = json.dumps({"questions": ["Q1?", "Q2?", "Q3?", "Q4?", "Q5?"]})
-    app.dependency_overrides[get_client] = lambda: _Stub(payload)
+def test_interview_questions_bank_only():
+    from app.data.interview_questions import INDEPENDENT_QUESTIONS
+
+    resp = client.get("/api/interview/questions?n=4&ai=false")
+    assert resp.status_code == 200
+    qs = resp.json()["questions"]
+    assert len(qs) == 4
+    assert len(set(qs)) == 4  # no duplicates
+    assert all(q in INDEPENDENT_QUESTIONS for q in qs)
+
+
+def test_interview_questions_blends_ai():
+    app.dependency_overrides[get_client] = lambda: _Stub(
+        json.dumps({"questions": ["A fresh scenario question?"]})
+    )
     try:
         resp = client.get("/api/interview/questions?n=4")
         assert resp.status_code == 200
-        assert resp.json()["questions"] == ["Q1?", "Q2?", "Q3?", "Q4?"]
+        qs = resp.json()["questions"]
+        assert len(qs) == 4
+        assert "A fresh scenario question?" in qs
     finally:
         app.dependency_overrides.clear()
 
 
-def test_interview_questions_bad_json_502():
-    app.dependency_overrides[get_client] = lambda: _Stub("nope")
+def test_interview_questions_ai_failure_falls_back_to_bank():
+    class _Boom:
+        async def chat(self, messages, **_kwargs):
+            raise DeepSeekError("nope")
+
+    app.dependency_overrides[get_client] = lambda: _Boom()
     try:
-        assert client.get("/api/interview/questions").status_code == 502
+        resp = client.get("/api/interview/questions?n=4")
+        assert resp.status_code == 200
+        assert len(resp.json()["questions"]) == 4  # bank still fills it
     finally:
         app.dependency_overrides.clear()
 

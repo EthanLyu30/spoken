@@ -5,11 +5,13 @@ ASR, then sends the transcripts here for an ETS-style rating and sample answers.
 """
 
 import json
+import random
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import ValidationError
 
 from app.api.chat import get_client
+from app.data.interview_questions import INDEPENDENT_QUESTIONS
 from app.schemas.interview import (
     InterviewQuestions,
     InterviewResult,
@@ -20,11 +22,11 @@ from app.services.deepseek import DeepSeekClient, DeepSeekError
 
 router = APIRouter(tags=["interview"])
 
-_QUESTIONS_SYSTEM = """You are a TOEFL iBT speaking coach. Generate {n} TOEFL-style INDEPENDENT speaking questions (the "state and defend a personal opinion / preference / agree-or-disagree" type), each answerable in about 45 seconds.
+_SCENARIO_SYSTEM = """You are a TOEFL iBT speaking coach. Generate ONE fresh TOEFL-style INDEPENDENT speaking question grounded in a realistic, everyday scenario (study, work, travel, technology, relationships, daily life).
 
-Keep each question one or two clear sentences, varied across topics (study, work, technology, lifestyle, society). Do NOT number them.
+It must match the real TOEFL independent format (state and defend an opinion / preference / agree-or-disagree), be one or two clear sentences, and be answerable in about 45 seconds.
 
-Return ONLY JSON: {{"questions": ["...", "..."]}}."""
+Return ONLY JSON: {"questions": ["..."]}."""
 
 _SCORE_SYSTEM = """You are an experienced TOEFL iBT speaking rater. You receive TOEFL-style independent speaking questions and a test-taker's spoken answer (auto-transcribed from speech, so ignore minor transcription noise and missing punctuation).
 
@@ -41,30 +43,50 @@ For EACH item return an object with:
 Return ONLY JSON: {"overall": <number 0-6, the average of the scores>, "results": [ ... in the same order as the input ]}."""
 
 
-@router.get("/interview/questions", response_model=InterviewQuestions)
-async def interview_questions(
-    n: int = 4,
-    client: DeepSeekClient = Depends(get_client),
-) -> InterviewQuestions:
-    n = max(1, min(n, 6))
+async def _ai_scenario_question(client: DeepSeekClient) -> str | None:
+    """One fresh scenario-grounded question, or None if generation fails."""
     messages = [
-        {"role": "system", "content": _QUESTIONS_SYSTEM.format(n=n)},
-        {"role": "user", "content": "Give me today's set of questions."},
+        {"role": "system", "content": _SCENARIO_SYSTEM},
+        {"role": "user", "content": "Give me one question for today."},
     ]
     try:
         raw = await client.chat(
-            messages, temperature=0.9, max_tokens=500, response_format={"type": "json_object"}
+            messages, temperature=0.95, max_tokens=120, response_format={"type": "json_object"}
         )
-    except DeepSeekError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    try:
-        data = json.loads(raw)
-        questions = [q for q in data.get("questions", []) if isinstance(q, str) and q.strip()]
-        if not questions:
-            raise ValueError("no questions")
-        return InterviewQuestions(questions=questions[:n])
-    except (json.JSONDecodeError, ValidationError, ValueError, TypeError) as exc:
-        raise HTTPException(status_code=502, detail="Could not generate questions") from exc
+        items = [q for q in json.loads(raw).get("questions", []) if isinstance(q, str) and q.strip()]
+        return items[0].strip() if items else None
+    except (DeepSeekError, json.JSONDecodeError, ValueError, TypeError, KeyError):
+        return None
+
+
+@router.get("/interview/questions", response_model=InterviewQuestions)
+async def interview_questions(
+    n: int = 4,
+    ai: bool = True,
+    client: DeepSeekClient = Depends(get_client),
+) -> InterviewQuestions:
+    """Real TOEFL questions from the bank, blended with one AI scenario question.
+
+    Always succeeds (the bank is the fallback), so the drill never blocks on the
+    model being unavailable.
+    """
+    n = max(1, min(n, 6))
+    pool = random.sample(INDEPENDENT_QUESTIONS, min(len(INDEPENDENT_QUESTIONS), n + 2))
+
+    if not ai:
+        return InterviewQuestions(questions=pool[:n])
+
+    questions = pool[: max(0, n - 1)]
+    extra = await _ai_scenario_question(client)
+    if extra and extra not in questions:
+        questions.append(extra)
+    # Top up from the bank if AI was unavailable or produced a duplicate.
+    for q in pool:
+        if len(questions) >= n:
+            break
+        if q not in questions:
+            questions.append(q)
+    return InterviewQuestions(questions=questions[:n])
 
 
 @router.post("/interview/score", response_model=InterviewScoreResponse)
