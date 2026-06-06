@@ -13,7 +13,7 @@ router = APIRouter(tags=["daily"])
 
 _SYSTEM = """Generate {n} short, uplifting English sentences for a Chinese learner to read aloud — a mix of famous quotes and useful everyday lines. Each must sound natural and be at most 14 words.
 
-Return ONLY a JSON object: {{"lines": [{{"text": "...", "author": "a name or Anonymous", "zh": "中文翻译"}}]}}."""
+Return ONLY a JSON object: {{"lines": [{{"text": "...", "author": "a name or Anonymous", "zh": "中文翻译", "usage": "一句话中文说明什么时候用这句话"}}]}}."""
 
 
 @router.get("/daily-lines", response_model=DailyLinesResponse)
