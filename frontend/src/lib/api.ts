@@ -48,6 +48,8 @@ export interface CustomScene {
   goal: string;
   persona: string;
   opening_line: string;
+  /** Short Chinese theme tag (display-only), e.g. "日常生活·邻里". */
+  source?: string;
 }
 
 /** Expand a learner's short description into a full role-play scene. */

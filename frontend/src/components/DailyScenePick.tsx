@@ -88,6 +88,11 @@ export function DailyScenePick() {
             {scene.title_zh || scene.title}
           </h3>
           <p className="mt-0.5 text-sm font-semibold text-coral-deep">{scene.title}</p>
+          {scene.source && (
+            <span className="mt-2 inline-block rounded-full bg-surface-2 px-2.5 py-1 text-xs font-bold text-coral-deep">
+              灵感 · {scene.source}
+            </span>
+          )}
           <p className="mt-1.5 text-sm text-muted">{scene.goal}</p>
           <div className="mt-4 flex flex-wrap items-center gap-2.5">
             <button
