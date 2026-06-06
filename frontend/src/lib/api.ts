@@ -220,6 +220,19 @@ export async function postHint(
   return data.suggestions;
 }
 
+export interface DailyLine {
+  text: string;
+  author: string;
+  zh: string;
+}
+
+/** Ask DeepSeek for a fresh batch of short lines to shadow. */
+export function getDailyLines(n = 5, signal?: AbortSignal): Promise<DailyLine[]> {
+  return request<{ lines: DailyLine[] }>(`/api/daily-lines?n=${n}`, { signal }).then(
+    (r) => r.lines,
+  );
+}
+
 export interface Word {
   id: number;
   text: string;
