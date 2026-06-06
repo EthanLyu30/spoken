@@ -7,16 +7,32 @@
 import { useVoice } from "../store/voice";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const DEFAULT_TIMEOUT = 60_000; // generous: DeepSeek replies can be slow
 
 export interface HealthResponse {
   status: string;
   app: string;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * Combine the caller's abort signal with a timeout so a hung request fails
+ * cleanly (surfaced as an error the UI can show) instead of spinning forever.
+ */
+export function withTimeout(signal: AbortSignal | undefined | null, ms: number): AbortSignal | undefined {
+  if (typeof AbortSignal === "undefined" || typeof AbortSignal.timeout !== "function") {
+    return signal ?? undefined;
+  }
+  const timeout = AbortSignal.timeout(ms);
+  if (!signal) return timeout;
+  const anyFn = (AbortSignal as unknown as { any?: (s: AbortSignal[]) => AbortSignal }).any;
+  return anyFn ? anyFn([signal, timeout]) : signal;
+}
+
+async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...init,
+    signal: withTimeout(init?.signal, timeoutMs),
   });
   if (!res.ok) {
     throw new Error(`${init?.method ?? "GET"} ${path} failed: ${res.status}`);
@@ -194,7 +210,7 @@ export async function fetchTtsUrl(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-    signal,
+    signal: withTimeout(signal, 30_000),
   });
   if (!res.ok) throw new Error(`tts failed: ${res.status}`);
   return URL.createObjectURL(await res.blob());
@@ -206,7 +222,7 @@ export async function postAsr(pcm: ArrayBuffer, signal?: AbortSignal): Promise<s
     method: "POST",
     headers: { "Content-Type": "application/octet-stream" },
     body: pcm,
-    signal,
+    signal: withTimeout(signal, 45_000),
   });
   if (!res.ok) throw new Error(`asr failed: ${res.status}`);
   const data = (await res.json()) as { text: string };
@@ -237,7 +253,7 @@ export async function postPronunciation(
     method: "POST",
     headers: { "Content-Type": "application/octet-stream" },
     body: pcm,
-    signal,
+    signal: withTimeout(signal, 45_000),
   });
   if (!res.ok) throw new Error(`pronunciation failed: ${res.status}`);
   return (await res.json()) as PronunciationResult;
@@ -253,7 +269,7 @@ export async function postHint(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ scenario_id: scenarioId, messages }),
-    signal,
+    signal: withTimeout(signal, 30_000),
   });
   if (!res.ok) throw new Error(`hint failed: ${res.status}`);
   const data = (await res.json()) as { suggestions: string[] };
