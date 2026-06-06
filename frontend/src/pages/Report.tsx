@@ -96,7 +96,7 @@ export default function Report() {
         </Link>
       </header>
 
-      <main className="mx-auto w-full max-w-3xl px-5 py-6">
+      <main data-collect className="mx-auto w-full max-w-3xl px-5 py-6">
         {loading && (
           <section className="card grid place-items-center p-10 text-center">
             <Buddy mood="talking" size={120} />
