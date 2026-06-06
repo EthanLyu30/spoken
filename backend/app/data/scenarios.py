@@ -183,6 +183,159 @@ SCENARIOS: list[ScenarioDef] = [
             "and keep it light. Don't interrogate — share a little about yourself too."
         ),
     ),
+    ScenarioDef(
+        id="restaurant",
+        slug="dinner-reservation",
+        title="Dinner Reservation",
+        title_zh="餐厅订位点餐",
+        category="Dining",
+        category_zh="餐饮",
+        subtitle="订位、看菜单、点一顿正式晚餐",
+        goal="Get a table, order a full meal, and ask about the dishes.",
+        difficulty=2,
+        minutes=6,
+        icon="UtensilsCrossed",
+        partner_role="a warm restaurant waiter",
+        opening_line="Good evening, welcome! Do you have a reservation with us tonight?",
+        persona=(
+            "You are a warm waiter at a sit-down restaurant. Seat them, walk them through "
+            "the menu, take their order, suggest a dish, and check back. Keep it polite."
+        ),
+    ),
+    ScenarioDef(
+        id="shopping",
+        slug="shopping-and-returns",
+        title="Shopping & Returns",
+        title_zh="购物与退换",
+        category="Shopping",
+        category_zh="购物",
+        subtitle="试穿、比价、退换商品",
+        goal="Find an item, ask about size and price, and handle a return.",
+        difficulty=2,
+        minutes=5,
+        icon="ShoppingBag",
+        partner_role="a helpful shop assistant",
+        opening_line="Hi there! Let me know if you need a hand finding anything.",
+        persona=(
+            "You are a helpful clothing-shop assistant. Help them find an item, offer sizes "
+            "and colours, mention price, and handle a return or exchange politely."
+        ),
+    ),
+    ScenarioDef(
+        id="hotel",
+        slug="hotel-check-in",
+        title="Hotel Check-in",
+        title_zh="酒店入住",
+        category="Travel",
+        category_zh="出行",
+        subtitle="办理入住、问设施、解决房间问题",
+        goal="Check in, ask about amenities, and sort out a room request.",
+        difficulty=2,
+        minutes=5,
+        icon="Hotel",
+        partner_role="a courteous hotel front-desk clerk",
+        opening_line="Good evening, welcome! Checking in? May I have your name, please?",
+        persona=(
+            "You are a courteous hotel front-desk clerk. Check them in, explain breakfast, "
+            "wifi and checkout, and help with a small request or issue. Be efficient and kind."
+        ),
+    ),
+    ScenarioDef(
+        id="directions",
+        slug="asking-directions",
+        title="Asking Directions",
+        title_zh="街头问路",
+        category="Travel",
+        category_zh="出行",
+        subtitle="向路人问路、听懂指引",
+        goal="Ask how to get somewhere and confirm the route.",
+        difficulty=1,
+        minutes=4,
+        icon="MapPin",
+        partner_role="a friendly local on the street",
+        opening_line="Oh, hello! You look a little lost — need some help?",
+        persona=(
+            "You are a friendly local. Give clear, simple directions with turns, landmarks "
+            "and rough time, then check they understood. Keep it warm and brief."
+        ),
+    ),
+    ScenarioDef(
+        id="presentation",
+        slug="presentation-qa",
+        title="Presentation Q&A",
+        title_zh="汇报答疑",
+        category="Work",
+        category_zh="职场",
+        subtitle="做完汇报后回答听众提问",
+        goal="Field questions about your presentation clearly and confidently.",
+        difficulty=4,
+        minutes=7,
+        icon="Presentation",
+        partner_role="a curious colleague in the audience",
+        opening_line="Thanks for the presentation! I've got a couple of questions, if that's okay.",
+        persona=(
+            "You are an engaged colleague asking follow-ups about the learner's presentation. "
+            "Ask two or three clear questions (data, next steps, a challenge), react to answers, "
+            "and stay supportive."
+        ),
+    ),
+    ScenarioDef(
+        id="networking",
+        slug="networking-event",
+        title="Networking Event",
+        title_zh="职场社交",
+        category="Work",
+        category_zh="职场",
+        subtitle="在活动上认识同行、交换联系",
+        goal="Introduce yourself, find common ground, and swap contacts.",
+        difficulty=3,
+        minutes=6,
+        icon="Handshake",
+        partner_role="a friendly fellow attendee",
+        opening_line="Hi there! Great session, wasn't it? So what brings you to the event?",
+        persona=(
+            "You are a friendly professional at a networking event. Make small talk, ask what "
+            "they do, find common ground, and naturally move toward swapping contacts."
+        ),
+    ),
+    ScenarioDef(
+        id="phone",
+        slug="customer-service-call",
+        title="Customer Service Call",
+        title_zh="客服来电",
+        category="Services",
+        category_zh="服务",
+        subtitle="电话咨询 / 投诉、解决问题",
+        goal="Explain a problem on the phone and get it resolved.",
+        difficulty=3,
+        minutes=6,
+        icon="Headphones",
+        partner_role="a patient customer-service rep named Jamie",
+        opening_line="Thanks for calling support, this is Jamie. How can I help you today?",
+        persona=(
+            "You are a patient phone support rep. Ask for details, empathise, and walk them to "
+            "a solution (refund, fix or booking). Keep it calm and clear."
+        ),
+    ),
+    ScenarioDef(
+        id="friend",
+        slug="catching-up",
+        title="Catching Up",
+        title_zh="和朋友闲聊",
+        category="Social",
+        category_zh="社交",
+        subtitle="和好友聊近况、约周末",
+        goal="Catch up with a friend and make weekend plans.",
+        difficulty=1,
+        minutes=5,
+        icon="MessageCircle",
+        partner_role="the learner's close, upbeat friend",
+        opening_line="Heyyy! It's been ages! How have you been?",
+        persona=(
+            "You are the learner's close, upbeat friend. Catch up casually, share a little "
+            "about yourself, react warmly, and make a fun weekend plan together."
+        ),
+    ),
 ]
 
 _BY_ID: dict[str, ScenarioDef] = {s.id: s for s in SCENARIOS}
@@ -214,6 +367,14 @@ _VOICES: dict[str, str] = {
     "airport": "x4_enus_laura_education",  # check-in agent
     "doctor": "x3_enus_emma_assist",  # Dr. Lee, gentle
     "party": "x4_lindsey_formal",  # Sam, friendly guest
+    "restaurant": "x4_lindsey_formal",
+    "shopping": "x3_enus_emma_assist",
+    "hotel": "x4_enus_laura_education",
+    "directions": "x5_enus_flossie_flow",
+    "presentation": "henry",
+    "networking": "x4_enus_luna_formal",
+    "phone": "x4_enus_luna_formal",
+    "friend": "x5_enus_flossie_flow",
 }
 
 

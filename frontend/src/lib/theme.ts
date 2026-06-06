@@ -18,6 +18,14 @@ export const scenarioThemes: Record<string, ScenarioTheme> = {
   airport: { base: "#ff7aa2", soft: "#ffe8f0", deep: "#e85585" },
   doctor: { base: "#ff6f5e", soft: "#ffe8e3", deep: "#e6503d" },
   party: { base: "#ffc94d", soft: "#fff5d8", deep: "#cf9612" },
+  restaurant: { base: "#ef5a6f", soft: "#ffe6ea", deep: "#d23d54" },
+  shopping: { base: "#e86fb0", soft: "#fce6f2", deep: "#c94f93" },
+  hotel: { base: "#5b8def", soft: "#e8eefc", deep: "#3d6fd0" },
+  directions: { base: "#8bbf3f", soft: "#f1f7df", deep: "#6f9e2c" },
+  presentation: { base: "#8a7bf0", soft: "#ece9fd", deep: "#6b5fd0" },
+  networking: { base: "#2bb3a3", soft: "#e0f5f2", deep: "#1f8e82" },
+  phone: { base: "#3fb6c0", soft: "#e1f5f7", deep: "#2b95a0" },
+  friend: { base: "#ff8a5b", soft: "#ffe9dd", deep: "#e86c3a" },
 };
 
 export const fallbackTheme: ScenarioTheme = {
