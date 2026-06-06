@@ -1,59 +1,290 @@
+export type QuoteCategory = "movie" | "speech" | "literature" | "people" | "proverb";
+
 export interface Quote {
+  /** Exact English wording. */
   text: string;
+  /** Speaker: the character for film/dialogue, otherwise the author/speaker. */
   author: string;
   zh: string;
+  category: QuoteCategory;
+  /** Work / occasion + year, e.g. "Dead Poets Society (1989)". Omitted for proverbs. */
+  source?: string;
 }
 
-/** Curated, short, famous English lines for daily shadowing practice. */
+/**
+ * Curated, attributed lines for daily shadowing. Attributions are kept honest:
+ * famous misattributed/apocryphal quotes (e.g. the "Gandhi" / "Eleanor
+ * Roosevelt" ones) are deliberately excluded. Each card links out to a search
+ * so learners can hear the original and explore further.
+ */
 export const quotes: Quote[] = [
-  { text: "The only way to do great work is to love what you do.", author: "Steve Jobs", zh: "把工作做到卓越的唯一方法，就是热爱你所做的事。" },
-  { text: "Stay hungry, stay foolish.", author: "Steve Jobs", zh: "求知若饥，虚心若愚。" },
-  { text: "In the middle of difficulty lies opportunity.", author: "Albert Einstein", zh: "困难之中蕴藏着机会。" },
-  { text: "Believe you can and you're halfway there.", author: "Theodore Roosevelt", zh: "相信自己能行，你就已经成功了一半。" },
-  { text: "The future belongs to those who believe in the beauty of their dreams.", author: "Eleanor Roosevelt", zh: "未来属于那些相信梦想之美的人。" },
-  { text: "It always seems impossible until it's done.", author: "Nelson Mandela", zh: "在做成之前，一切看似不可能。" },
-  { text: "The journey of a thousand miles begins with a single step.", author: "Lao Tzu", zh: "千里之行，始于足下。" },
-  { text: "Success is not final, failure is not fatal: it is the courage to continue that counts.", author: "Winston Churchill", zh: "成功并非终点，失败也非末日，重要的是继续前行的勇气。" },
-  { text: "Whether you think you can or you think you can't, you're right.", author: "Henry Ford", zh: "无论你认为自己行还是不行，你都是对的。" },
-  { text: "Quality is not an act, it is a habit.", author: "Aristotle", zh: "优秀不是一种行为，而是一种习惯。" },
-  { text: "Happiness depends upon ourselves.", author: "Aristotle", zh: "幸福取决于我们自己。" },
-  { text: "Be the change that you wish to see in the world.", author: "Mahatma Gandhi", zh: "想看到世界如何改变，就先成为那个改变。" },
-  { text: "Life is what happens when you're busy making other plans.", author: "John Lennon", zh: "生活，就是当你忙于计划时发生的事。" },
-  { text: "Everything you can imagine is real.", author: "Pablo Picasso", zh: "你能想象的一切都是真实的。" },
-  { text: "The secret of getting ahead is getting started.", author: "Mark Twain", zh: "领先的秘诀在于开始行动。" },
-  { text: "Little by little, one travels far.", author: "J.R.R. Tolkien", zh: "积少成多，终能远行。" },
-  { text: "Don't watch the clock; do what it does. Keep going.", author: "Sam Levenson", zh: "别盯着时钟，像它一样不停向前。" },
-  { text: "If you can dream it, you can do it.", author: "Walt Disney", zh: "只要你敢想，就能做到。" },
-  { text: "Simplicity is the ultimate sophistication.", author: "Leonardo da Vinci", zh: "简约是终极的精致。" },
-  { text: "Courage is grace under pressure.", author: "Ernest Hemingway", zh: "勇气是压力之下的从容。" },
-  { text: "Knowledge speaks, but wisdom listens.", author: "Jimi Hendrix", zh: "知识在说，而智慧在听。" },
-  { text: "Turn your wounds into wisdom.", author: "Oprah Winfrey", zh: "把伤痛化作智慧。" },
-  { text: "Do what you can, with what you have, where you are.", author: "Theodore Roosevelt", zh: "在你所处之地，用你所有的，做你能做的。" },
-  { text: "Well done is better than well said.", author: "Benjamin Franklin", zh: "做得好胜过说得好。" },
-  { text: "The best way to predict the future is to create it.", author: "Peter Drucker", zh: "预测未来最好的方式，就是去创造它。" },
-  { text: "Practice makes perfect.", author: "Proverb", zh: "熟能生巧。" },
-  { text: "Where there is a will, there is a way.", author: "Proverb", zh: "有志者，事竟成。" },
-  { text: "Actions speak louder than words.", author: "Proverb", zh: "行动胜于言辞。" },
-  { text: "Dream big. Start small. Act now.", author: "Robin Sharma", zh: "大胆做梦，从小处起步，立刻行动。" },
-  { text: "Fall seven times, stand up eight.", author: "Japanese Proverb", zh: "跌倒七次，第八次站起来。" },
-  { text: "What you do today can improve all your tomorrows.", author: "Ralph Marston", zh: "你今天的努力会改善所有的明天。" },
-  { text: "A little progress each day adds up to big results.", author: "Anonymous", zh: "每天一点点进步，终成大成果。" },
-  { text: "Your time is limited, so don't waste it living someone else's life.", author: "Steve Jobs", zh: "你的时间有限，别浪费在过别人的生活上。" },
-  { text: "Hard work beats talent when talent doesn't work hard.", author: "Tim Notke", zh: "当天赋不努力时，努力会胜过天赋。" },
-  { text: "The expert in anything was once a beginner.", author: "Helen Hayes", zh: "任何领域的专家都曾是初学者。" },
-  { text: "Mistakes are proof that you are trying.", author: "Anonymous", zh: "犯错，证明你在努力尝试。" },
-  { text: "Be so good they can't ignore you.", author: "Steve Martin", zh: "做到出色到无人能忽视你。" },
-  { text: "Doubt kills more dreams than failure ever will.", author: "Suzy Kassem", zh: "怀疑扼杀的梦想，比失败更多。" },
-  { text: "Energy and persistence conquer all things.", author: "Benjamin Franklin", zh: "精力与坚持能征服一切。" },
-  { text: "You miss every shot you don't take.", author: "Wayne Gretzky", zh: "你不出手，就永远不会进球。" },
-  { text: "Done is better than perfect.", author: "Sheryl Sandberg", zh: "完成胜过完美。" },
-  { text: "Strive for progress, not perfection.", author: "Anonymous", zh: "追求进步，而非完美。" },
-  { text: "The way to get started is to quit talking and begin doing.", author: "Walt Disney", zh: "开始的方法，就是停止空谈、动手去做。" },
-  { text: "Difficult roads often lead to beautiful destinations.", author: "Anonymous", zh: "难走的路，往往通向美好的终点。" },
-  { text: "Great things never came from comfort zones.", author: "Anonymous", zh: "伟大从不来自舒适区。" },
-  { text: "Push yourself, because no one else is going to do it for you.", author: "Anonymous", zh: "逼自己一把，没人会替你努力。" },
-  { text: "The harder I work, the luckier I get.", author: "Samuel Goldwyn", zh: "我越努力，就越幸运。" },
-  { text: "Today is your chance to build the tomorrow you want.", author: "Ken Poirot", zh: "今天，是你建造理想明天的机会。" },
-  { text: "Small steps every day lead to big change.", author: "Anonymous", zh: "每天的小步，汇成大改变。" },
-  { text: "Believe in yourself and all that you are.", author: "Christian D. Larson", zh: "相信你自己，相信你的全部。" },
+  // --- 电影 Movies ---
+  {
+    text: "Life was like a box of chocolates. You never know what you're gonna get.",
+    author: "Forrest Gump",
+    zh: "生活就像一盒巧克力，你永远不知道下一颗是什么味道。",
+    category: "movie",
+    source: "Forrest Gump (1994)",
+  },
+  {
+    text: "May the Force be with you.",
+    author: "Han Solo",
+    zh: "愿原力与你同在。",
+    category: "movie",
+    source: "Star Wars (1977)",
+  },
+  {
+    text: "To infinity and beyond!",
+    author: "Buzz Lightyear",
+    zh: "飞向宇宙，浩瀚无垠！",
+    category: "movie",
+    source: "Toy Story (1995)",
+  },
+  {
+    text: "Just keep swimming.",
+    author: "Dory",
+    zh: "不停地游就好。",
+    category: "movie",
+    source: "Finding Nemo (2003)",
+  },
+  {
+    text: "Hope is a good thing, maybe the best of things, and no good thing ever dies.",
+    author: "Andy Dufresne",
+    zh: "希望是美好的，也许是人间至善，而美好的事物永不消逝。",
+    category: "movie",
+    source: "The Shawshank Redemption (1994)",
+  },
+  {
+    text: "There's no place like home.",
+    author: "Dorothy",
+    zh: "没有什么地方比得上家。",
+    category: "movie",
+    source: "The Wizard of Oz (1939)",
+  },
+  {
+    text: "Carpe diem. Seize the day, boys.",
+    author: "John Keating",
+    zh: "把握当下，孩子们，及时行动。",
+    category: "movie",
+    source: "Dead Poets Society (1989)",
+  },
+  {
+    text: "With great power comes great responsibility.",
+    author: "Uncle Ben",
+    zh: "能力越大，责任越大。",
+    category: "movie",
+    source: "Spider-Man (2002)",
+  },
+  {
+    text: "I'll be back.",
+    author: "The Terminator",
+    zh: "我会回来的。",
+    category: "movie",
+    source: "The Terminator (1984)",
+  },
+  {
+    text: "After all, tomorrow is another day.",
+    author: "Scarlett O'Hara",
+    zh: "毕竟，明天又是新的一天。",
+    category: "movie",
+    source: "Gone with the Wind (1939)",
+  },
+
+  // --- 演讲 Speeches & TED ---
+  {
+    text: "Stay hungry. Stay foolish.",
+    author: "Steve Jobs",
+    zh: "求知若饥，虚心若愚。",
+    category: "speech",
+    source: "Stanford Commencement, 2005",
+  },
+  {
+    text: "Your time is limited, so don't waste it living someone else's life.",
+    author: "Steve Jobs",
+    zh: "你的时间有限，别浪费在过别人的生活上。",
+    category: "speech",
+    source: "Stanford Commencement, 2005",
+  },
+  {
+    text: "Ask not what your country can do for you — ask what you can do for your country.",
+    author: "John F. Kennedy",
+    zh: "不要问国家能为你做什么，要问你能为国家做什么。",
+    category: "speech",
+    source: "Inaugural Address, 1961",
+  },
+  {
+    text: "The only thing we have to fear is fear itself.",
+    author: "Franklin D. Roosevelt",
+    zh: "我们唯一需要恐惧的，就是恐惧本身。",
+    category: "speech",
+    source: "First Inaugural Address, 1933",
+  },
+  {
+    text: "I have a dream.",
+    author: "Martin Luther King Jr.",
+    zh: "我有一个梦想。",
+    category: "speech",
+    source: "March on Washington, 1963",
+  },
+  {
+    text: "Don't fake it till you make it. Fake it till you become it.",
+    author: "Amy Cuddy",
+    zh: "不要假装到成功为止，要假装到你真正成为那样的人。",
+    category: "speech",
+    source: "TED Talk, 2012",
+  },
+  {
+    text: "If you're not prepared to be wrong, you'll never come up with anything original.",
+    author: "Ken Robinson",
+    zh: "如果你不敢犯错，就永远想不出有原创性的东西。",
+    category: "speech",
+    source: "TED Talk, 2006",
+  },
+  {
+    text: "Education is the most powerful weapon which you can use to change the world.",
+    author: "Nelson Mandela",
+    zh: "教育是你能用来改变世界的最强武器。",
+    category: "speech",
+    source: "speech, 2003",
+  },
+
+  // --- 文学 Literature ---
+  {
+    text: "It is our choices that show what we truly are, far more than our abilities.",
+    author: "Albus Dumbledore",
+    zh: "决定我们是谁的，是我们的选择，而远非我们的能力。",
+    category: "literature",
+    source: "J.K. Rowling, Harry Potter and the Chamber of Secrets",
+  },
+  {
+    text: "Not all those who wander are lost.",
+    author: "J.R.R. Tolkien",
+    zh: "并非所有徘徊的人都迷失了方向。",
+    category: "literature",
+    source: "The Lord of the Rings",
+  },
+  {
+    text: "All we have to decide is what to do with the time that is given us.",
+    author: "Gandalf",
+    zh: "我们要做的，只是决定如何度过被赋予的时光。",
+    category: "literature",
+    source: "J.R.R. Tolkien, The Lord of the Rings",
+  },
+  {
+    text: "It does not do to dwell on dreams and forget to live.",
+    author: "Albus Dumbledore",
+    zh: "沉湎于梦想而忘记生活，是不可取的。",
+    category: "literature",
+    source: "J.K. Rowling, Harry Potter and the Philosopher's Stone",
+  },
+  {
+    text: "So we beat on, boats against the current, borne back ceaselessly into the past.",
+    author: "F. Scott Fitzgerald",
+    zh: "于是我们奋力搏击，如同逆水行舟，不停地被浪潮推回到过去。",
+    category: "literature",
+    source: "The Great Gatsby",
+  },
+  {
+    text: "We accept the love we think we deserve.",
+    author: "Stephen Chbosky",
+    zh: "我们接受自己认为配得上的爱。",
+    category: "literature",
+    source: "The Perks of Being a Wallflower",
+  },
+  {
+    text: "Whatever our souls are made of, his and mine are the same.",
+    author: "Emily Brontë",
+    zh: "无论我们的灵魂由什么构成，他的和我的都是一样的。",
+    category: "literature",
+    source: "Wuthering Heights",
+  },
+  {
+    text: "Tomorrow is always fresh, with no mistakes in it yet.",
+    author: "Anne Shirley",
+    zh: "明天总是崭新的，还没有任何过失。",
+    category: "literature",
+    source: "L.M. Montgomery, Anne of Green Gables",
+  },
+
+  // --- 名人 Famous people ---
+  {
+    text: "The only way to do great work is to love what you do.",
+    author: "Steve Jobs",
+    zh: "把工作做到卓越的唯一方法，就是热爱你所做的事。",
+    category: "people",
+    source: "Stanford Commencement, 2005",
+  },
+  {
+    text: "Life is what happens when you're busy making other plans.",
+    author: "John Lennon",
+    zh: "生活，就是当你忙于计划时发生的事。",
+    category: "people",
+    source: "song \"Beautiful Boy\", 1980",
+  },
+  {
+    text: "The journey of a thousand miles begins with a single step.",
+    author: "Lao Tzu",
+    zh: "千里之行，始于足下。",
+    category: "people",
+    source: "Tao Te Ching",
+  },
+  {
+    text: "Well done is better than well said.",
+    author: "Benjamin Franklin",
+    zh: "做得好胜过说得好。",
+    category: "people",
+    source: "Poor Richard's Almanack",
+  },
+  {
+    text: "Done is better than perfect.",
+    author: "Sheryl Sandberg",
+    zh: "完成胜过完美。",
+    category: "people",
+    source: "Lean In",
+  },
+  {
+    text: "You miss 100% of the shots you don't take.",
+    author: "Wayne Gretzky",
+    zh: "你不出手，就百分之百不会进球。",
+    category: "people",
+  },
+  {
+    text: "Do what you can, with what you have, where you are.",
+    author: "Theodore Roosevelt",
+    zh: "在你所处之地，用你所有的，做你能做的。",
+    category: "people",
+  },
+  {
+    text: "Turn your wounds into wisdom.",
+    author: "Oprah Winfrey",
+    zh: "把伤痛化作智慧。",
+    category: "people",
+  },
+  {
+    text: "Don't watch the clock; do what it does. Keep going.",
+    author: "Sam Levenson",
+    zh: "别盯着时钟，像它一样不停向前。",
+    category: "people",
+  },
+
+  // --- 谚语 Proverbs (traditional, no single author) ---
+  { text: "Practice makes perfect.", author: "English proverb", zh: "熟能生巧。", category: "proverb" },
+  { text: "Where there is a will, there is a way.", author: "English proverb", zh: "有志者，事竟成。", category: "proverb" },
+  { text: "Actions speak louder than words.", author: "English proverb", zh: "行动胜于言辞。", category: "proverb" },
+  { text: "Rome wasn't built in a day.", author: "English proverb", zh: "罗马不是一天建成的。", category: "proverb" },
+  { text: "Better late than never.", author: "English proverb", zh: "迟到总比不到好。", category: "proverb" },
 ];
+
+export const categoryLabels: Record<QuoteCategory, string> = {
+  movie: "电影",
+  speech: "演讲",
+  literature: "文学",
+  people: "名人",
+  proverb: "谚语",
+};
+
+/** A web-search URL so learners can hear the original line and explore it. */
+export function quoteSearchUrl(q: { text: string; author: string; source?: string }): string {
+  const query = [`"${q.text}"`, q.author, q.source].filter(Boolean).join(" ");
+  return `https://www.bing.com/search?q=${encodeURIComponent(query)}`;
+}
