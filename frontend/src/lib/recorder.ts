@@ -33,6 +33,9 @@ export async function startRecording(): Promise<ActiveRecorder> {
 
   return {
     stop: async () => {
+      // Grace period so the final ScriptProcessor block (and the tail of the
+      // last word the user just spoke) is captured instead of being dropped.
+      await new Promise((r) => setTimeout(r, 250));
       processor.onaudioprocess = null;
       processor.disconnect();
       source.disconnect();
