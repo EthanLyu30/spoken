@@ -3,7 +3,8 @@ import { Check, RefreshCw, Search, Sparkles, Volume2 } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { PronounceButton } from "../components/PronounceButton";
-import { fetchTtsUrl, getDailyLines, getWords, postWord, type DailyLine } from "../lib/api";
+import { getDailyLines, getWords, postWord, type DailyLine } from "../lib/api";
+import { speakText } from "../lib/speech";
 import {
   categoryLabels,
   quoteSearchUrl,
@@ -21,22 +22,6 @@ const sourceOf = (q: Line): string | undefined => ("source" in q ? q.source : un
 /** Categories that actually have entries, in display order. */
 const ORDER: QuoteCategory[] = ["movie", "speech", "literature", "people", "proverb"];
 const presentCats = ORDER.filter((c) => quotes.some((q) => q.category === c));
-
-let sharedAudio: HTMLAudioElement | null = null;
-let sharedUrl: string | null = null;
-async function speak(text: string) {
-  try {
-    const url = await fetchTtsUrl(text);
-    if (!sharedAudio) sharedAudio = new Audio();
-    sharedAudio.pause();
-    if (sharedUrl) URL.revokeObjectURL(sharedUrl);
-    sharedUrl = url;
-    sharedAudio.src = url;
-    await sharedAudio.play();
-  } catch {
-    /* ignore */
-  }
-}
 
 /** Day-of-year, so the starting window rotates once per day. */
 function dayOfYear(): number {
@@ -190,7 +175,7 @@ export default function Daily() {
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => speak(q.text)}
+                    onClick={() => speakText(q.text)}
                     className="inline-flex items-center gap-1.5 rounded-full bg-coral px-3.5 py-1.5 text-xs font-bold text-primary-fg shadow-soft transition-transform active:translate-y-0.5"
                   >
                     <Volume2 className="h-3.5 w-3.5" /> 朗读

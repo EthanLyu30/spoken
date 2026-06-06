@@ -1,15 +1,26 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+export type VoiceEngine = "browser" | "iflytek";
+
 /**
- * User overrides for Pip's voice. `null` means "follow the scenario's tuned
- * voice"; a value overrides it everywhere. Persisted across sessions.
+ * User overrides for Pip's read-aloud voice.
+ *
+ * - `engine`: "browser" uses the OS/browser Web Speech voices (more natural,
+ *   connected speech); "iflytek" uses the cloud cascade voices.
+ * - `vcn` / `browserVoiceURI`: the chosen voice for each engine (null = auto).
+ * - `speed` / `pitch`: 0-100 sliders (null = neutral / follow scenario), mapped
+ *   per engine when speaking.
  */
 interface VoiceState {
+  engine: VoiceEngine;
   vcn: string | null;
+  browserVoiceURI: string | null;
   speed: number | null;
   pitch: number | null;
+  setEngine: (engine: VoiceEngine) => void;
   setVcn: (vcn: string | null) => void;
+  setBrowserVoiceURI: (uri: string | null) => void;
   setSpeed: (speed: number | null) => void;
   setPitch: (pitch: number | null) => void;
   reset: () => void;
@@ -18,19 +29,23 @@ interface VoiceState {
 export const useVoice = create<VoiceState>()(
   persist(
     (set) => ({
+      engine: "browser",
       vcn: null,
+      browserVoiceURI: null,
       speed: null,
       pitch: null,
+      setEngine: (engine) => set({ engine }),
       setVcn: (vcn) => set({ vcn }),
+      setBrowserVoiceURI: (browserVoiceURI) => set({ browserVoiceURI }),
       setSpeed: (speed) => set({ speed }),
       setPitch: (pitch) => set({ pitch }),
-      reset: () => set({ vcn: null, speed: null, pitch: null }),
+      reset: () => set({ vcn: null, browserVoiceURI: null, speed: null, pitch: null }),
     }),
     { name: "spoken-voice" },
   ),
 );
 
-/** Selectable English voices (only iFlytek voices that are licensed/working). */
+/** Selectable iFlytek English voices (only licensed/working ones). */
 export const VOICE_OPTIONS: { id: string; label: string }[] = [
   { id: "x5_enus_flossie_flow", label: "Flossie · 活泼女声" },
   { id: "x3_enus_emma_assist", label: "Emma · 柔和女声" },
