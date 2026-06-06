@@ -7,7 +7,9 @@ audio blob. The HMAC handshake lives in ``xf_auth``.
 from __future__ import annotations
 
 import base64
+import io
 import json
+import wave
 
 import websockets
 
@@ -16,6 +18,24 @@ from app.services.xf_auth import build_auth_url
 
 _HOST = "tts-api.xfyun.cn"
 _PATH = "/v2/tts"
+
+SAMPLE_RATE = 16000
+
+
+def pcm16_to_wav(pcm: bytes, *, rate: int = SAMPLE_RATE, channels: int = 1) -> bytes:
+    """Wrap 16-bit little-endian PCM in a single WAV container.
+
+    iFlytek streams audio as many small frames. Concatenating MP3 frames leaves
+    encoder padding between them (audible as choppy, syllable-by-syllable
+    speech); concatenating raw PCM and wrapping it once is gapless.
+    """
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(pcm)
+    return buf.getvalue()
 
 
 class XfTtsError(RuntimeError):
@@ -31,7 +51,7 @@ class XfTtsClient:
         text: str,
         *,
         vcn: str = "x5_enus_flossie_flow",
-        aue: str = "lame",  # lame -> mp3; raw -> 16k PCM
+        aue: str = "raw",  # raw -> 16k PCM (gapless); lame -> mp3
         speed: int = 54,  # 0-100, 50 = neutral
         pitch: int = 52,  # 0-100, 50 = neutral
         volume: int = 80,  # 0-100

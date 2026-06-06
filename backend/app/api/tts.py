@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.data import scenarios as catalog
 from app.schemas.tts import TtsRequest
-from app.services.xf_tts import XfTtsClient, XfTtsError
+from app.services.xf_tts import XfTtsClient, XfTtsError, pcm16_to_wav
 
 router = APIRouter(tags=["tts"])
 
@@ -20,12 +20,15 @@ async def tts(
 ) -> Response:
     cfg = catalog.voice_for(req.scenario_id)
     try:
-        audio = await client.synthesize(
+        # Synthesize as raw PCM and wrap once as WAV -> gapless, continuous
+        # playback (concatenated MP3 frames sound choppy / syllable-by-syllable).
+        pcm = await client.synthesize(
             req.text,
             vcn=str(cfg["vcn"]),
             speed=int(cfg["speed"]),  # type: ignore[arg-type]
             pitch=int(cfg["pitch"]),  # type: ignore[arg-type]
+            aue="raw",
         )
     except XfTtsError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return Response(content=audio, media_type="audio/mpeg")
+    return Response(content=pcm16_to_wav(pcm), media_type="audio/wav")
