@@ -9,6 +9,7 @@ import Daily from "./pages/Daily";
 import CustomScenePage from "./pages/CustomScene";
 import Interview from "./pages/Interview";
 import { WordCollector } from "./components/WordCollector";
+import { Onboarding } from "./components/Onboarding";
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <WordCollector />
+      <Onboarding />
     </>
   );
 }
