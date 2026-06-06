@@ -172,3 +172,33 @@ export async function postAsr(pcm: ArrayBuffer, signal?: AbortSignal): Promise<s
   const data = (await res.json()) as { text: string };
   return data.text;
 }
+
+export interface WordScore {
+  word: string;
+  score: number;
+}
+
+export interface PronunciationResult {
+  overall: number;
+  accuracy: number;
+  fluency: number;
+  integrity: number;
+  standard: number;
+  words: WordScore[];
+}
+
+/** Score how well the given 16 kHz PCM reads `text` (iFlytek ISE). */
+export async function postPronunciation(
+  text: string,
+  pcm: ArrayBuffer,
+  signal?: AbortSignal,
+): Promise<PronunciationResult> {
+  const res = await fetch(`${BASE_URL}/api/pronunciation?text=${encodeURIComponent(text)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: pcm,
+    signal,
+  });
+  if (!res.ok) throw new Error(`pronunciation failed: ${res.status}`);
+  return (await res.json()) as PronunciationResult;
+}
