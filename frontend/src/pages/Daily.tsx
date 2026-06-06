@@ -167,7 +167,7 @@ export default function Daily() {
           </p>
         )}
 
-        <ul className="space-y-3.5">
+        <ul data-collect className="space-y-3.5">
           {lines.map((q, i) => {
             const src = sourceOf(q);
             return (

@@ -381,7 +381,10 @@ export default function Conversation() {
         <p className="mt-1 font-display text-base font-semibold text-ink">{stageStatus}</p>
       </div>
 
-      <main className="mx-auto w-full min-h-0 max-w-2xl flex-1 space-y-3 overflow-y-auto px-5 py-4">
+      <main
+        data-collect
+        className="mx-auto w-full min-h-0 max-w-2xl flex-1 space-y-3 overflow-y-auto px-5 py-4"
+      >
         {messages.map((m, i) => (
           <Bubble
             key={i}
