@@ -7,7 +7,17 @@ Run locally with:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import asr, chat, feedback, health, pronunciation, scenarios, sessions, tts
+from app.api import (
+    asr,
+    chat,
+    feedback,
+    health,
+    hint,
+    pronunciation,
+    scenarios,
+    sessions,
+    tts,
+)
 from app.core.config import get_settings
 from app.db import init_db
 
@@ -36,6 +46,7 @@ app.include_router(sessions.router, prefix="/api")
 app.include_router(tts.router, prefix="/api")
 app.include_router(asr.router, prefix="/api")
 app.include_router(pronunciation.router, prefix="/api")
+app.include_router(hint.router, prefix="/api")
 
 # Create database tables (idempotent).
 init_db()

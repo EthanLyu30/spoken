@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
+  Lightbulb,
   Loader2,
   Mic,
   Phone,
@@ -10,10 +11,12 @@ import {
   Square,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
 import { getScenario } from "../data/scenarios";
+import { scenarioIcons } from "../lib/icons";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
-import { postChat, fetchTtsUrl, postAsr, type ChatMessage } from "../lib/api";
+import { postChat, fetchTtsUrl, postAsr, postHint, type ChatMessage } from "../lib/api";
 import { useSession } from "../store/session";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { startVoiceCall, type CallPhase, type VoiceCall } from "../lib/call";
@@ -36,6 +39,7 @@ export default function Conversation() {
   const scenario = scenarioId ? getScenario(scenarioId) : undefined;
   const id = scenario?.id ?? "";
   const t = themeFor(id);
+  const ScenarioIcon = scenario ? scenarioIcons[scenario.icon] : null;
   const fallbackOpener = (id && localOpeners[id]) || "Hi! Whenever you're ready, just say hello.";
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -47,6 +51,8 @@ export default function Conversation() {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [callPhase, setCallPhase] = useState<CallPhase | null>(null);
+  const [hints, setHints] = useState<string[] | null>(null);
+  const [hintLoading, setHintLoading] = useState(false);
 
   const endRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -227,6 +233,20 @@ export default function Conversation() {
     audioRef.current?.pause();
   }
 
+  async function getHints() {
+    if (!id || hintLoading || booting) return;
+    setHintLoading(true);
+    setError(null);
+    try {
+      const s = await postHint(id, messages);
+      setHints(s.length ? s : ["试着先打个招呼或回应上一句～"]);
+    } catch {
+      setError("获取提示失败，请稍后再试。");
+    } finally {
+      setHintLoading(false);
+    }
+  }
+
   const stageMood: BuddyMood =
     callPhase === "speaking"
       ? "talking"
@@ -295,7 +315,17 @@ export default function Conversation() {
       </header>
 
       <div className="mx-auto mt-3 flex w-full max-w-2xl shrink-0 flex-col items-center px-5 text-center">
-        <Buddy mood={stageMood} size={callPhase ? 124 : 112} color={t.base} />
+        <div className="relative">
+          <Buddy mood={stageMood} size={callPhase ? 124 : 112} color={t.base} />
+          {ScenarioIcon && (
+            <span
+              className="absolute bottom-1 right-1 grid h-9 w-9 place-items-center rounded-full border-2 border-bg shadow-soft"
+              style={{ background: t.soft, color: t.deep }}
+            >
+              <ScenarioIcon className="h-5 w-5" strokeWidth={2.4} />
+            </span>
+          )}
+        </div>
         <p className="mt-1 font-display text-base font-semibold text-ink">{stageStatus}</p>
       </div>
 
@@ -339,6 +369,32 @@ export default function Conversation() {
           </div>
         ) : (
           <>
+            {hints && (
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="text-[0.66rem] font-bold uppercase tracking-wide text-muted">提示</span>
+                {hints.map((h, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => {
+                      setInput(h);
+                      setHints(null);
+                    }}
+                    className="rounded-full border border-border bg-surface-2 px-3 py-1.5 text-xs font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
+                  >
+                    {h}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setHints(null)}
+                  aria-label="关闭提示"
+                  className="grid h-6 w-6 place-items-center rounded-full text-muted hover:text-ink"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
             <div className="flex items-center gap-2 rounded-full border border-border bg-surface p-2 shadow-pop">
               <button
                 type="button"
@@ -399,7 +455,19 @@ export default function Conversation() {
               >
                 <Phone className="h-3.5 w-3.5" /> 通话模式
               </button>
-              <span className="text-xs text-muted">免提连续对话（测试版）</span>
+              <button
+                type="button"
+                onClick={getHints}
+                disabled={booting || hintLoading}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-1.5 text-xs font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5 disabled:opacity-50"
+              >
+                {hintLoading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Lightbulb className="h-3.5 w-3.5" />
+                )}
+                提示
+              </button>
             </div>
           </>
         )}

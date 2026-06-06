@@ -202,3 +202,20 @@ export async function postPronunciation(
   if (!res.ok) throw new Error(`pronunciation failed: ${res.status}`);
   return (await res.json()) as PronunciationResult;
 }
+
+/** Suggest a few natural things the learner could say next. */
+export async function postHint(
+  scenarioId: string,
+  messages: ChatMessage[],
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const res = await fetch(`${BASE_URL}/api/hint`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scenario_id: scenarioId, messages }),
+    signal,
+  });
+  if (!res.ok) throw new Error(`hint failed: ${res.status}`);
+  const data = (await res.json()) as { suggestions: string[] };
+  return data.suggestions;
+}
