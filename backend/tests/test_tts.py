@@ -12,10 +12,14 @@ class _StubTts:
         self.audio = audio  # raw 16-bit PCM bytes
         self.vcn: str | None = None
         self.aue: str | None = None
+        self.speed: int | None = None
+        self.pitch: int | None = None
 
-    async def synthesize(self, text, *, vcn=None, aue="raw", **_kwargs):
+    async def synthesize(self, text, *, vcn=None, aue="raw", speed=None, pitch=None, **_kwargs):
         self.vcn = vcn
         self.aue = aue
+        self.speed = speed
+        self.pitch = pitch
         return self.audio
 
 
@@ -41,6 +45,22 @@ def test_tts_uses_scenario_voice():
         resp = client.post("/api/tts", json={"text": "hi", "scenario_id": "interview"})
         assert resp.status_code == 200
         assert stub.vcn == "henry"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_tts_applies_user_overrides():
+    stub = _StubTts()
+    app.dependency_overrides[get_tts_client] = lambda: stub
+    try:
+        resp = client.post(
+            "/api/tts",
+            json={"text": "hi", "scenario_id": "interview", "vcn": "x3_enus_emma_assist", "speed": 40, "pitch": 60},
+        )
+        assert resp.status_code == 200
+        assert stub.vcn == "x3_enus_emma_assist"  # override beats scenario "henry"
+        assert stub.speed == 40
+        assert stub.pitch == 60
     finally:
         app.dependency_overrides.clear()
 

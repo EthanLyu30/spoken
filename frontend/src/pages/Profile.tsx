@@ -1,11 +1,23 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Award, Flame, Lock, MessageSquare, Sparkles, Star, Trophy } from "lucide-react";
+import {
+  Award,
+  Flame,
+  Loader2,
+  Lock,
+  MessageSquare,
+  RotateCcw,
+  Sparkles,
+  Star,
+  Trophy,
+  Volume2,
+} from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import { Ring } from "../components/ui/Ring";
 import { ProgressBar } from "../components/ui/ProgressBar";
-import { getSessions, getWords, type SessionSummary, type Word } from "../lib/api";
+import { fetchTtsUrl, getSessions, getWords, type SessionSummary, type Word } from "../lib/api";
+import { useVoice, VOICE_OPTIONS } from "../store/voice";
 import { userProgress } from "../data/progress";
 import { cn } from "../lib/utils";
 
@@ -87,6 +99,8 @@ export default function Profile() {
           </div>
         </section>
 
+        <VoiceSettings />
+
         <section className="card mt-5 p-6">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-display text-lg font-semibold text-ink">成就徽章</h2>
@@ -122,6 +136,104 @@ export default function Profile() {
 
       <BottomNav />
     </div>
+  );
+}
+
+function VoiceSettings() {
+  const { vcn, speed, pitch, setVcn, setSpeed, setPitch, reset } = useVoice();
+  const [previewing, setPreviewing] = useState(false);
+  const custom = vcn != null || speed != null || pitch != null;
+
+  const speedLabel = (speed ?? 50) <= 40 ? "偏慢" : (speed ?? 50) >= 62 ? "偏快" : "适中";
+  const pitchLabel = (pitch ?? 50) <= 44 ? "低沉" : (pitch ?? 50) >= 58 ? "偏高" : "适中";
+
+  async function preview() {
+    if (previewing) return;
+    setPreviewing(true);
+    try {
+      const url = await fetchTtsUrl("Hi! I'm Pip. Let's practice English together — you've got this!");
+      const audio = new Audio(url);
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        setPreviewing(false);
+      };
+      audio.onerror = () => setPreviewing(false);
+      await audio.play();
+    } catch {
+      setPreviewing(false);
+    }
+  }
+
+  return (
+    <section className="card mt-5 p-6">
+      <div className="mb-1 flex items-center justify-between">
+        <h2 className="font-display text-lg font-semibold text-ink">语音设置</h2>
+        {custom && (
+          <button
+            type="button"
+            onClick={reset}
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
+          >
+            <RotateCcw className="h-3.5 w-3.5" /> 跟随场景
+          </button>
+        )}
+      </div>
+      <p className="mb-4 text-sm text-muted">
+        {custom ? "已自定义 · 应用到所有朗读" : "当前跟随场景（每个场景自带语气）— 调整后将统一生效"}
+      </p>
+
+      <label className="mb-1.5 block text-sm font-bold text-ink">音色</label>
+      <select
+        value={vcn ?? ""}
+        onChange={(e) => setVcn(e.target.value || null)}
+        className="mb-5 w-full rounded-2xl border border-border bg-surface-2 px-4 py-2.5 text-ink outline-none focus:border-coral"
+      >
+        <option value="">跟随场景（推荐）</option>
+        {VOICE_OPTIONS.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+
+      <div className="mb-1.5 flex items-center justify-between text-sm">
+        <span className="font-bold text-ink">语速</span>
+        <span className="font-semibold text-muted">{speedLabel}</span>
+      </div>
+      <input
+        type="range"
+        min={20}
+        max={85}
+        value={speed ?? 50}
+        onChange={(e) => setSpeed(Number(e.target.value))}
+        className="mb-5 w-full"
+        style={{ accentColor: "var(--coral)" }}
+      />
+
+      <div className="mb-1.5 flex items-center justify-between text-sm">
+        <span className="font-bold text-ink">音调</span>
+        <span className="font-semibold text-muted">{pitchLabel}</span>
+      </div>
+      <input
+        type="range"
+        min={30}
+        max={75}
+        value={pitch ?? 50}
+        onChange={(e) => setPitch(Number(e.target.value))}
+        className="mb-5 w-full"
+        style={{ accentColor: "var(--coral)" }}
+      />
+
+      <button
+        type="button"
+        onClick={preview}
+        disabled={previewing}
+        className="inline-flex items-center gap-1.5 rounded-full bg-coral px-5 py-2.5 text-sm font-bold text-primary-fg shadow-pop transition-transform active:translate-y-0.5 disabled:opacity-60"
+      >
+        {previewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Volume2 className="h-4 w-4" />}
+        {previewing ? "播放中…" : "试听"}
+      </button>
+    </section>
   );
 }
 
