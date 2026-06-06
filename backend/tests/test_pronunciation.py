@@ -12,7 +12,7 @@ SAMPLE_XML = """<?xml version="1.0" encoding="UTF-8"?>
     <rec_paper>
       <read_chapter total_score="4.5" accuracy_score="4.4" fluency_score="4.8" integrity_score="5.0" standard_score="4.2" word_count="2" content="hi there">
         <sentence total_score="4.5" accuracy_score="4.4">
-          <word content="hi" total_score="4.6"><syll content="h ay"><phone content="h"/></syll></word>
+          <word content="hi" total_score="4.6"><syll content="h ay"><phone content="h" dp_message="0"/><phone content="ay" dp_message="16"/></syll></word>
           <word content="fil" beg_pos="1" end_pos="2"/>
           <word content="there" total_score="4.0"></word>
         </sentence>
@@ -40,6 +40,11 @@ def test_pronunciation_parses_scores():
         assert body["integrity"] == 100.0
         assert [w["word"] for w in body["words"]] == ["hi", "there"]
         assert body["words"][0]["score"] == 92.0
+        # phoneme-level detail: "h" ok, "ay" flagged (dp_message != 0)
+        assert body["words"][0]["phonemes"] == [
+            {"label": "h", "ok": True},
+            {"label": "ay", "ok": False},
+        ]
     finally:
         app.dependency_overrides.clear()
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from app.schemas.pronunciation import PronunciationResult, WordScore
+from app.schemas.pronunciation import PhonemeScore, PronunciationResult, WordScore
 
 # iFlytek English scores are on a 0-5 scale; surface them as 0-100.
 _SCALE = 20.0
@@ -35,7 +35,13 @@ def parse_ise_xml(xml: str) -> PronunciationResult:
         content = (w.attrib.get("content") or "").strip()
         if ts is None or not content or content in _FILLER:
             continue
-        words.append(WordScore(word=content, score=_to100(ts)))
+        phonemes: list[PhonemeScore] = []
+        for ph in w.iter("phone"):
+            label = (ph.attrib.get("content") or "").strip()
+            if not label or label in _FILLER:
+                continue
+            phonemes.append(PhonemeScore(label=label, ok=ph.attrib.get("dp_message", "0") == "0"))
+        words.append(WordScore(word=content, score=_to100(ts), phonemes=phonemes))
 
     a = overall.attrib
     return PronunciationResult(
