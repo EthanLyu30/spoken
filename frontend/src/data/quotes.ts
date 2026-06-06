@@ -101,6 +101,30 @@ export const quotes: Quote[] = [
     source: "Gone with the Wind (1939)",
     usage: "安慰遭遇挫折的人，相信明天会更好时。",
   },
+  {
+    text: "Here's looking at you, kid.",
+    author: "Rick Blaine",
+    zh: "敬你，孩子。",
+    category: "movie",
+    source: "Casablanca (1942)",
+    usage: "浪漫或告别场合，俏皮地举杯、表达心意时。",
+  },
+  {
+    text: "Keep your friends close, but your enemies closer.",
+    author: "Michael Corleone",
+    zh: "亲近你的朋友，但要更亲近你的敌人。",
+    category: "movie",
+    source: "The Godfather Part II (1974)",
+    usage: "谈处世策略、如何对待竞争对手时。",
+  },
+  {
+    text: "There's some good in this world, Mr. Frodo, and it's worth fighting for.",
+    author: "Samwise Gamgee",
+    zh: "这世上仍有美好，弗罗多先生，值得我们为之奋战。",
+    category: "movie",
+    source: "The Lord of the Rings: The Two Towers (2002)",
+    usage: "在困境中鼓励别人坚守信念、别失去希望时。",
+  },
 
   // --- 演讲 Speeches & TED ---
   {
@@ -233,6 +257,22 @@ export const quotes: Quote[] = [
     source: "L.M. Montgomery, Anne of Green Gables",
     usage: "犯错后自我宽慰、满怀希望迎接新一天时。",
   },
+  {
+    text: "It was the best of times, it was the worst of times.",
+    author: "Charles Dickens",
+    zh: "那是最好的时代，也是最坏的时代。",
+    category: "literature",
+    source: "A Tale of Two Cities",
+    usage: "形容矛盾交织的时代或处境时，写作开头很好用。",
+  },
+  {
+    text: "To be, or not to be, that is the question.",
+    author: "William Shakespeare",
+    zh: "生存还是毁灭，这是个问题。",
+    category: "literature",
+    source: "Hamlet",
+    usage: "面对重大两难抉择时引用，略带戏剧色彩。",
+  },
 
   // --- 名人 Famous people ---
   {
@@ -302,6 +342,13 @@ export const quotes: Quote[] = [
     zh: "别盯着时钟，像它一样不停向前。",
     category: "people",
     usage: "鼓励专注坚持、别总想着时间快慢时。",
+  },
+  {
+    text: "Float like a butterfly, sting like a bee.",
+    author: "Muhammad Ali",
+    zh: "像蝴蝶一样飞舞，像蜜蜂一样蜇人。",
+    category: "people",
+    usage: "形容灵活敏捷、充满自信的宣言，也常用于比赛/体育语境。",
   },
 
   // --- 谚语 Proverbs (traditional, no single author) ---
