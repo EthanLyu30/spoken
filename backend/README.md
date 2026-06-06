@@ -50,6 +50,9 @@ uvicorn app.main:app --reload
 | `POST` | `/api/tts` | 文本转语音（讯飞），返回 mp3，让 Pip 朗读 |
 | `POST` | `/api/asr` | 语音转文本（讯飞），上传 16k 单声道 PCM，返回转写 |
 | `POST` | `/api/pronunciation` | 发音评测（讯飞 ISE）：16k PCM + 参考文本 `?text=`，返回词级打分 |
+| `POST` | `/api/hint` | 卡壳提示：根据对话给 2-3 句可参考的回答（DeepSeek） |
+| `POST` `GET` | `/api/words` | 生词本：保存 / 列出收藏的词（缺释义时 DeepSeek 补全） |
+| `PATCH` `DELETE` | `/api/words/{id}` | 标记掌握 / 删除 |
 
 `POST /api/chat` 接收场景 id 与历史消息，返回 AI 陪练的下一句话。历史为空时直接返回脚本化开场白（不调用模型）；有用户消息时调用 DeepSeek，因此需要在 `.env` 中配置 `DEEPSEEK_API_KEY`。
 
