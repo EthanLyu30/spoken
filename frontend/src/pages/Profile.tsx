@@ -5,9 +5,13 @@ import {
   Loader2,
   Lock,
   MessageSquare,
+  Mic,
+  Repeat,
+  Rocket,
   RotateCcw,
   Sparkles,
   Star,
+  Timer,
   Trophy,
   Volume2,
 } from "lucide-react";
@@ -64,13 +68,25 @@ export default function Profile() {
   const todayGoal = stats?.today_goal ?? 3;
   const goalPct = Math.min(100, (todayCount / todayGoal) * 100);
 
+  const bestPron = practice
+    .filter((p) => p.kind === "pronunciation")
+    .reduce((m, p) => Math.max(m, p.score), 0);
+  const interviewCount = practice.filter((p) => p.kind === "interview").length;
+  const reviewedCount = words.filter((w) => (w.box ?? 0) > 0).length;
+
   const badges = [
     { icon: Star, title: "初次开口", desc: "完成第一次对话", earned: sessionCount >= 1 },
     { icon: Flame, title: "三日连击", desc: "连续练习 3 天", earned: streak >= 3 },
+    { icon: Flame, title: "一周不断", desc: "连续练习 7 天", earned: streak >= 7 },
     { icon: MessageSquare, title: "话痨", desc: "累计 10 次对话", earned: sessionCount >= 10 },
     { icon: Sparkles, title: "词汇收藏家", desc: "收藏 10 个词", earned: wordCount >= 10 },
+    { icon: Sparkles, title: "百词斩", desc: "收藏 50 个词", earned: wordCount >= 50 },
+    { icon: Repeat, title: "复习标兵", desc: "复习过 10 个词", earned: reviewedCount >= 10 },
+    { icon: Mic, title: "发音达人", desc: "跟读得分 ≥ 90", earned: bestPron >= 90 },
+    { icon: Timer, title: "口语考官", desc: "完成 3 次限时问答", earned: interviewCount >= 3 },
     { icon: Trophy, title: "高分达人", desc: "单次总分 ≥ 90", earned: best >= 90 },
     { icon: Award, title: "场景探索者", desc: "体验 5 个不同场景", earned: distinct >= 5 },
+    { icon: Rocket, title: "升级达人", desc: "等级达到 Lv.3", earned: level >= 3 },
   ];
   const earnedCount = badges.filter((b) => b.earned).length;
 
@@ -102,6 +118,8 @@ export default function Profile() {
           <Stat icon={<Flame className="h-4 w-4" />} value={streak} label="连续天数" />
           <Stat icon={<Trophy className="h-4 w-4" />} value={avg || "—"} label="平均分" />
         </div>
+
+        <StreakCard streak={streak} />
 
         <section className="card mt-5 p-6">
           <div className="flex items-center gap-4">
@@ -312,6 +330,41 @@ function VoiceSettings() {
         {previewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Volume2 className="h-4 w-4" />}
         {previewing ? "播放中…" : "试听"}
       </button>
+    </section>
+  );
+}
+
+function StreakCard({ streak }: { streak: number }) {
+  const milestones = [3, 7, 14, 30];
+  const next = milestones.find((m) => m > streak);
+  return (
+    <section className="card mt-5 flex items-center gap-4 p-6">
+      <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-[#fff0dd]">
+        <Flame className="h-8 w-8 text-[#e07f1c]" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="font-display text-lg font-semibold text-ink">🔥 {streak} 天连击</p>
+        <p className="mt-0.5 text-sm text-muted">
+          {streak === 0
+            ? "今天开练，点燃你的第一团火苗！"
+            : next
+              ? `再坚持 ${next - streak} 天，解锁 ${next} 天里程碑！`
+              : "连击王者，继续保持！"}
+        </p>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {milestones.map((m) => (
+            <span
+              key={m}
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[0.6rem] font-bold",
+                streak >= m ? "bg-[#ffe0b8] text-[#e07f1c]" : "bg-surface-2 text-muted",
+              )}
+            >
+              {m} 天
+            </span>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
