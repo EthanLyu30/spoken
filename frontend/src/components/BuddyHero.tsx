@@ -1,8 +1,11 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Flame, Sparkles, Target } from "lucide-react";
 import { Buddy } from "./Buddy";
 import { Ring } from "./ui/Ring";
 import { ProgressBar } from "./ui/ProgressBar";
 import { StatChip } from "./StatChip";
+import { getWords } from "../lib/api";
 import { userProgress } from "../data/progress";
 
 interface BuddyHeroProps {
@@ -14,6 +17,15 @@ export function BuddyHero({ greeting }: BuddyHeroProps) {
   const p = userProgress;
   const xpPct = (p.xp / p.xpToNext) * 100;
   const goalPct = (p.todayMinutes / p.goalMinutes) * 100;
+  const [wordCount, setWordCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    getWords(ctrl.signal)
+      .then((ws) => setWordCount(ws.length))
+      .catch(() => undefined);
+    return () => ctrl.abort();
+  }, []);
 
   return (
     <section className="relative overflow-hidden rounded-huge border border-border bg-surface p-6 shadow-pop md:p-9">
@@ -56,8 +68,24 @@ export function BuddyHero({ greeting }: BuddyHeroProps) {
 
           <div className="flex flex-wrap gap-2.5">
             <StatChip icon={<Flame className="h-4 w-4" />} value={p.streakDays} label="天连续" tint="#fff0dd" fg="#e07f1c" />
-            <StatChip icon={<Sparkles className="h-4 w-4" />} value={p.wordsLearned} label="收集词" tint="#e6f4fc" fg="#2c8fc6" />
-            <StatChip icon={<Target className="h-4 w-4" />} value={`${Math.round(goalPct)}%`} label="今日目标" tint="#e2f6ee" fg="#2b9b70" />
+            <Link to="/words" className="transition-transform hover:-translate-y-0.5" aria-label="打开生词本">
+              <StatChip
+                icon={<Sparkles className="h-4 w-4" />}
+                value={wordCount ?? p.wordsLearned}
+                label="收集词"
+                tint="#e6f4fc"
+                fg="#2c8fc6"
+              />
+            </Link>
+            <Link to="/progress" className="transition-transform hover:-translate-y-0.5" aria-label="查看进度">
+              <StatChip
+                icon={<Target className="h-4 w-4" />}
+                value={`${Math.round(goalPct)}%`}
+                label="今日目标"
+                tint="#e2f6ee"
+                fg="#2b9b70"
+              />
+            </Link>
           </div>
         </div>
       </div>

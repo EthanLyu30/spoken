@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Flame } from "lucide-react";
 import { BuddyHero } from "../components/BuddyHero";
 import { JourneyPath } from "../components/JourneyPath";
@@ -6,8 +7,9 @@ import { BackendStatus } from "../components/BackendStatus";
 import { StatChip } from "../components/StatChip";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
-import { chapters, getScenario, scenarios, type Scenario } from "../data/scenarios";
+import { chapters, getScenario, type Scenario } from "../data/scenarios";
 import { userProgress } from "../data/progress";
+import { cn } from "../lib/utils";
 
 function greetingFor(d: Date): string {
   const h = d.getHours();
@@ -19,6 +21,11 @@ function greetingFor(d: Date): string {
 
 export default function Home() {
   const greeting = greetingFor(new Date());
+  const [activeChapter, setActiveChapter] = useState(0);
+  const chapter = chapters[activeChapter];
+  const chapterScenarios = chapter.ids
+    .map((cid) => getScenario(cid))
+    .filter((s): s is Scenario => Boolean(s));
 
   return (
     <div className="min-h-screen pb-24">
@@ -41,33 +48,32 @@ export default function Home() {
         </div>
 
         <section className="mt-12">
-          <div className="mb-7 flex items-end justify-between gap-4">
-            <div>
-              <p className="eyebrow">Your journey · 闯关地图</p>
-              <h2 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">今天来练哪一关？</h2>
-            </div>
-            <span className="hidden text-sm font-semibold text-muted sm:block">
-              {scenarios.length} 个场景 · 跟着 Pip 一路通关
-            </span>
+          <p className="eyebrow">Your journey · 闯关地图</p>
+          <h2 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">今天来练哪一关？</h2>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {chapters.map((ch, i) => (
+              <button
+                key={ch.title}
+                type="button"
+                onClick={() => setActiveChapter(i)}
+                className={cn(
+                  "rounded-full px-4 py-2 text-sm font-bold transition-transform active:translate-y-0.5",
+                  i === activeChapter
+                    ? "bg-coral text-primary-fg shadow-pop"
+                    : "border border-border bg-surface text-ink shadow-soft hover:-translate-y-0.5",
+                )}
+              >
+                {ch.titleZh}
+              </button>
+            ))}
           </div>
 
-          <div className="space-y-12">
-            {chapters.map((ch) => {
-              const items = ch.ids
-                .map((cid) => getScenario(cid))
-                .filter((s): s is Scenario => Boolean(s));
-              if (items.length === 0) return null;
-              return (
-                <div key={ch.title}>
-                  <div className="mb-1 flex items-baseline gap-2">
-                    <h3 className="font-display text-xl font-semibold text-ink">{ch.titleZh}</h3>
-                    <span className="text-sm font-semibold text-muted">{ch.title}</span>
-                  </div>
-                  <JourneyPath scenarios={items} />
-                </div>
-              );
-            })}
-          </div>
+          <p className="mt-3 text-sm font-semibold text-muted">
+            {chapter.title} · {chapterScenarios.length} 关
+          </p>
+
+          <JourneyPath key={chapter.title} scenarios={chapterScenarios} />
         </section>
       </main>
 
