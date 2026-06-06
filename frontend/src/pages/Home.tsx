@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 import { Flame } from "lucide-react";
 import { BuddyHero } from "../components/BuddyHero";
 import { JourneyPath } from "../components/JourneyPath";
@@ -6,6 +5,7 @@ import { Wordmark } from "../components/Wordmark";
 import { BackendStatus } from "../components/BackendStatus";
 import { StatChip } from "../components/StatChip";
 import { PlayfulBackground } from "../components/PlayfulBackground";
+import { BottomNav } from "../components/BottomNav";
 import { chapters, getScenario, scenarios, type Scenario } from "../data/scenarios";
 import { userProgress } from "../data/progress";
 
@@ -21,32 +21,18 @@ export default function Home() {
   const greeting = greetingFor(new Date());
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen pb-24">
       <PlayfulBackground />
 
       <header className="mx-auto flex w-full max-w-5xl items-center justify-between px-5 pt-6 sm:px-8">
         <Wordmark />
-        <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-          <Link
-            to="/words"
-            className="rounded-full border border-border bg-surface px-4 py-2 text-sm font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
-          >
-            生词本
-          </Link>
-          <Link
-            to="/progress"
-            className="rounded-full border border-border bg-surface px-4 py-2 text-sm font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
-          >
-            我的进度
-          </Link>
-          <StatChip
-            icon={<Flame className="h-4 w-4" />}
-            value={userProgress.streakDays}
-            label="天连续"
-            tint="#fff0dd"
-            fg="#e07f1c"
-          />
-        </div>
+        <StatChip
+          icon={<Flame className="h-4 w-4" />}
+          value={userProgress.streakDays}
+          label="天连续"
+          tint="#fff0dd"
+          fg="#e07f1c"
+        />
       </header>
 
       <main className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-8">
@@ -89,6 +75,7 @@ export default function Home() {
         <span className="text-sm font-semibold text-muted">Spoken · 和 Pip 一起练英语口语</span>
         <BackendStatus />
       </footer>
+      <BottomNav />
     </div>
   );
 }
