@@ -94,6 +94,16 @@ export default {
           "0%,100%": { transform: "rotate(-3deg)" },
           "50%": { transform: "rotate(3deg)" },
         },
+        drift: {
+          "0%,100%": { transform: "translate(0,0)" },
+          "33%": { transform: "translate(22px,-18px)" },
+          "66%": { transform: "translate(-16px,14px)" },
+        },
+        fall: {
+          "0%": { transform: "translateY(-12vh) rotate(0deg)", opacity: "0" },
+          "12%": { opacity: "1" },
+          "100%": { transform: "translateY(112vh) rotate(380deg)", opacity: "0.9" },
+        },
       },
       animation: {
         bob: "bob 3.4s ease-in-out infinite",
@@ -104,6 +114,8 @@ export default {
         pulsering: "pulsering 1.8s ease-out infinite",
         sparkle: "sparkle 2.6s ease-in-out infinite",
         wiggle: "wiggle 0.5s ease-in-out infinite",
+        drift: "drift 16s ease-in-out infinite",
+        fall: "fall 4s linear infinite",
       },
     },
   },

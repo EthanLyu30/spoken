@@ -275,7 +275,15 @@ export default function Conversation() {
 
   return (
     <div className="flex h-screen flex-col">
-      <PlayfulBackground />
+      <PlayfulBackground accent={t.base} />
+      {ScenarioIcon && (
+        <ScenarioIcon
+          aria-hidden
+          className="pointer-events-none fixed -right-10 top-20 -z-10 h-80 w-80 opacity-[0.05]"
+          style={{ color: t.base }}
+          strokeWidth={1.25}
+        />
+      )}
 
       <header className="mx-auto flex w-full max-w-2xl shrink-0 items-center justify-between gap-3 px-5 pt-6">
         <div className="flex shrink-0 items-center gap-2">
