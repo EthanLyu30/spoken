@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.data import scenarios as catalog
 from app.schemas.tts import TtsRequest
-from app.services.xf_tts import XfTtsClient, XfTtsError, pcm16_to_wav
+from app.services.xf_tts import XfTtsClient, XfTtsError, pcm16_to_wav, smooth_silences
 
 router = APIRouter(tags=["tts"])
 
@@ -35,4 +35,5 @@ async def tts(
         )
     except XfTtsError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return Response(content=pcm16_to_wav(pcm), media_type="audio/wav")
+    # Collapse the engine's over-long inter-word gaps so speech sounds connected.
+    return Response(content=pcm16_to_wav(smooth_silences(pcm)), media_type="audio/wav")

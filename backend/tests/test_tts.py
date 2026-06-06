@@ -1,8 +1,10 @@
+import array
+
 from fastapi.testclient import TestClient
 
 from app.api.tts import get_tts_client
 from app.main import app
-from app.services.xf_tts import XfTtsError
+from app.services.xf_tts import SAMPLE_RATE, XfTtsError, smooth_silences
 
 client = TestClient(app)
 
@@ -80,3 +82,24 @@ def test_tts_service_error_maps_to_503():
 
 def test_tts_rejects_empty_text():
     assert client.post("/api/tts", json={"text": ""}).status_code == 422
+
+
+def test_smooth_silences_shortens_internal_gap_and_trims_edges():
+    rate = SAMPLE_RATE
+    tone = array.array("h", [8000 if (i // 80) % 2 == 0 else -8000 for i in range(rate // 5)])  # 200ms
+    long_sil = array.array("h", [0] * (rate // 2))  # 500ms internal silence
+    edge_sil = array.array("h", [0] * (rate // 4))  # 250ms leading + trailing
+    pcm = (edge_sil + tone + long_sil + tone + edge_sil).tobytes()
+    out = smooth_silences(pcm)
+    # Internal gap collapsed and leading/trailing silence removed.
+    assert len(out) < len(pcm)
+    # Both spoken segments survive.
+    assert len(out) > len(tone.tobytes())
+
+
+def test_smooth_silences_keeps_continuous_speech():
+    rate = SAMPLE_RATE
+    tone = array.array("h", [6000 if (i // 80) % 2 == 0 else -6000 for i in range(rate)])  # 1s buzz
+    pcm = tone.tobytes()
+    # No long internal silence -> essentially unchanged.
+    assert smooth_silences(pcm) == pcm
