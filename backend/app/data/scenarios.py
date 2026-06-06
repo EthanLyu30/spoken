@@ -357,27 +357,28 @@ def get_public(scenario_id: str) -> ScenarioPublic | None:
     return scenario.public() if scenario else None
 
 
-# Each scenario partner gets a distinct native-English iFlytek voice for
-# character (all verified available on the app). Falls back to the default.
-DEFAULT_VOICE = "x5_enus_flossie_flow"
-_VOICES: dict[str, str] = {
-    "interview": "henry",  # Alex, male, professional
-    "cafe": "x5_enus_flossie_flow",  # cheerful barista
-    "standup": "x4_enus_luna_formal",  # Sam, teammate
-    "airport": "x4_enus_laura_education",  # check-in agent
-    "doctor": "x3_enus_emma_assist",  # Dr. Lee, gentle
-    "party": "x4_lindsey_formal",  # Sam, friendly guest
-    "restaurant": "x4_lindsey_formal",
-    "shopping": "x3_enus_emma_assist",
-    "hotel": "x4_enus_laura_education",
-    "directions": "x5_enus_flossie_flow",
-    "presentation": "henry",
-    "networking": "x4_enus_luna_formal",
-    "phone": "x4_enus_luna_formal",
-    "friend": "x5_enus_flossie_flow",
+# Each scenario gets a native-English voice + prosody (speed/pitch 0-100,
+# 50 = neutral) so the emotion fits the scene: lively for friends/parties,
+# calm for the doctor, measured for an interview, etc.
+DEFAULT_VOICE: dict[str, object] = {"vcn": "x5_enus_flossie_flow", "speed": 54, "pitch": 52}
+_VOICES: dict[str, dict[str, object]] = {
+    "interview": {"vcn": "henry", "speed": 52, "pitch": 50},
+    "cafe": {"vcn": "x5_enus_flossie_flow", "speed": 56, "pitch": 54},
+    "standup": {"vcn": "x4_enus_luna_formal", "speed": 55, "pitch": 52},
+    "airport": {"vcn": "x4_enus_laura_education", "speed": 52, "pitch": 50},
+    "doctor": {"vcn": "x3_enus_emma_assist", "speed": 46, "pitch": 48},
+    "party": {"vcn": "x4_lindsey_formal", "speed": 60, "pitch": 56},
+    "restaurant": {"vcn": "x4_lindsey_formal", "speed": 53, "pitch": 52},
+    "shopping": {"vcn": "x3_enus_emma_assist", "speed": 55, "pitch": 53},
+    "hotel": {"vcn": "x4_enus_laura_education", "speed": 51, "pitch": 50},
+    "directions": {"vcn": "x5_enus_flossie_flow", "speed": 54, "pitch": 53},
+    "presentation": {"vcn": "henry", "speed": 50, "pitch": 50},
+    "networking": {"vcn": "x4_enus_luna_formal", "speed": 57, "pitch": 54},
+    "phone": {"vcn": "x4_enus_luna_formal", "speed": 53, "pitch": 50},
+    "friend": {"vcn": "x5_enus_flossie_flow", "speed": 60, "pitch": 56},
 }
 
 
-def voice_for(scenario_id: str | None) -> str:
-    """The iFlytek voice (vcn) for a scenario, or the default."""
+def voice_for(scenario_id: str | None) -> dict[str, object]:
+    """Voice + prosody config for a scenario, or the default."""
     return _VOICES.get(scenario_id or "", DEFAULT_VOICE)

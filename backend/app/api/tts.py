@@ -18,9 +18,14 @@ def get_tts_client() -> XfTtsClient:
 async def tts(
     req: TtsRequest, client: XfTtsClient = Depends(get_tts_client)
 ) -> Response:
-    voice = catalog.voice_for(req.scenario_id)
+    cfg = catalog.voice_for(req.scenario_id)
     try:
-        audio = await client.synthesize(req.text, vcn=voice)
+        audio = await client.synthesize(
+            req.text,
+            vcn=str(cfg["vcn"]),
+            speed=int(cfg["speed"]),  # type: ignore[arg-type]
+            pitch=int(cfg["pitch"]),  # type: ignore[arg-type]
+        )
     except XfTtsError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return Response(content=audio, media_type="audio/mpeg")
