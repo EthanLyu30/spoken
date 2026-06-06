@@ -5,6 +5,7 @@ import Report from "./pages/Report";
 import Progress from "./pages/Progress";
 import WordBag from "./pages/WordBag";
 import Profile from "./pages/Profile";
+import Daily from "./pages/Daily";
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
       <Route path="/progress" element={<Progress />} />
       <Route path="/words" element={<WordBag />} />
       <Route path="/me" element={<Profile />} />
+      <Route path="/daily" element={<Daily />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
