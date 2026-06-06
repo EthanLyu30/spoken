@@ -5,7 +5,7 @@ import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import { Button } from "../components/ui/Button";
-import { deleteWord, getWords, patchWord, postWord, type Word } from "../lib/api";
+import { deleteWord, getWords, patchWord, postWord, reviewWord, type Word } from "../lib/api";
 import { speakText } from "../lib/speech";
 import { getScenario } from "../data/scenarios";
 import { themeFor } from "../lib/theme";
@@ -14,11 +14,20 @@ import { cn } from "../lib/utils";
 const backLink =
   "inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5";
 
+/** A word is due for review when it isn't mastered and its due date has passed. */
+function isDue(w: Word): boolean {
+  if (w.mastered) return false;
+  if (!w.due_at) return true;
+  const due = new Date(w.due_at.endsWith("Z") ? w.due_at : `${w.due_at}Z`);
+  return Number.isNaN(due.getTime()) || due.getTime() <= Date.now();
+}
+
 export default function WordBag() {
   const [words, setWords] = useState<Word[] | null>(null);
   const [error, setError] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
   const [review, setReview] = useState(false);
+  const [deck, setDeck] = useState<Word[]>([]); // snapshot for the review session
   const [tab, setTab] = useState<"word" | "sentence">("word");
   const [newWord, setNewWord] = useState("");
   const [adding, setAdding] = useState(false);
@@ -62,6 +71,18 @@ export default function WordBag() {
   const wordCount = all.filter((w) => kindOf(w) === "word").length;
   const sentCount = all.filter((w) => kindOf(w) === "sentence").length;
   const active = all.filter((w) => kindOf(w) === tab);
+  const dueCount = active.filter(isDue).length;
+
+  function startReview() {
+    const dueNow = active.filter(isDue);
+    const pool = dueNow.length ? dueNow : active.filter((w) => !w.mastered);
+    if (!pool.length) return;
+    setDeck(pool);
+    setReview(true);
+  }
+  function onReviewed(updated: Word) {
+    setWords((ws) => (ws ? ws.map((x) => (x.id === updated.id ? updated : x)) : ws));
+  }
 
   return (
     <div className="min-h-screen pb-24">
@@ -74,10 +95,11 @@ export default function WordBag() {
         {active.length > 0 && (
           <button
             type="button"
-            onClick={() => setReview((r) => !r)}
+            onClick={() => (review ? setReview(false) : startReview())}
             className="inline-flex items-center gap-1.5 rounded-full bg-coral px-4 py-2 text-sm font-bold text-primary-fg shadow-pop transition-transform active:translate-y-0.5"
           >
-            <BookOpen className="h-4 w-4" /> {review ? "列表" : "复习"}
+            <BookOpen className="h-4 w-4" />
+            {review ? "列表" : dueCount > 0 ? `复习 ${dueCount}` : "复习"}
           </button>
         )}
       </header>
@@ -163,7 +185,7 @@ export default function WordBag() {
                 {tab === "word" ? "还没有收藏单词，上面加一个吧。" : "还没有收藏句子，去「金句」收藏几句。"}
               </p>
             ) : review ? (
-              <Flashcards words={active} onMaster={toggleMaster} />
+              <ReviewDeck deck={deck} onReviewed={onReviewed} onDone={() => setReview(false)} />
             ) : (
               <ul className="space-y-3">
                 {active.map((w) => {
@@ -249,18 +271,51 @@ export default function WordBag() {
   );
 }
 
-function Flashcards({ words, onMaster }: { words: Word[]; onMaster: (w: Word) => void }) {
+/** Spaced-repetition review: flip the card, then grade 记得 / 忘了. */
+function ReviewDeck({
+  deck,
+  onReviewed,
+  onDone,
+}: {
+  deck: Word[];
+  onReviewed: (w: Word) => void;
+  onDone: () => void;
+}) {
   const [i, setI] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const w = words[i % words.length];
-  function next() {
-    setFlipped(false);
-    setI((x) => (x + 1) % words.length);
+  const [busy, setBusy] = useState(false);
+  const [stats, setStats] = useState({ know: 0, again: 0 });
+  const w = deck[i];
+
+  if (!w) {
+    return (
+      <section className="card grid place-items-center gap-3 p-8 text-center">
+        <Buddy mood="cheer" size={120} />
+        <h3 className="font-display text-xl font-semibold text-ink">复习完成！</h3>
+        <p className="text-sm text-muted">
+          记得 {stats.know} · 待加强 {stats.again}
+        </p>
+        <p className="text-xs text-muted">记得的词会过段时间再出现，忘了的很快会再考你。</p>
+        <Button onClick={onDone}>回到列表</Button>
+      </section>
+    );
   }
+
+  async function answer(remembered: boolean) {
+    if (busy) return;
+    setBusy(true);
+    const updated = await reviewWord(w.id, remembered).catch(() => null);
+    if (updated) onReviewed(updated);
+    setStats((s) => (remembered ? { ...s, know: s.know + 1 } : { ...s, again: s.again + 1 }));
+    setFlipped(false);
+    setI((x) => x + 1);
+    setBusy(false);
+  }
+
   return (
     <section className="card grid place-items-center gap-4 p-8 text-center">
       <p className="text-xs font-bold uppercase tracking-wide text-muted">
-        {(i % words.length) + 1} / {words.length}
+        {i + 1} / {deck.length}
       </p>
       <button
         type="button"
@@ -276,18 +331,22 @@ function Flashcards({ words, onMaster }: { words: Word[]; onMaster: (w: Word) =>
           </div>
         )}
       </button>
-      <p className="text-xs text-muted">点卡片翻面看释义</p>
-      <div className="flex gap-3">
-        <Button variant="soft" onClick={next}>
-          下一个
-        </Button>
-        <Button
-          onClick={() => {
-            if (!w.mastered) onMaster(w);
-            next();
-          }}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => speakText(w.text)}
+          className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-ink"
         >
-          认识 ✓
+          <Volume2 className="h-3.5 w-3.5" /> 朗读
+        </button>
+        <span className="text-xs text-muted">点卡片翻面看释义</span>
+      </div>
+      <div className="flex gap-3">
+        <Button variant="soft" disabled={busy} onClick={() => answer(false)}>
+          忘了
+        </Button>
+        <Button disabled={busy} onClick={() => answer(true)}>
+          记得 ✓
         </Button>
       </div>
     </section>

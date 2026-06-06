@@ -412,6 +412,9 @@ export interface Word {
   kind: string; // "word" | "sentence"
   mastered: boolean;
   created_at: string;
+  box?: number; // spaced-repetition Leitner box
+  due_at?: string | null;
+  last_reviewed?: string | null;
 }
 
 export function getWords(signal?: AbortSignal): Promise<Word[]> {
@@ -431,6 +434,21 @@ export function postWord(
   return request<Word>("/api/words", {
     method: "POST",
     body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+/** Words whose spaced-repetition review is due (not yet mastered). */
+export function getDueWords(kind?: string, signal?: AbortSignal): Promise<Word[]> {
+  const q = kind ? `?kind=${kind}` : "";
+  return request<Word[]>(`/api/words/due${q}`, { signal });
+}
+
+/** Record an SRS review: remembered pushes the next review out, forgot resets it. */
+export function reviewWord(id: number, remembered: boolean, signal?: AbortSignal): Promise<Word> {
+  return request<Word>(`/api/words/${id}/review`, {
+    method: "POST",
+    body: JSON.stringify({ remembered }),
     signal,
   });
 }

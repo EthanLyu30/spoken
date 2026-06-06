@@ -25,3 +25,7 @@ class WordEntry(Base):
     kind: Mapped[str] = mapped_column(String(16), default="word", index=True)  # word | sentence
     mastered: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    # --- spaced repetition (Leitner) ---
+    box: Mapped[int] = mapped_column(Integer, default=0)
+    due_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    last_reviewed: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

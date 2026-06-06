@@ -51,6 +51,35 @@ def test_delete_missing_404():
     assert client.delete("/api/words/999999").status_code == 404
 
 
+def test_srs_review_updates_box_and_due():
+    r = client.post(
+        "/api/words",
+        json={"text": "srs-demo-word", "meaning": "m", "example": "e", "kind": "word"},
+    )
+    wid = r.json()["id"]
+    assert r.json()["box"] == 0  # new word starts in box 0
+
+    # New words are due immediately.
+    due = client.get("/api/words/due?kind=word").json()
+    assert any(w["id"] == wid for w in due)
+
+    # Remembering it bumps the box and pushes the due date out (no longer due).
+    rv = client.post(f"/api/words/{wid}/review", json={"remembered": True})
+    assert rv.status_code == 200 and rv.json()["box"] == 1
+    assert not any(w["id"] == wid for w in client.get("/api/words/due?kind=word").json())
+
+    # Forgetting resets it to box 0 and makes it due again.
+    rv2 = client.post(f"/api/words/{wid}/review", json={"remembered": False})
+    assert rv2.json()["box"] == 0
+    assert any(w["id"] == wid for w in client.get("/api/words/due?kind=word").json())
+
+    client.delete(f"/api/words/{wid}")
+
+
+def test_review_missing_404():
+    assert client.post("/api/words/999999/review", json={"remembered": True}).status_code == 404
+
+
 def test_add_is_idempotent_and_stores_kind():
     payload = {
         "text": "a unique sentence here",

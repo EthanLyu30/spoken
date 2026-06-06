@@ -17,6 +17,10 @@ class WordUpdate(BaseModel):
     mastered: bool
 
 
+class WordReview(BaseModel):
+    remembered: bool
+
+
 class Word(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -28,3 +32,6 @@ class Word(BaseModel):
     kind: str
     mastered: bool
     created_at: datetime
+    box: int = 0
+    due_at: datetime | None = None
+    last_reviewed: datetime | None = None
