@@ -8,7 +8,7 @@ import { Button } from "../components/ui/Button";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { useSession } from "../store/session";
 import { useCustomScene } from "../store/custom";
-import { postFeedback, postSession, postWord, type FeedbackResponse } from "../lib/api";
+import { deleteWord, postFeedback, postSession, postWord, type FeedbackResponse } from "../lib/api";
 import { getScenario } from "../data/scenarios";
 
 const SCORE_COLORS = ["#ff6f5e", "#ff9f45", "#41c08c", "#57b7e8"];
@@ -31,7 +31,8 @@ export default function Report() {
   const [feedback, setFeedback] = useState<FeedbackResponse | null>(null);
   const [loading, setLoading] = useState(hasSession);
   const [error, setError] = useState<string | null>(null);
-  const [savedWords, setSavedWords] = useState<Set<number>>(new Set());
+  // phrase index -> saved word id, so the chip can toggle collect / un-collect.
+  const [savedWords, setSavedWords] = useState<Map<number, number>>(new Map());
   const reqId = useRef(0);
 
   useEffect(() => {
@@ -202,23 +203,30 @@ export default function Report() {
                         <span className="text-xs text-muted">{p.note}</span>
                         <button
                           type="button"
-                          disabled={savedWords.has(i)}
+                          title={savedWords.has(i) ? "再次点击取消收藏" : "收藏到生词本"}
                           onClick={() => {
-                            setSavedWords((s) => new Set(s).add(i));
+                            const existing = savedWords.get(i);
+                            if (existing !== undefined) {
+                              setSavedWords((s) => {
+                                const n = new Map(s);
+                                n.delete(i);
+                                return n;
+                              });
+                              deleteWord(existing).catch(() =>
+                                setSavedWords((s) => new Map(s).set(i, existing)),
+                              );
+                              return;
+                            }
                             postWord({
                               text: p.text,
                               meaning: p.note,
                               scenario_id: scenarioId ?? "",
                               kind: "word",
-                            }).catch(() => {
-                              setSavedWords((s) => {
-                                const n = new Set(s);
-                                n.delete(i);
-                                return n;
-                              });
-                            });
+                            })
+                              .then((w) => setSavedWords((s) => new Map(s).set(i, w.id)))
+                              .catch(() => undefined);
                           }}
-                          className="text-[0.66rem] font-bold uppercase tracking-wide text-coral-deep disabled:text-muted"
+                          className="text-[0.66rem] font-bold uppercase tracking-wide text-coral-deep"
                         >
                           {savedWords.has(i) ? "已收藏 ✓" : "+ 收藏"}
                         </button>

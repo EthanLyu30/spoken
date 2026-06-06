@@ -3,7 +3,7 @@ import { Check, RefreshCw, Search, Sparkles, Volume2 } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { PronounceButton } from "../components/PronounceButton";
-import { getDailyLines, getWords, postWord, type DailyLine } from "../lib/api";
+import { deleteWord, getDailyLines, getWords, postWord, type DailyLine } from "../lib/api";
 import { speakText } from "../lib/speech";
 import {
   categoryLabels,
@@ -43,7 +43,8 @@ export default function Daily() {
   const [page, setPage] = useState(0);
   const [aiLines, setAiLines] = useState<DailyLine[] | null>(null);
   const [genState, setGenState] = useState<"idle" | "loading" | "error">("idle");
-  const [saved, setSaved] = useState<Set<string>>(new Set());
+  // text -> word id, so the collect button can toggle (collect / un-collect).
+  const [saved, setSaved] = useState<Map<string, number>>(new Map());
 
   const pool = useMemo(() => (cat === "all" ? quotes : quotes.filter((q) => q.category === cat)), [cat]);
   const base = dayOfYear() * SET_SIZE;
@@ -57,7 +58,7 @@ export default function Daily() {
   useEffect(() => {
     const ctrl = new AbortController();
     getWords(ctrl.signal)
-      .then((ws) => setSaved(new Set(ws.map((w) => w.text))))
+      .then((ws) => setSaved(new Map(ws.map((w) => [w.text, w.id]))))
       .catch(() => undefined);
     return () => ctrl.abort();
   }, []);
@@ -68,18 +69,26 @@ export default function Daily() {
     setAiLines(null);
   }
 
-  function save(q: Line) {
-    if (saved.has(q.text)) return;
-    setSaved((s) => new Set(s).add(q.text));
-    const src = sourceOf(q);
-    const meaning = `${q.zh} —— ${q.author}${src ? `《${src}》` : ""}`;
-    postWord({ text: q.text, meaning, kind: "sentence" }).catch(() =>
+  async function toggleSave(q: Line) {
+    const existingId = saved.get(q.text);
+    if (existingId !== undefined) {
+      // Un-collect: remove optimistically, restore on failure.
       setSaved((s) => {
-        const n = new Set(s);
+        const n = new Map(s);
         n.delete(q.text);
         return n;
-      }),
-    );
+      });
+      deleteWord(existingId).catch(() => setSaved((s) => new Map(s).set(q.text, existingId)));
+      return;
+    }
+    const src = sourceOf(q);
+    const meaning = `${q.zh} —— ${q.author}${src ? `《${src}》` : ""}`;
+    try {
+      const w = await postWord({ text: q.text, meaning, kind: "sentence" });
+      setSaved((s) => new Map(s).set(q.text, w.id));
+    } catch {
+      /* ignore */
+    }
   }
 
   function shuffle() {
@@ -182,9 +191,14 @@ export default function Daily() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => save(q)}
-                    disabled={saved.has(q.text)}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5 disabled:text-muted"
+                    onClick={() => toggleSave(q)}
+                    title={saved.has(q.text) ? "再次点击取消收藏" : "收藏到生词本"}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold shadow-soft transition-transform hover:-translate-y-0.5",
+                      saved.has(q.text)
+                        ? "bg-leaf/15 text-leaf-deep"
+                        : "border border-border bg-surface text-ink",
+                    )}
                   >
                     <Check className="h-3.5 w-3.5" /> {saved.has(q.text) ? "已收藏" : "收藏"}
                   </button>
