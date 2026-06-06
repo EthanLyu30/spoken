@@ -4,6 +4,8 @@
  * In dev, requests to `/api/*` are proxied to the FastAPI server by Vite
  * (see vite.config.ts). In other environments, set VITE_API_BASE_URL.
  */
+import { useVoice } from "../store/voice";
+
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export interface HealthResponse {
@@ -182,10 +184,16 @@ export async function fetchTtsUrl(
   scenarioId?: string,
   signal?: AbortSignal,
 ): Promise<string> {
+  // Apply the user's voice overrides (null = follow the scenario voice).
+  const v = useVoice.getState();
+  const body: Record<string, unknown> = { text, scenario_id: scenarioId };
+  if (v.vcn) body.vcn = v.vcn;
+  if (v.speed != null) body.speed = v.speed;
+  if (v.pitch != null) body.pitch = v.pitch;
   const res = await fetch(`${BASE_URL}/api/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, scenario_id: scenarioId }),
+    body: JSON.stringify(body),
     signal,
   });
   if (!res.ok) throw new Error(`tts failed: ${res.status}`);
