@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, BookOpen, Check, Trash2, Volume2 } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
+import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import { Button } from "../components/ui/Button";
 import { deleteWord, fetchTtsUrl, getWords, patchWord, type Word } from "../lib/api";
@@ -56,7 +57,7 @@ export default function WordBag() {
   const mastered = words?.filter((w) => w.mastered).length ?? 0;
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen pb-24">
       <PlayfulBackground />
 
       <header className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-5 pt-6">
@@ -192,6 +193,7 @@ export default function WordBag() {
           </ul>
         )}
       </main>
+      <BottomNav />
     </div>
   );
 }

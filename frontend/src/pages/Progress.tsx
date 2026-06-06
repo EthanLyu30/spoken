@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import type { EChartsOption } from "echarts";
 import { PlayfulBackground } from "../components/PlayfulBackground";
+import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import { Button } from "../components/ui/Button";
 import { EChart } from "../components/EChart";
@@ -107,7 +108,7 @@ export default function Progress() {
   }, [latest]);
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen pb-24">
       <PlayfulBackground />
 
       <header className="mx-auto w-full max-w-3xl px-5 pt-6">
@@ -195,6 +196,7 @@ export default function Progress() {
           </div>
         )}
       </main>
+      <BottomNav />
     </div>
   );
 }
