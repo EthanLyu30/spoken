@@ -32,7 +32,7 @@ function dayOfYear(): number {
 }
 
 /** A wrap-around slice of `n` items starting at `start`. */
-function window<T>(arr: T[], start: number, n: number): T[] {
+function rotateWindow<T>(arr: T[], start: number, n: number): T[] {
   const len = arr.length;
   return Array.from({ length: Math.min(n, len) }, (_, i) => arr[(((start + i) % len) + len) % len]);
 }
@@ -45,7 +45,10 @@ export default function Daily() {
   const [saved, setSaved] = useState<Set<string>>(new Set());
 
   const base = dayOfYear() * SET_SIZE;
-  const curated = useMemo(() => window(quotes, base + page * SET_SIZE, SET_SIZE), [base, page]);
+  const curated = useMemo(
+    () => rotateWindow(quotes, base + page * SET_SIZE, SET_SIZE),
+    [base, page],
+  );
   const lines = aiLines ?? curated;
   const fromAi = aiLines !== null;
 
