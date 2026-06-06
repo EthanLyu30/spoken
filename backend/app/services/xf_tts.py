@@ -32,6 +32,9 @@ class XfTtsClient:
         *,
         vcn: str = "x5_enus_flossie_flow",
         aue: str = "lame",  # lame -> mp3; raw -> 16k PCM
+        speed: int = 54,  # 0-100, 50 = neutral
+        pitch: int = 52,  # 0-100, 50 = neutral
+        volume: int = 80,  # 0-100
     ) -> bytes:
         s = self._s
         if not (s.xf_app_id and s.xf_api_key and s.xf_api_secret):
@@ -43,6 +46,9 @@ class XfTtsClient:
             "business": {
                 "aue": aue,
                 "vcn": vcn,
+                "speed": speed,
+                "pitch": pitch,
+                "volume": volume,
                 "tte": "UTF8",
                 "auf": "audio/L16;rate=16000",
             },
