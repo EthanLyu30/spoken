@@ -8,22 +8,28 @@ client = TestClient(app)
 
 
 class _StubTts:
-    def __init__(self, audio: bytes = b"ID3fake-mp3-bytes") -> None:
-        self.audio = audio
+    def __init__(self, audio: bytes = b"\x00\x00\x01\x00\x02\x00\x03\x00") -> None:
+        self.audio = audio  # raw 16-bit PCM bytes
         self.vcn: str | None = None
+        self.aue: str | None = None
 
-    async def synthesize(self, text, *, vcn=None, **_kwargs):
+    async def synthesize(self, text, *, vcn=None, aue="raw", **_kwargs):
         self.vcn = vcn
+        self.aue = aue
         return self.audio
 
 
-def test_tts_returns_audio():
-    app.dependency_overrides[get_tts_client] = lambda: _StubTts()
+def test_tts_returns_wav_audio():
+    stub = _StubTts()
+    app.dependency_overrides[get_tts_client] = lambda: stub
     try:
         resp = client.post("/api/tts", json={"text": "Hello there"})
         assert resp.status_code == 200
-        assert resp.headers["content-type"] == "audio/mpeg"
-        assert resp.content == b"ID3fake-mp3-bytes"
+        assert resp.headers["content-type"] == "audio/wav"
+        # PCM is wrapped in a single WAV container for gapless playback.
+        assert resp.content[:4] == b"RIFF"
+        assert resp.content[8:12] == b"WAVE"
+        assert stub.aue == "raw"
     finally:
         app.dependency_overrides.clear()
 
