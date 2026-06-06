@@ -49,3 +49,17 @@ def test_patch_missing_404():
 
 def test_delete_missing_404():
     assert client.delete("/api/words/999999").status_code == 404
+
+
+def test_add_is_idempotent_and_stores_kind():
+    payload = {
+        "text": "a unique sentence here",
+        "meaning": "x",
+        "example": "y",
+        "kind": "sentence",
+    }
+    a = client.post("/api/words", json=payload)
+    b = client.post("/api/words", json=payload)
+    assert a.status_code == 201 and b.status_code == 201
+    assert a.json()["id"] == b.json()["id"]  # no duplicate row
+    assert a.json()["kind"] == "sentence"

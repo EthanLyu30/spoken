@@ -226,6 +226,7 @@ export interface Word {
   meaning: string;
   example: string;
   scenario_id: string;
+  kind: string; // "word" | "sentence"
   mastered: boolean;
   created_at: string;
 }
@@ -235,7 +236,13 @@ export function getWords(signal?: AbortSignal): Promise<Word[]> {
 }
 
 export function postWord(
-  payload: { text: string; scenario_id?: string; meaning?: string; example?: string },
+  payload: {
+    text: string;
+    scenario_id?: string;
+    meaning?: string;
+    example?: string;
+    kind?: string;
+  },
   signal?: AbortSignal,
 ): Promise<Word> {
   return request<Word>("/api/words", {

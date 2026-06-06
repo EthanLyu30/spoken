@@ -32,11 +32,24 @@ async def define_word(text: str, client: DeepSeekClient) -> tuple[str, str]:
         return "", ""
 
 
+def find_by_text(db: Session, text: str) -> WordEntry | None:
+    return db.scalars(select(WordEntry).where(WordEntry.text == text)).first()
+
+
 def create_word(
-    db: Session, text: str, scenario_id: str, meaning: str, example: str
+    db: Session,
+    text: str,
+    scenario_id: str,
+    meaning: str,
+    example: str,
+    kind: str = "word",
 ) -> WordEntry:
     entry = WordEntry(
-        text=text, scenario_id=scenario_id, meaning=meaning, example=example
+        text=text,
+        scenario_id=scenario_id,
+        meaning=meaning,
+        example=example,
+        kind=kind,
     )
     db.add(entry)
     db.commit()
