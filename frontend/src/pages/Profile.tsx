@@ -34,6 +34,7 @@ import {
 import { EChart } from "../components/EChart";
 import { listBrowserVoices, primeBrowserVoices, speakText } from "../lib/speech";
 import { useVoice, VOICE_OPTIONS, type VoiceEngine } from "../store/voice";
+import { resetOnboarding } from "../components/Onboarding";
 import { tokens } from "../lib/tokens";
 import { cn } from "../lib/utils";
 
@@ -174,6 +175,19 @@ export default function Profile() {
             ))}
           </div>
         </section>
+
+        <div className="mt-6 text-center">
+          <button
+            type="button"
+            onClick={() => {
+              resetOnboarding();
+              window.location.reload();
+            }}
+            className="text-sm font-semibold text-muted underline-offset-4 transition-colors hover:text-ink hover:underline"
+          >
+            重新查看新手引导
+          </button>
+        </div>
       </main>
 
       <BottomNav />
