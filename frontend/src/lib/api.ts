@@ -314,6 +314,7 @@ export interface DailyLine {
   text: string;
   author: string;
   zh: string;
+  usage?: string;
 }
 
 /** Ask DeepSeek for a fresh batch of short lines to shadow. */

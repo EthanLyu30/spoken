@@ -181,6 +181,11 @@ export default function Daily() {
                 <p className="mt-1.5 text-sm font-bold text-coral-deep">— {q.author}</p>
                 {src && <p className="mt-0.5 text-xs font-semibold text-muted">出处 · {src}</p>}
                 <p className="mt-1 text-sm text-muted">{q.zh}</p>
+                {q.usage && (
+                  <p className="mt-1.5 rounded-xl bg-surface-2 px-2.5 py-1.5 text-xs font-semibold text-leaf-deep">
+                    💬 场景 · {q.usage}
+                  </p>
+                )}
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
