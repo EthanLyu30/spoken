@@ -7,7 +7,7 @@ import { ProgressBar } from "../components/ui/ProgressBar";
 import { Button } from "../components/ui/Button";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { useSession } from "../store/session";
-import { postFeedback, postSession, type FeedbackResponse } from "../lib/api";
+import { postFeedback, postSession, postWord, type FeedbackResponse } from "../lib/api";
 import { getScenario } from "../data/scenarios";
 
 const SCORE_COLORS = ["#ff6f5e", "#ff9f45", "#41c08c", "#57b7e8"];
@@ -27,6 +27,7 @@ export default function Report() {
   const [feedback, setFeedback] = useState<FeedbackResponse | null>(null);
   const [loading, setLoading] = useState(hasSession);
   const [error, setError] = useState<string | null>(null);
+  const [savedWords, setSavedWords] = useState<Set<number>>(new Set());
   const reqId = useRef(0);
 
   useEffect(() => {
@@ -190,11 +191,32 @@ export default function Report() {
                 ) : (
                   <ul className="mt-4 space-y-2.5">
                     {feedback.phrases.map((p, i) => (
-                      <li key={i} className="flex flex-wrap items-baseline gap-2">
+                      <li key={i} className="flex flex-wrap items-center gap-2">
                         <span className="rounded-full bg-surface-2 px-3 py-1 text-sm font-semibold text-ink">
                           {p.text}
                         </span>
                         <span className="text-xs text-muted">{p.note}</span>
+                        <button
+                          type="button"
+                          disabled={savedWords.has(i)}
+                          onClick={() => {
+                            setSavedWords((s) => new Set(s).add(i));
+                            postWord({
+                              text: p.text,
+                              meaning: p.note,
+                              scenario_id: scenarioId ?? "",
+                            }).catch(() => {
+                              setSavedWords((s) => {
+                                const n = new Set(s);
+                                n.delete(i);
+                                return n;
+                              });
+                            });
+                          }}
+                          className="text-[0.66rem] font-bold uppercase tracking-wide text-coral-deep disabled:text-muted"
+                        >
+                          {savedWords.has(i) ? "已收藏 ✓" : "+ 收藏"}
+                        </button>
                       </li>
                     ))}
                   </ul>

@@ -17,6 +17,7 @@ from app.api import (
     scenarios,
     sessions,
     tts,
+    words,
 )
 from app.core.config import get_settings
 from app.db import init_db
@@ -47,6 +48,7 @@ app.include_router(tts.router, prefix="/api")
 app.include_router(asr.router, prefix="/api")
 app.include_router(pronunciation.router, prefix="/api")
 app.include_router(hint.router, prefix="/api")
+app.include_router(words.router, prefix="/api")
 
 # Create database tables (idempotent).
 init_db()

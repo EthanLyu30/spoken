@@ -219,3 +219,41 @@ export async function postHint(
   const data = (await res.json()) as { suggestions: string[] };
   return data.suggestions;
 }
+
+export interface Word {
+  id: number;
+  text: string;
+  meaning: string;
+  example: string;
+  scenario_id: string;
+  mastered: boolean;
+  created_at: string;
+}
+
+export function getWords(signal?: AbortSignal): Promise<Word[]> {
+  return request<Word[]>("/api/words", { signal });
+}
+
+export function postWord(
+  payload: { text: string; scenario_id?: string; meaning?: string; example?: string },
+  signal?: AbortSignal,
+): Promise<Word> {
+  return request<Word>("/api/words", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export function patchWord(id: number, mastered: boolean, signal?: AbortSignal): Promise<Word> {
+  return request<Word>(`/api/words/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ mastered }),
+    signal,
+  });
+}
+
+export async function deleteWord(id: number, signal?: AbortSignal): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/words/${id}`, { method: "DELETE", signal });
+  if (!res.ok) throw new Error(`delete word failed: ${res.status}`);
+}

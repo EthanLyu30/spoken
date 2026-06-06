@@ -26,7 +26,13 @@ export default function Home() {
 
       <header className="mx-auto flex w-full max-w-5xl items-center justify-between px-5 pt-6 sm:px-8">
         <Wordmark />
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
+          <Link
+            to="/words"
+            className="rounded-full border border-border bg-surface px-4 py-2 text-sm font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
+          >
+            生词本
+          </Link>
           <Link
             to="/progress"
             className="rounded-full border border-border bg-surface px-4 py-2 text-sm font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
