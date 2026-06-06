@@ -20,9 +20,11 @@ const ANSWER_SECONDS = 45;
 type Phase = "intro" | "quiz" | "scoring" | "results" | "error";
 type QPhase = "ready" | "recording" | "transcribing";
 
+const MAX_BAND = 6;
+
 function bandColor(score: number): string {
-  if (score >= 26) return "#2fa274";
-  if (score >= 18) return "#e07f1c";
+  if (score >= 5) return "#2fa274";
+  if (score >= 3) return "#e07f1c";
   return "#e6503d";
 }
 
@@ -240,16 +242,16 @@ export default function Interview() {
         {phase === "results" && result && (
           <>
             <section className="card flex items-center gap-5 p-6">
-              <Ring pct={(result.overall / 30) * 100} size={104} stroke={11} color={bandColor(result.overall)}>
+              <Ring pct={(result.overall / MAX_BAND) * 100} size={104} stroke={11} color={bandColor(result.overall)}>
                 <div className="text-center">
                   <div className="font-display text-2xl font-bold tabnum text-ink">{result.overall}</div>
-                  <div className="text-[0.58rem] font-bold uppercase text-muted">/ 30</div>
+                  <div className="text-[0.58rem] font-bold uppercase text-muted">/ {MAX_BAND}</div>
                 </div>
               </Ring>
               <div>
                 <p className="eyebrow">Your score · 总评</p>
                 <h1 className="mt-1 font-display text-2xl font-semibold text-ink">托福口语预估分</h1>
-                <p className="mt-1 text-sm text-muted">满分 30，对照托福独立口语评分标准</p>
+                <p className="mt-1 text-sm text-muted">满分 {MAX_BAND}，对照托福独立口语评分标准</p>
               </div>
             </section>
 
@@ -260,7 +262,7 @@ export default function Interview() {
                     <span className="text-xs font-bold text-muted">第 {i + 1} 题</span>
                     <span className="font-display text-lg font-bold tabnum" style={{ color: bandColor(r.score) }}>
                       {r.score}
-                      <span className="ml-1 text-xs font-bold text-muted">/30 · {r.level}</span>
+                      <span className="ml-1 text-xs font-bold text-muted">/{MAX_BAND} · {r.level}</span>
                     </span>
                   </div>
                   <h3 className="font-display font-semibold leading-snug text-ink">{r.question}</h3>

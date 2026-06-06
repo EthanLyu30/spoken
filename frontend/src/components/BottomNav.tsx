@@ -1,10 +1,11 @@
 import { NavLink } from "react-router-dom";
-import { BookOpen, Home, Quote, TrendingUp, User } from "lucide-react";
+import { BookOpen, Home, Quote, Timer, TrendingUp, User } from "lucide-react";
 import { cn } from "../lib/utils";
 
 const items = [
   { to: "/", icon: Home, label: "首页", end: true },
   { to: "/daily", icon: Quote, label: "金句", end: false },
+  { to: "/interview", icon: Timer, label: "问答", end: false },
   { to: "/words", icon: BookOpen, label: "生词本", end: false },
   { to: "/progress", icon: TrendingUp, label: "进度", end: false },
   { to: "/me", icon: User, label: "我的", end: false },

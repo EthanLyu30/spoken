@@ -39,12 +39,12 @@ def test_interview_questions_bad_json_502():
 def test_interview_score():
     payload = json.dumps(
         {
-            "overall": 24,
+            "overall": 5,
             "results": [
                 {
                     "question": "Do you prefer studying alone or in a group?",
                     "answer": "I prefer studying alone because...",
-                    "score": 24,
+                    "score": 5,
                     "level": "Good",
                     "feedback": "表达清晰，可再多举一个例子。",
                     "sample_answer": "Personally, I prefer studying alone...",
@@ -60,8 +60,8 @@ def test_interview_score():
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["overall"] == 24
-        assert body["results"][0]["score"] == 24
+        assert body["overall"] == 5
+        assert body["results"][0]["score"] == 5
         assert body["results"][0]["sample_answer"].startswith("Personally")
     finally:
         app.dependency_overrides.clear()
@@ -71,8 +71,8 @@ def test_interview_score_computes_overall_when_missing():
     payload = json.dumps(
         {
             "results": [
-                {"question": "Q1", "answer": "a", "score": 20, "level": "Fair", "feedback": "ok", "sample_answer": "s"},
-                {"question": "Q2", "answer": "b", "score": 30, "level": "Good", "feedback": "ok", "sample_answer": "s"},
+                {"question": "Q1", "answer": "a", "score": 4, "level": "Fair", "feedback": "ok", "sample_answer": "s"},
+                {"question": "Q2", "answer": "b", "score": 6, "level": "Good", "feedback": "ok", "sample_answer": "s"},
             ]
         }
     )
@@ -83,7 +83,7 @@ def test_interview_score_computes_overall_when_missing():
             json={"items": [{"question": "Q1", "answer": "a"}, {"question": "Q2", "answer": "b"}]},
         )
         assert resp.status_code == 200
-        assert resp.json()["overall"] == 25
+        assert resp.json()["overall"] == 5
     finally:
         app.dependency_overrides.clear()
 

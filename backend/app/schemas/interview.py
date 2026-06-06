@@ -19,12 +19,12 @@ class InterviewScoreRequest(BaseModel):
 class InterviewResult(BaseModel):
     question: str
     answer: str
-    score: int = Field(ge=0, le=30)
+    score: int = Field(ge=0, le=6)  # TOEFL-style per-question band, 0-6
     level: str
     feedback: str
     sample_answer: str
 
 
 class InterviewScoreResponse(BaseModel):
-    overall: int = Field(ge=0, le=30)
+    overall: float = Field(ge=0, le=6)
     results: list[InterviewResult]
