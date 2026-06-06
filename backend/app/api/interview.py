@@ -33,12 +33,12 @@ Rate each answer like an ETS independent speaking task, judging delivery, langua
 For EACH item return an object with:
 - "question": echo the question.
 - "answer": echo the transcript (may be empty).
-- "score": integer 0-30 (TOEFL speaking scale equivalent for this single answer; an empty or off-topic answer scores low).
+- "score": integer 0-6 (TOEFL-style band for this single answer; 6 = excellent, 0 = no/irrelevant answer).
 - "level": one of "Good", "Fair", "Limited", "Weak".
 - "feedback": 2-3 sentences in Chinese covering delivery / language / development, ending with one concrete, actionable tip.
-- "sample_answer": a natural, high-scoring (band 4) sample answer in English, about 100-130 words (~45 seconds spoken), directly answering the question.
+- "sample_answer": a natural, high-scoring (band 6) sample answer in English, about 100-130 words (~45 seconds spoken), directly answering the question.
 
-Return ONLY JSON: {"overall": <integer 0-30, the rounded average>, "results": [ ... in the same order as the input ]}."""
+Return ONLY JSON: {"overall": <number 0-6, the average of the scores>, "results": [ ... in the same order as the input ]}."""
 
 
 @router.get("/interview/questions", response_model=InterviewQuestions)
@@ -93,7 +93,8 @@ async def interview_score(
             raise ValueError("no results")
         overall = data.get("overall")
         if not isinstance(overall, (int, float)):
-            overall = round(sum(r.score for r in results) / len(results))
-        return InterviewScoreResponse(overall=int(overall), results=results)
+            overall = sum(r.score for r in results) / len(results)
+        overall = round(max(0.0, min(6.0, float(overall))), 1)
+        return InterviewScoreResponse(overall=overall, results=results)
     except (json.JSONDecodeError, ValidationError, ValueError, TypeError) as exc:
         raise HTTPException(status_code=502, detail="Could not score answers") from exc
