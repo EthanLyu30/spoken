@@ -25,11 +25,14 @@ def get_client() -> DeepSeekClient:
 async def chat(
     req: ChatRequest, client: DeepSeekClient = Depends(get_client)
 ) -> ChatResponse:
-    scenario = catalog.get_scenario(req.scenario_id)
-    if scenario is None:
-        raise HTTPException(
-            status_code=404, detail=f"Unknown scenario: {req.scenario_id}"
-        )
+    if req.custom is not None:
+        scenario = catalog.scene_from_custom(req.custom)
+    else:
+        scenario = catalog.get_scenario(req.scenario_id)
+        if scenario is None:
+            raise HTTPException(
+                status_code=404, detail=f"Unknown scenario: {req.scenario_id}"
+            )
 
     # No user turn yet -> return the scripted opener (no model call).
     if not any(m.role == "user" for m in req.messages):

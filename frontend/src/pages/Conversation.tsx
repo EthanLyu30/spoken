@@ -8,6 +8,7 @@ import {
   Phone,
   PhoneOff,
   Send,
+  Sparkles,
   Square,
   Volume2,
   VolumeX,
@@ -18,6 +19,7 @@ import { scenarioIcons } from "../lib/icons";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
 import { postChat, fetchTtsUrl, postAsr, postHint, type ChatMessage } from "../lib/api";
 import { useSession } from "../store/session";
+import { useCustomScene } from "../store/custom";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { startVoiceCall, type CallPhase, type VoiceCall } from "../lib/call";
 import { Buddy, type BuddyMood } from "../components/Buddy";
@@ -36,11 +38,15 @@ const localOpeners: Record<string, string> = {
 
 export default function Conversation() {
   const { scenarioId } = useParams();
-  const scenario = scenarioId ? getScenario(scenarioId) : undefined;
-  const id = scenario?.id ?? "";
+  const isCustom = scenarioId === "custom";
+  const customScene = useCustomScene((s) => s.scene);
+  const scenario = scenarioId && !isCustom ? getScenario(scenarioId) : undefined;
+  const id = isCustom ? "custom" : scenario?.id ?? "";
   const t = themeFor(id);
-  const ScenarioIcon = scenario ? scenarioIcons[scenario.icon] : null;
-  const fallbackOpener = (id && localOpeners[id]) || "Hi! Whenever you're ready, just say hello.";
+  const ScenarioIcon = scenario ? scenarioIcons[scenario.icon] : isCustom ? Sparkles : null;
+  const fallbackOpener =
+    (isCustom ? customScene?.opening_line : id ? localOpeners[id] : "") ||
+    "Hi! Whenever you're ready, just say hello.";
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -80,9 +86,19 @@ export default function Conversation() {
 
   // Fetch the scene opener once.
   useEffect(() => {
-    const ctrl = new AbortController();
     setBooting(true);
     setError(null);
+    // Custom scenes carry their opener with them — no catalogue / model call.
+    if (isCustom) {
+      if (!customScene) {
+        navigate("/custom", { replace: true });
+        return;
+      }
+      setMessages([{ role: "assistant", content: customScene.opening_line }]);
+      setBooting(false);
+      return;
+    }
+    const ctrl = new AbortController();
     if (!id) {
       setMessages([{ role: "assistant", content: fallbackOpener }]);
       setBooting(false);
@@ -160,7 +176,7 @@ export default function Conversation() {
     setError(null);
     setLoading(true);
     try {
-      const r = await postChat(id, next);
+      const r = await postChat(id, next, undefined, isCustom ? customScene ?? undefined : undefined);
       setMessages((m) => [...m, { role: "assistant", content: r.reply }]);
     } catch {
       setError("发送失败，请确认后端在运行后重试。");
@@ -213,7 +229,7 @@ export default function Conversation() {
             { role: "user", content: userText },
           ];
           setMessages(next);
-          const r = await postChat(id, next);
+          const r = await postChat(id, next, undefined, isCustom ? customScene ?? undefined : undefined);
           setMessages((m) => [...m, { role: "assistant", content: r.reply }]);
           return r.reply;
         },
@@ -308,7 +324,11 @@ export default function Conversation() {
             className="truncate rounded-full px-4 py-2 text-sm font-bold shadow-soft"
             style={{ background: t.soft, color: t.deep }}
           >
-            {scenario ? `${scenario.titleZh} · ${scenario.title}` : "Practice"}
+            {scenario
+              ? `${scenario.titleZh} · ${scenario.title}`
+              : isCustom
+                ? customScene?.title_zh || "自定义场景"
+                : "Practice"}
           </span>
           {hasUserTurn && (
             <button

@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import (
     asr,
     chat,
+    custom,
     daily,
     feedback,
     health,
@@ -51,6 +52,7 @@ app.include_router(pronunciation.router, prefix="/api")
 app.include_router(hint.router, prefix="/api")
 app.include_router(words.router, prefix="/api")
 app.include_router(daily.router, prefix="/api")
+app.include_router(custom.router, prefix="/api")
 
 # Create database tables (idempotent).
 init_db()

@@ -3,6 +3,7 @@
 from pydantic import BaseModel, Field
 
 from app.schemas.chat import ChatMessage
+from app.schemas.custom import CustomScene
 
 
 class SkillScore(BaseModel):
@@ -26,6 +27,8 @@ class Phrase(BaseModel):
 class FeedbackRequest(BaseModel):
     scenario_id: str = Field(min_length=1)
     messages: list[ChatMessage] = Field(default_factory=list, max_length=60)
+    # When present, assess against this user-defined scene (see ChatRequest).
+    custom: CustomScene | None = None
 
 
 class FeedbackResponse(BaseModel):

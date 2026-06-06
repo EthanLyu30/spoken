@@ -7,6 +7,7 @@ import { ProgressBar } from "../components/ui/ProgressBar";
 import { Button } from "../components/ui/Button";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { useSession } from "../store/session";
+import { useCustomScene } from "../store/custom";
 import { postFeedback, postSession, postWord, type FeedbackResponse } from "../lib/api";
 import { getScenario } from "../data/scenarios";
 
@@ -21,7 +22,10 @@ const savedSignatures = new Set<string>();
 export default function Report() {
   const scenarioId = useSession((s) => s.scenarioId);
   const messages = useSession((s) => s.messages);
-  const scenario = scenarioId ? getScenario(scenarioId) : undefined;
+  const isCustom = scenarioId === "custom";
+  const customScene = useCustomScene((s) => s.scene);
+  const scenario = scenarioId && !isCustom ? getScenario(scenarioId) : undefined;
+  const sceneLabel = scenario?.titleZh ?? (isCustom ? customScene?.title_zh : undefined);
   const hasSession = !!scenarioId && messages.some((m) => m.role === "user");
 
   const [feedback, setFeedback] = useState<FeedbackResponse | null>(null);
@@ -36,7 +40,7 @@ export default function Report() {
     const myId = ++reqId.current;
     setLoading(true);
     setError(null);
-    postFeedback(scenarioId, messages, ctrl.signal)
+    postFeedback(scenarioId, messages, ctrl.signal, isCustom ? customScene ?? undefined : undefined)
       .then((f) => {
         if (myId !== reqId.current) return;
         setFeedback(f);
@@ -121,7 +125,7 @@ export default function Report() {
               <div className="grid items-center gap-6 md:grid-cols-[auto_1fr_auto]">
                 <Buddy mood="cheer" size={128} className="mx-auto" />
                 <div className="text-center md:text-left">
-                  <p className="eyebrow">课后小结 · Debrief{scenario ? ` · ${scenario.titleZh}` : ""}</p>
+                  <p className="eyebrow">课后小结 · Debrief{sceneLabel ? ` · ${sceneLabel}` : ""}</p>
                   <h1 className="mt-1 font-display text-2xl font-semibold leading-snug text-ink md:text-3xl">
                     {feedback.summary}
                   </h1>

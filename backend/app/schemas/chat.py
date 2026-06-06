@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.custom import CustomScene
+
 Role = Literal["user", "assistant"]
 
 
@@ -16,6 +18,8 @@ class ChatRequest(BaseModel):
     scenario_id: str = Field(min_length=1)
     # Conversation so far, oldest first. May be empty to request the opener.
     messages: list[ChatMessage] = Field(default_factory=list, max_length=40)
+    # When present, role-play this user-defined scene instead of a catalogue one.
+    custom: CustomScene | None = None
 
 
 class ChatResponse(BaseModel):
