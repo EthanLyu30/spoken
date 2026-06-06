@@ -6,10 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class WordCreate(BaseModel):
-    text: str = Field(min_length=1, max_length=128)
+    text: str = Field(min_length=1, max_length=256)
     scenario_id: str = ""
     meaning: str = ""
     example: str = ""
+    kind: str = "word"  # "word" or "sentence"
 
 
 class WordUpdate(BaseModel):
@@ -24,5 +25,6 @@ class Word(BaseModel):
     meaning: str
     example: str
     scenario_id: str
+    kind: str
     mastered: bool
     created_at: datetime

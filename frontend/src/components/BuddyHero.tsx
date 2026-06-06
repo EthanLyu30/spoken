@@ -22,7 +22,7 @@ export function BuddyHero({ greeting }: BuddyHeroProps) {
   useEffect(() => {
     const ctrl = new AbortController();
     getWords(ctrl.signal)
-      .then((ws) => setWordCount(ws.length))
+      .then((ws) => setWordCount(ws.filter((w) => w.kind !== "sentence").length))
       .catch(() => undefined);
     return () => ctrl.abort();
   }, []);

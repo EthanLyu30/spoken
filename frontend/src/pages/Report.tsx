@@ -205,6 +205,7 @@ export default function Report() {
                               text: p.text,
                               meaning: p.note,
                               scenario_id: scenarioId ?? "",
+                              kind: "word",
                             }).catch(() => {
                               setSavedWords((s) => {
                                 const n = new Set(s);

@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Quote as QuoteIcon, Volume2 } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { PronounceButton } from "../components/PronounceButton";
-import { fetchTtsUrl, postWord } from "../lib/api";
+import { fetchTtsUrl, getWords, postWord } from "../lib/api";
 import { quotes, type Quote } from "../data/quotes";
 
 let sharedAudio: HTMLAudioElement | null = null;
@@ -33,10 +33,18 @@ export default function Daily() {
   const today = quotes[todayIndex(quotes.length)];
   const [saved, setSaved] = useState<Set<string>>(new Set());
 
+  useEffect(() => {
+    const ctrl = new AbortController();
+    getWords(ctrl.signal)
+      .then((ws) => setSaved(new Set(ws.map((w) => w.text))))
+      .catch(() => undefined);
+    return () => ctrl.abort();
+  }, []);
+
   function save(q: Quote) {
     if (saved.has(q.text)) return;
     setSaved((s) => new Set(s).add(q.text));
-    postWord({ text: q.text, meaning: `${q.zh} —— ${q.author}` }).catch(() =>
+    postWord({ text: q.text, meaning: `${q.zh} —— ${q.author}`, kind: "sentence" }).catch(() =>
       setSaved((s) => {
         const n = new Set(s);
         n.delete(q.text);

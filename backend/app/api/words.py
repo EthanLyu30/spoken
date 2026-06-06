@@ -18,13 +18,19 @@ async def add_word(
     db: Session = Depends(get_db),
     client: DeepSeekClient = Depends(get_client),
 ) -> Word:
+    text = payload.text.strip()
+    # Idempotent: collecting the same text twice returns the existing entry.
+    existing = repo.find_by_text(db, text)
+    if existing is not None:
+        return Word.model_validate(existing)
+
     meaning = payload.meaning.strip()
     example = payload.example.strip()
     if not meaning or not example:
-        m, e = await repo.define_word(payload.text, client)
+        m, e = await repo.define_word(text, client)
         meaning = meaning or m
         example = example or e
-    entry = repo.create_word(db, payload.text.strip(), payload.scenario_id, meaning, example)
+    entry = repo.create_word(db, text, payload.scenario_id, meaning, example, payload.kind)
     return Word.model_validate(entry)
 
 
