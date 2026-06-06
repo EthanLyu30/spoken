@@ -1,12 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, RefreshCw, Sparkles, Volume2 } from "lucide-react";
+import { Check, RefreshCw, Search, Sparkles, Volume2 } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { PronounceButton } from "../components/PronounceButton";
 import { fetchTtsUrl, getDailyLines, getWords, postWord, type DailyLine } from "../lib/api";
-import { quotes } from "../data/quotes";
+import {
+  categoryLabels,
+  quoteSearchUrl,
+  quotes,
+  type Quote,
+  type QuoteCategory,
+} from "../data/quotes";
+import { cn } from "../lib/utils";
 
 const SET_SIZE = 5;
+
+type Line = Quote | DailyLine;
+const sourceOf = (q: Line): string | undefined => ("source" in q ? q.source : undefined);
+
+/** Categories that actually have entries, in display order. */
+const ORDER: QuoteCategory[] = ["movie", "speech", "literature", "people", "proverb"];
+const presentCats = ORDER.filter((c) => quotes.some((q) => q.category === c));
 
 let sharedAudio: HTMLAudioElement | null = null;
 let sharedUrl: string | null = null;
@@ -34,22 +48,25 @@ function dayOfYear(): number {
 /** A wrap-around slice of `n` items starting at `start`. */
 function rotateWindow<T>(arr: T[], start: number, n: number): T[] {
   const len = arr.length;
+  if (len === 0) return [];
   return Array.from({ length: Math.min(n, len) }, (_, i) => arr[(((start + i) % len) + len) % len]);
 }
 
 export default function Daily() {
-  // `page` cycles the curated pool; null `aiLines` means show the curated set.
+  // `cat` filters the pool; `page` cycles it; non-null `aiLines` shows AI output.
+  const [cat, setCat] = useState<QuoteCategory | "all">("all");
   const [page, setPage] = useState(0);
   const [aiLines, setAiLines] = useState<DailyLine[] | null>(null);
   const [genState, setGenState] = useState<"idle" | "loading" | "error">("idle");
   const [saved, setSaved] = useState<Set<string>>(new Set());
 
+  const pool = useMemo(() => (cat === "all" ? quotes : quotes.filter((q) => q.category === cat)), [cat]);
   const base = dayOfYear() * SET_SIZE;
   const curated = useMemo(
-    () => rotateWindow(quotes, base + page * SET_SIZE, SET_SIZE),
-    [base, page],
+    () => rotateWindow(pool, base + page * SET_SIZE, SET_SIZE),
+    [pool, base, page],
   );
-  const lines = aiLines ?? curated;
+  const lines: Line[] = aiLines ?? curated;
   const fromAi = aiLines !== null;
 
   useEffect(() => {
@@ -60,10 +77,18 @@ export default function Daily() {
     return () => ctrl.abort();
   }, []);
 
-  function save(q: DailyLine) {
+  function pickCat(next: QuoteCategory | "all") {
+    setCat(next);
+    setPage(0);
+    setAiLines(null);
+  }
+
+  function save(q: Line) {
     if (saved.has(q.text)) return;
     setSaved((s) => new Set(s).add(q.text));
-    postWord({ text: q.text, meaning: `${q.zh} —— ${q.author}`, kind: "sentence" }).catch(() =>
+    const src = sourceOf(q);
+    const meaning = `${q.zh} —— ${q.author}${src ? `《${src}》` : ""}`;
+    postWord({ text: q.text, meaning, kind: "sentence" }).catch(() =>
       setSaved((s) => {
         const n = new Set(s);
         n.delete(q.text);
@@ -94,12 +119,30 @@ export default function Daily() {
       <PlayfulBackground />
 
       <main className="mx-auto w-full max-w-3xl px-5 py-8">
-        <div className="mb-5">
+        <div className="mb-4">
           <p className="eyebrow">Daily lines · 每日金句</p>
           <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">今日五句</h1>
           <p className="mt-1 text-sm text-muted">
-            每天为你轮换一小组 · 听一遍、跟读打分、收进生词本。
+            选自电影 / 演讲 / 文学 / 名人，标注出处 · 每天轮换一小组，可点「🔎」去搜原句。
           </p>
+        </div>
+
+        <div className="mb-4 flex flex-wrap gap-2">
+          {(["all", ...presentCats] as const).map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => pickCat(c)}
+              className={cn(
+                "rounded-full px-3.5 py-1.5 text-sm font-bold transition-transform active:translate-y-0.5",
+                cat === c
+                  ? "bg-coral text-primary-fg shadow-pop"
+                  : "border border-border bg-surface text-ink shadow-soft hover:-translate-y-0.5",
+              )}
+            >
+              {c === "all" ? "全部" : categoryLabels[c]}
+            </button>
+          ))}
         </div>
 
         <div className="mb-5 flex flex-wrap items-center gap-2.5">
@@ -120,7 +163,7 @@ export default function Daily() {
             {genState === "loading" ? "生成中…" : "AI 生成新句"}
           </button>
           <span className="text-xs font-semibold text-muted">
-            {fromAi ? "✨ Pip 现编的" : "精选金句"}
+            {fromAi ? "✨ AI 原创 · 无出处" : "精选 · 标注出处"}
           </span>
         </div>
 
@@ -131,36 +174,50 @@ export default function Daily() {
         )}
 
         <ul className="space-y-3.5">
-          {lines.map((q, i) => (
-            <li key={`${q.text}-${i}`} className="card relative overflow-hidden p-5 md:p-6">
-              <span className="absolute -right-3 -top-4 font-display text-6xl font-bold text-coral opacity-10">
-                {i + 1}
-              </span>
-              <p className="font-display text-lg font-semibold leading-snug text-ink md:text-xl">
-                {q.text}
-              </p>
-              <p className="mt-1.5 text-sm font-bold text-coral-deep">— {q.author}</p>
-              <p className="mt-0.5 text-sm text-muted">{q.zh}</p>
-              <div className="mt-3 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => speak(q.text)}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-coral px-3.5 py-1.5 text-xs font-bold text-primary-fg shadow-soft transition-transform active:translate-y-0.5"
-                >
-                  <Volume2 className="h-3.5 w-3.5" /> 朗读
-                </button>
-                <button
-                  type="button"
-                  onClick={() => save(q)}
-                  disabled={saved.has(q.text)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5 disabled:text-muted"
-                >
-                  <Check className="h-3.5 w-3.5" /> {saved.has(q.text) ? "已收藏" : "收藏"}
-                </button>
-                <PronounceButton text={q.text} />
-              </div>
-            </li>
-          ))}
+          {lines.map((q, i) => {
+            const src = sourceOf(q);
+            return (
+              <li key={`${q.text}-${i}`} className="card relative overflow-hidden p-5 md:p-6">
+                <span className="absolute -right-3 -top-4 font-display text-6xl font-bold text-coral opacity-10">
+                  {i + 1}
+                </span>
+                <p className="font-display text-lg font-semibold leading-snug text-ink md:text-xl">
+                  {q.text}
+                </p>
+                <p className="mt-1.5 text-sm font-bold text-coral-deep">— {q.author}</p>
+                {src && <p className="mt-0.5 text-xs font-semibold text-muted">出处 · {src}</p>}
+                <p className="mt-1 text-sm text-muted">{q.zh}</p>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => speak(q.text)}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-coral px-3.5 py-1.5 text-xs font-bold text-primary-fg shadow-soft transition-transform active:translate-y-0.5"
+                  >
+                    <Volume2 className="h-3.5 w-3.5" /> 朗读
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => save(q)}
+                    disabled={saved.has(q.text)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5 disabled:text-muted"
+                  >
+                    <Check className="h-3.5 w-3.5" /> {saved.has(q.text) ? "已收藏" : "收藏"}
+                  </button>
+                  <PronounceButton text={q.text} />
+                  {!fromAi && (
+                    <a
+                      href={quoteSearchUrl(q)}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
+                    >
+                      <Search className="h-3.5 w-3.5" /> 去搜索
+                    </a>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       </main>
 
