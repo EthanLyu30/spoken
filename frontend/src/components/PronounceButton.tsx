@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Loader2, Mic, Square } from "lucide-react";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
-import { postPronunciation, type PronunciationResult } from "../lib/api";
+import { postPronunciation, savePractice, type PronunciationResult } from "../lib/api";
 
 function scoreColor(s: number): string {
   if (s >= 85) return "#2fa274"; // green
@@ -25,7 +25,9 @@ export function PronounceButton({ text }: { text: string }) {
       setErr(false);
       try {
         const pcm = await rec!.stop();
-        setResult(await postPronunciation(text, pcm));
+        const r = await postPronunciation(text, pcm);
+        setResult(r);
+        savePractice("pronunciation", r.overall, text).catch(() => undefined);
       } catch {
         setErr(true);
       } finally {
