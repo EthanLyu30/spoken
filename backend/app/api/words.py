@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.api.chat import get_client
 from app.db import get_db
-from app.schemas.word import Word, WordCreate, WordUpdate
+from app.schemas.word import Word, WordCreate, WordReview, WordUpdate
 from app.services import words as repo
 from app.services.deepseek import DeepSeekClient
 
@@ -37,6 +37,19 @@ async def add_word(
 @router.get("/words", response_model=list[Word])
 def list_words(db: Session = Depends(get_db)) -> list[Word]:
     return [Word.model_validate(w) for w in repo.list_words(db)]
+
+
+@router.get("/words/due", response_model=list[Word])
+def list_due_words(kind: str | None = None, db: Session = Depends(get_db)) -> list[Word]:
+    return [Word.model_validate(w) for w in repo.list_due(db, kind)]
+
+
+@router.post("/words/{word_id}/review", response_model=Word)
+def review_word(word_id: int, payload: WordReview, db: Session = Depends(get_db)) -> Word:
+    entry = repo.get_word(db, word_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Word not found")
+    return Word.model_validate(repo.review_word(db, entry, payload.remembered))
 
 
 @router.patch("/words/{word_id}", response_model=Word)

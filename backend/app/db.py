@@ -24,11 +24,42 @@ SessionLocal = sessionmaker(
 )
 
 
+def _migrate_sqlite() -> None:
+    """Add columns introduced after a table first shipped (SQLite only).
+
+    ``create_all`` never alters an existing table, so a dev database created
+    before the spaced-repetition fields would be missing them. Add any missing
+    columns in place so existing word bags keep working.
+    """
+    if not _url.startswith("sqlite"):
+        return
+    from sqlalchemy import text
+
+    additions = {
+        "words": {
+            "box": "ALTER TABLE words ADD COLUMN box INTEGER NOT NULL DEFAULT 0",
+            "due_at": "ALTER TABLE words ADD COLUMN due_at DATETIME",
+            "last_reviewed": "ALTER TABLE words ADD COLUMN last_reviewed DATETIME",
+        },
+    }
+    with engine.begin() as conn:
+        for table, cols in additions.items():
+            existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            if not existing:
+                continue  # table not created yet; create_all will handle it
+            for col, ddl in cols.items():
+                if col not in existing:
+                    conn.exec_driver_sql(ddl)
+            if "due_at" in cols and "due_at" not in existing:
+                conn.exec_driver_sql("UPDATE words SET due_at = created_at WHERE due_at IS NULL")
+
+
 def init_db() -> None:
     """Create tables (idempotent). Importing models registers their mappers."""
     import app.models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _migrate_sqlite()
 
 
 def get_db() -> Iterator[Session]:
