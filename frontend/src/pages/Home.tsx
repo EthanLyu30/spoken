@@ -1,15 +1,13 @@
 import { Link } from "react-router-dom";
 import { Flame } from "lucide-react";
 import { BuddyHero } from "../components/BuddyHero";
-import { ScenarioCard } from "../components/ScenarioCard";
+import { JourneyPath } from "../components/JourneyPath";
 import { Wordmark } from "../components/Wordmark";
 import { BackendStatus } from "../components/BackendStatus";
 import { StatChip } from "../components/StatChip";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { scenarios } from "../data/scenarios";
 import { userProgress } from "../data/progress";
-import { themeFor } from "../lib/theme";
-import { cn } from "../lib/utils";
 
 function greetingFor(d: Date): string {
   const h = d.getHours();
@@ -61,40 +59,7 @@ export default function Home() {
             </span>
           </div>
 
-          <div className="relative">
-            {/* dotted journey path */}
-            <span
-              aria-hidden
-              className="absolute bottom-3 left-[1.85rem] top-3 w-1 -translate-x-1/2 rounded-full md:left-1/2"
-              style={{
-                backgroundImage:
-                  "repeating-linear-gradient(to bottom, var(--border) 0 9px, transparent 9px 20px)",
-              }}
-            />
-            <div className="flex flex-col gap-6">
-              {scenarios.map((s, i) => {
-                const right = i % 2 === 1;
-                const t = themeFor(s.id);
-                return (
-                  <div key={s.id} className="relative md:grid md:grid-cols-2 md:gap-10">
-                    <span
-                      aria-hidden
-                      className="absolute left-[1.85rem] top-7 z-10 h-5 w-5 -translate-x-1/2 rounded-full border-4 border-bg md:left-1/2"
-                      style={{ background: t.base }}
-                    />
-                    <div className={cn("pl-14 md:pl-0", right ? "md:col-start-2" : "md:col-start-1")}>
-                      <ScenarioCard
-                        scenario={s}
-                        stop={i + 1}
-                        className="animate-rise"
-                        style={{ animationDelay: `${i * 0.07}s` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <JourneyPath scenarios={scenarios} />
         </section>
       </main>
 
