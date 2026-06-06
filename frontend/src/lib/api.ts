@@ -105,6 +105,40 @@ export function postChat(
   });
 }
 
+/**
+ * Stream one role-play turn as plain-text deltas. `onText` receives the full
+ * accumulated reply each time more arrives. Resolves with the final text.
+ * Throws on any failure so the caller can fall back to {@link postChat}.
+ */
+export async function streamChat(
+  scenarioId: string,
+  messages: ChatMessage[],
+  onText: (full: string) => void,
+  signal?: AbortSignal,
+  custom?: CustomScene,
+): Promise<string> {
+  const res = await fetch(`${BASE_URL}/api/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scenario_id: scenarioId, messages, custom }),
+    signal: withTimeout(signal, 60_000),
+  });
+  if (!res.ok || !res.body) throw new Error(`chat stream failed: ${res.status}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let full = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    full += decoder.decode(value, { stream: true });
+    if (full) onText(full);
+  }
+  full += decoder.decode();
+  const text = full.trim();
+  if (!text) throw new Error("empty stream");
+  return text;
+}
+
 export interface SkillScore {
   key: string;
   label_en: string;
