@@ -17,7 +17,8 @@ import {
 import { getScenario } from "../data/scenarios";
 import { scenarioIcons } from "../lib/icons";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
-import { postChat, fetchTtsUrl, postAsr, postHint, type ChatMessage } from "../lib/api";
+import { postChat, postAsr, postHint, type ChatMessage } from "../lib/api";
+import { speakText, type Speaking } from "../lib/speech";
 import { useSession } from "../store/session";
 import { useCustomScene } from "../store/custom";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
@@ -61,8 +62,7 @@ export default function Conversation() {
   const [hintLoading, setHintLoading] = useState(false);
 
   const endRef = useRef<HTMLDivElement>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioUrlRef = useRef<string | null>(null);
+  const speakingRef = useRef<Speaking | null>(null);
   const lastSpokenRef = useRef(-1);
   const recorderRef = useRef<ActiveRecorder | null>(null);
   const callRef = useRef<VoiceCall | null>(null);
@@ -135,11 +135,10 @@ export default function Conversation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, muted, callPhase]);
 
-  // Stop audio / recording / call + free the blob URL on unmount.
+  // Stop audio / recording / call on unmount.
   useEffect(() => {
     return () => {
-      audioRef.current?.pause();
-      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+      speakingRef.current?.stop();
       recorderRef.current?.stop().catch(() => undefined);
       callRef.current?.end();
     };
@@ -147,24 +146,10 @@ export default function Conversation() {
 
   // Play a line of Pip's speech; resolves when playback finishes.
   function playTts(text: string): Promise<void> {
-    return new Promise((resolve) => {
-      fetchTtsUrl(text, id)
-        .then((url) => {
-          let audio = audioRef.current;
-          if (!audio) {
-            audio = new Audio();
-            audioRef.current = audio;
-          }
-          audio.pause();
-          if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
-          audioUrlRef.current = url;
-          audio.src = url;
-          audio.onended = () => resolve();
-          audio.onerror = () => resolve();
-          void audio.play().catch(() => resolve());
-        })
-        .catch(() => resolve());
-    });
+    speakingRef.current?.stop();
+    const s = speakText(text, id);
+    speakingRef.current = s;
+    return s.done;
   }
 
   async function send() {
@@ -246,7 +231,7 @@ export default function Conversation() {
     callRef.current?.end();
     callRef.current = null;
     setCallPhase(null);
-    audioRef.current?.pause();
+    speakingRef.current?.stop();
   }
 
   async function getHints() {

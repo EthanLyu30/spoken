@@ -16,8 +16,9 @@ import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import { Ring } from "../components/ui/Ring";
 import { ProgressBar } from "../components/ui/ProgressBar";
-import { fetchTtsUrl, getSessions, getWords, type SessionSummary, type Word } from "../lib/api";
-import { useVoice, VOICE_OPTIONS } from "../store/voice";
+import { getSessions, getWords, type SessionSummary, type Word } from "../lib/api";
+import { listBrowserVoices, primeBrowserVoices, speakText } from "../lib/speech";
+import { useVoice, VOICE_OPTIONS, type VoiceEngine } from "../store/voice";
 import { userProgress } from "../data/progress";
 import { cn } from "../lib/utils";
 
@@ -139,34 +140,47 @@ export default function Profile() {
   );
 }
 
+const ENGINES: { id: VoiceEngine; label: string; hint: string }[] = [
+  { id: "browser", label: "浏览器语音", hint: "更自然、连贯（推荐）" },
+  { id: "iflytek", label: "讯飞云端", hint: "云端音色，可跟随场景" },
+];
+
 function VoiceSettings() {
-  const { vcn, speed, pitch, setVcn, setSpeed, setPitch, reset } = useVoice();
+  const {
+    engine,
+    vcn,
+    browserVoiceURI,
+    speed,
+    pitch,
+    setEngine,
+    setVcn,
+    setBrowserVoiceURI,
+    setSpeed,
+    setPitch,
+    reset,
+  } = useVoice();
   const [previewing, setPreviewing] = useState(false);
-  const custom = vcn != null || speed != null || pitch != null;
+  const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const custom = vcn != null || browserVoiceURI != null || speed != null || pitch != null;
+
+  useEffect(() => {
+    setBrowserVoices(listBrowserVoices());
+    primeBrowserVoices(() => setBrowserVoices(listBrowserVoices()));
+  }, []);
 
   const speedLabel = (speed ?? 50) <= 40 ? "偏慢" : (speed ?? 50) >= 62 ? "偏快" : "适中";
   const pitchLabel = (pitch ?? 50) <= 44 ? "低沉" : (pitch ?? 50) >= 58 ? "偏高" : "适中";
 
-  async function preview() {
+  function preview() {
     if (previewing) return;
     setPreviewing(true);
-    try {
-      const url = await fetchTtsUrl("Hi! I'm Pip. Let's practice English together — you've got this!");
-      const audio = new Audio(url);
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        setPreviewing(false);
-      };
-      audio.onerror = () => setPreviewing(false);
-      await audio.play();
-    } catch {
-      setPreviewing(false);
-    }
+    const s = speakText("Hi! I'm Pip. Let's practice English together — you've got this!");
+    s.done.finally(() => setPreviewing(false));
   }
 
   return (
     <section className="card mt-5 p-6">
-      <div className="mb-1 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between">
         <h2 className="font-display text-lg font-semibold text-ink">语音设置</h2>
         {custom && (
           <button
@@ -174,27 +188,69 @@ function VoiceSettings() {
             onClick={reset}
             className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
           >
-            <RotateCcw className="h-3.5 w-3.5" /> 跟随场景
+            <RotateCcw className="h-3.5 w-3.5" /> 重置
           </button>
         )}
       </div>
-      <p className="mb-4 text-sm text-muted">
-        {custom ? "已自定义 · 应用到所有朗读" : "当前跟随场景（每个场景自带语气）— 调整后将统一生效"}
+
+      <label className="mb-1.5 block text-sm font-bold text-ink">朗读引擎</label>
+      <div className="mb-1.5 grid grid-cols-2 gap-2">
+        {ENGINES.map((e) => (
+          <button
+            key={e.id}
+            type="button"
+            onClick={() => setEngine(e.id)}
+            className={cn(
+              "rounded-2xl border px-3 py-2.5 text-left transition-transform active:translate-y-0.5",
+              engine === e.id
+                ? "border-coral bg-coral/10 shadow-soft"
+                : "border-border bg-surface hover:-translate-y-0.5",
+            )}
+          >
+            <span className="block text-sm font-bold text-ink">{e.label}</span>
+            <span className="block text-[0.66rem] text-muted">{e.hint}</span>
+          </button>
+        ))}
+      </div>
+      <p className="mb-4 text-xs text-muted">
+        {engine === "browser"
+          ? "用你设备/浏览器自带的英文语音，朗读更连贯自然。"
+          : "用讯飞云端发音人，不选音色时跟随每个场景的语气。"}
       </p>
 
       <label className="mb-1.5 block text-sm font-bold text-ink">音色</label>
-      <select
-        value={vcn ?? ""}
-        onChange={(e) => setVcn(e.target.value || null)}
-        className="mb-5 w-full rounded-2xl border border-border bg-surface-2 px-4 py-2.5 text-ink outline-none focus:border-coral"
-      >
-        <option value="">跟随场景（推荐）</option>
-        {VOICE_OPTIONS.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+      {engine === "browser" ? (
+        <select
+          value={browserVoiceURI ?? ""}
+          onChange={(e) => setBrowserVoiceURI(e.target.value || null)}
+          className="mb-5 w-full rounded-2xl border border-border bg-surface-2 px-4 py-2.5 text-ink outline-none focus:border-coral"
+        >
+          <option value="">自动（最自然）</option>
+          {browserVoices.map((v) => (
+            <option key={v.voiceURI} value={v.voiceURI}>
+              {v.name}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <select
+          value={vcn ?? ""}
+          onChange={(e) => setVcn(e.target.value || null)}
+          className="mb-5 w-full rounded-2xl border border-border bg-surface-2 px-4 py-2.5 text-ink outline-none focus:border-coral"
+        >
+          <option value="">跟随场景（推荐）</option>
+          {VOICE_OPTIONS.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      )}
+      {engine === "browser" && browserVoices.length === 0 && (
+        <p className="-mt-3 mb-4 text-xs text-muted">
+          此浏览器暂未提供英文语音，可改用「讯飞云端」。
+        </p>
+      )}
 
       <div className="mb-1.5 flex items-center justify-between text-sm">
         <span className="font-bold text-ink">语速</span>

@@ -5,36 +5,14 @@ import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import { Button } from "../components/ui/Button";
-import {
-  deleteWord,
-  fetchTtsUrl,
-  getWords,
-  patchWord,
-  postWord,
-  type Word,
-} from "../lib/api";
+import { deleteWord, getWords, patchWord, postWord, type Word } from "../lib/api";
+import { speakText } from "../lib/speech";
 import { getScenario } from "../data/scenarios";
 import { themeFor } from "../lib/theme";
 import { cn } from "../lib/utils";
 
 const backLink =
   "inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5";
-
-let sharedAudio: HTMLAudioElement | null = null;
-let sharedUrl: string | null = null;
-async function speak(text: string) {
-  try {
-    const url = await fetchTtsUrl(text);
-    if (!sharedAudio) sharedAudio = new Audio();
-    sharedAudio.pause();
-    if (sharedUrl) URL.revokeObjectURL(sharedUrl);
-    sharedUrl = url;
-    sharedAudio.src = url;
-    await sharedAudio.play();
-  } catch {
-    /* ignore */
-  }
-}
 
 export default function WordBag() {
   const [words, setWords] = useState<Word[] | null>(null);
@@ -235,7 +213,7 @@ export default function WordBag() {
                           <div className="mt-3 flex flex-wrap gap-2">
                             <button
                               type="button"
-                              onClick={() => speak(w.text)}
+                              onClick={() => speakText(w.text)}
                               className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-ink"
                             >
                               <Volume2 className="h-3.5 w-3.5" /> 朗读
