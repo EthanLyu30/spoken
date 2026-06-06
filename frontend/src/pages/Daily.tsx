@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
-import { Check, Quote as QuoteIcon, Volume2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Check, RefreshCw, Sparkles, Volume2 } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { PronounceButton } from "../components/PronounceButton";
-import { fetchTtsUrl, getWords, postWord } from "../lib/api";
-import { quotes, type Quote } from "../data/quotes";
+import { fetchTtsUrl, getDailyLines, getWords, postWord, type DailyLine } from "../lib/api";
+import { quotes } from "../data/quotes";
+
+const SET_SIZE = 5;
 
 let sharedAudio: HTMLAudioElement | null = null;
 let sharedUrl: string | null = null;
@@ -22,16 +24,30 @@ async function speak(text: string) {
   }
 }
 
-function todayIndex(len: number): number {
+/** Day-of-year, so the starting window rotates once per day. */
+function dayOfYear(): number {
   const now = new Date();
   const start = new Date(now.getFullYear(), 0, 0);
-  const day = Math.floor((now.getTime() - start.getTime()) / 86400000);
-  return ((day % len) + len) % len;
+  return Math.floor((now.getTime() - start.getTime()) / 86400000);
+}
+
+/** A wrap-around slice of `n` items starting at `start`. */
+function window<T>(arr: T[], start: number, n: number): T[] {
+  const len = arr.length;
+  return Array.from({ length: Math.min(n, len) }, (_, i) => arr[(((start + i) % len) + len) % len]);
 }
 
 export default function Daily() {
-  const today = quotes[todayIndex(quotes.length)];
+  // `page` cycles the curated pool; null `aiLines` means show the curated set.
+  const [page, setPage] = useState(0);
+  const [aiLines, setAiLines] = useState<DailyLine[] | null>(null);
+  const [genState, setGenState] = useState<"idle" | "loading" | "error">("idle");
   const [saved, setSaved] = useState<Set<string>>(new Set());
+
+  const base = dayOfYear() * SET_SIZE;
+  const curated = useMemo(() => window(quotes, base + page * SET_SIZE, SET_SIZE), [base, page]);
+  const lines = aiLines ?? curated;
+  const fromAi = aiLines !== null;
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -41,7 +57,7 @@ export default function Daily() {
     return () => ctrl.abort();
   }, []);
 
-  function save(q: Quote) {
+  function save(q: DailyLine) {
     if (saved.has(q.text)) return;
     setSaved((s) => new Set(s).add(q.text));
     postWord({ text: q.text, meaning: `${q.zh} —— ${q.author}`, kind: "sentence" }).catch(() =>
@@ -53,76 +69,95 @@ export default function Daily() {
     );
   }
 
+  function shuffle() {
+    setAiLines(null);
+    setPage((p) => p + 1);
+  }
+
+  async function generate() {
+    if (genState === "loading") return;
+    setGenState("loading");
+    try {
+      const fresh = await getDailyLines(SET_SIZE);
+      setAiLines(fresh);
+      setGenState("idle");
+    } catch {
+      setGenState("error");
+    }
+  }
+
   return (
     <div className="min-h-screen pb-24">
       <PlayfulBackground />
 
       <main className="mx-auto w-full max-w-3xl px-5 py-8">
-        <div className="mb-6">
+        <div className="mb-5">
           <p className="eyebrow">Daily lines · 每日金句</p>
-          <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">今日金句</h1>
-          <p className="mt-1 text-sm text-muted">听一遍、跟读打分、收进生词本 — 每天积累一句。</p>
+          <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">今日五句</h1>
+          <p className="mt-1 text-sm text-muted">
+            每天为你轮换一小组 · 听一遍、跟读打分、收进生词本。
+          </p>
         </div>
 
-        <section className="card relative overflow-hidden p-6 md:p-8">
-          <QuoteIcon
-            aria-hidden
-            className="pointer-events-none absolute -right-4 -top-4 h-28 w-28 text-coral opacity-10"
-          />
-          <p className="font-display text-2xl font-semibold leading-snug text-ink">{today.text}</p>
-          <p className="mt-3 text-sm font-bold text-coral-deep">— {today.author}</p>
-          <p className="mt-1 text-sm text-muted">{today.zh}</p>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={() => speak(today.text)}
-              className="inline-flex items-center gap-1.5 rounded-full bg-coral px-4 py-2 text-sm font-bold text-primary-fg shadow-pop transition-transform active:translate-y-0.5"
-            >
-              <Volume2 className="h-4 w-4" /> 朗读
-            </button>
-            <button
-              type="button"
-              onClick={() => save(today)}
-              disabled={saved.has(today.text)}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5 disabled:text-muted"
-            >
-              <Check className="h-4 w-4" /> {saved.has(today.text) ? "已收藏" : "收藏"}
-            </button>
-          </div>
-          <div className="mt-3">
-            <PronounceButton text={today.text} />
-          </div>
-        </section>
+        <div className="mb-5 flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={shuffle}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5 active:translate-y-0.5"
+          >
+            <RefreshCw className="h-4 w-4" /> 换一批
+          </button>
+          <button
+            type="button"
+            onClick={generate}
+            disabled={genState === "loading"}
+            className="inline-flex items-center gap-1.5 rounded-full bg-coral px-4 py-2 text-sm font-bold text-primary-fg shadow-pop transition-transform active:translate-y-0.5 disabled:opacity-60"
+          >
+            <Sparkles className="h-4 w-4" />
+            {genState === "loading" ? "生成中…" : "AI 生成新句"}
+          </button>
+          <span className="text-xs font-semibold text-muted">
+            {fromAi ? "✨ Pip 现编的" : "精选金句"}
+          </span>
+        </div>
 
-        <h2 className="mb-3 mt-8 font-display text-xl font-semibold text-ink">更多金句</h2>
-        <ul className="space-y-3">
-          {quotes
-            .filter((q) => q.text !== today.text)
-            .map((q) => (
-              <li key={q.text} className="card p-5">
-                <p className="font-display text-lg font-semibold leading-snug text-ink">{q.text}</p>
-                <p className="mt-1.5 text-xs font-bold text-coral-deep">— {q.author}</p>
-                <p className="text-xs text-muted">{q.zh}</p>
-                <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => speak(q.text)}
-                    className="inline-flex items-center gap-1 text-[0.66rem] font-bold uppercase tracking-wide text-muted transition-colors hover:text-ink"
-                  >
-                    <Volume2 className="h-3.5 w-3.5" /> 朗读
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => save(q)}
-                    disabled={saved.has(q.text)}
-                    className="inline-flex items-center gap-1 text-[0.66rem] font-bold uppercase tracking-wide text-coral-deep transition-colors disabled:text-muted"
-                  >
-                    <Check className="h-3.5 w-3.5" /> {saved.has(q.text) ? "已收藏" : "收藏"}
-                  </button>
-                  <PronounceButton text={q.text} />
-                </div>
-              </li>
-            ))}
+        {genState === "error" && (
+          <p className="mb-4 rounded-2xl bg-surface-2 px-4 py-3 text-sm text-muted">
+            生成失败，请确认后端在运行后重试。先看看下面的精选金句吧。
+          </p>
+        )}
+
+        <ul className="space-y-3.5">
+          {lines.map((q, i) => (
+            <li key={`${q.text}-${i}`} className="card relative overflow-hidden p-5 md:p-6">
+              <span className="absolute -right-3 -top-4 font-display text-6xl font-bold text-coral opacity-10">
+                {i + 1}
+              </span>
+              <p className="font-display text-lg font-semibold leading-snug text-ink md:text-xl">
+                {q.text}
+              </p>
+              <p className="mt-1.5 text-sm font-bold text-coral-deep">— {q.author}</p>
+              <p className="mt-0.5 text-sm text-muted">{q.zh}</p>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => speak(q.text)}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-coral px-3.5 py-1.5 text-xs font-bold text-primary-fg shadow-soft transition-transform active:translate-y-0.5"
+                >
+                  <Volume2 className="h-3.5 w-3.5" /> 朗读
+                </button>
+                <button
+                  type="button"
+                  onClick={() => save(q)}
+                  disabled={saved.has(q.text)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5 disabled:text-muted"
+                >
+                  <Check className="h-3.5 w-3.5" /> {saved.has(q.text) ? "已收藏" : "收藏"}
+                </button>
+                <PronounceButton text={q.text} />
+              </div>
+            </li>
+          ))}
         </ul>
       </main>
 
