@@ -26,7 +26,8 @@ Return ONLY a JSON object with exactly these keys:
 - "partner_role": who the AI plays, with a name and a trait, e.g. "Mia, a warm barista".
 - "goal": one English sentence describing what the learner should accomplish.
 - "persona": 2-3 sentences of scene and character detail so the partner stays in character and keeps the conversation flowing with natural follow-up questions.
-- "opening_line": the partner's natural first spoken line in English — short, in character, and ending in a way that invites the learner to respond."""
+- "opening_line": the partner's natural first spoken line in English — short, in character, and ending in a way that invites the learner to respond.
+- "source": a SHORT Chinese theme tag for the scene (4-8 characters, e.g. "日常生活·点单" or "职场沟通"). This is just a category label, NOT a citation of any real news, article, or person."""
 
 
 _SUGGEST = """You suggest fresh English speaking-practice role-plays for Chinese learners.
@@ -39,7 +40,8 @@ Return ONLY a JSON object with exactly these keys:
 - "partner_role": who the AI plays, with a name and a trait.
 - "goal": one English sentence describing what the learner should accomplish.
 - "persona": 2-3 sentences of scene and character detail so the partner stays in character with natural follow-up questions.
-- "opening_line": the partner's natural first spoken line in English — short, in character, inviting the learner to respond."""
+- "opening_line": the partner's natural first spoken line in English — short, in character, inviting the learner to respond.
+- "source": a SHORT Chinese theme tag for the scene (4-8 characters, e.g. "生活灵感·邻里" or "旅行见闻"). This is a category label only, NOT a citation of any real news, article, or person."""
 
 
 async def _generate(client: DeepSeekClient, messages: list[dict], temperature: float) -> CustomScene:

@@ -15,6 +15,9 @@ class CustomScene(BaseModel):
     goal: str = Field(min_length=1, max_length=400)
     persona: str = Field(min_length=1, max_length=1200)
     opening_line: str = Field(min_length=1, max_length=400)
+    # A short Chinese theme / inspiration tag (NOT a real news citation),
+    # e.g. "日常生活·邻里" or "职场沟通". Display-only.
+    source: str = Field(default="", max_length=60)
 
 
 class CustomSceneRequest(BaseModel):

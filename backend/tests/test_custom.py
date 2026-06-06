@@ -26,6 +26,7 @@ _SCENE = {
     "goal": "Open a checking account and ask about fees.",
     "persona": "You are Dana at the front desk. Guide the learner through opening an account.",
     "opening_line": "Hi! Welcome in. How can I help you today?",
+    "source": "日常生活·银行",
 }
 
 
@@ -47,6 +48,7 @@ def test_scenario_suggestion_returns_scene():
         resp = client.get("/api/scenario-suggestion")
         assert resp.status_code == 200
         assert resp.json()["partner_role"].startswith("Dana")
+        assert resp.json()["source"] == "日常生活·银行"
     finally:
         app.dependency_overrides.clear()
 
