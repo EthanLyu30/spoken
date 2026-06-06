@@ -15,6 +15,7 @@ from app.api import (
     feedback,
     health,
     hint,
+    interview,
     pronunciation,
     scenarios,
     sessions,
@@ -53,6 +54,7 @@ app.include_router(hint.router, prefix="/api")
 app.include_router(words.router, prefix="/api")
 app.include_router(daily.router, prefix="/api")
 app.include_router(custom.router, prefix="/api")
+app.include_router(interview.router, prefix="/api")
 
 # Create database tables (idempotent).
 init_db()

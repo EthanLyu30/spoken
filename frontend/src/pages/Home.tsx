@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Flame, Sparkles, Wand2 } from "lucide-react";
+import { Flame, Sparkles, Timer, Wand2 } from "lucide-react";
 import { BuddyHero } from "../components/BuddyHero";
 import { DailyScenePick } from "../components/DailyScenePick";
 import { JourneyPath } from "../components/JourneyPath";
@@ -98,6 +98,29 @@ export default function Home() {
           </div>
           <span className="shrink-0 rounded-full bg-surface-2 px-3 py-1.5 text-xs font-bold text-coral-deep transition-colors group-hover:bg-coral group-hover:text-primary-fg">
             去创建 →
+          </span>
+        </Link>
+
+        <Link
+          to="/interview"
+          className="card group mt-4 flex items-center gap-4 p-5 transition-transform hover:-translate-y-0.5 md:p-6"
+        >
+          <span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-leaf text-primary-fg shadow-pop">
+            <Timer className="h-7 w-7" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-1.5 font-display text-lg font-semibold text-ink">
+              限时问答
+              <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[0.6rem] font-bold text-coral-deep">
+                托福口语
+              </span>
+            </p>
+            <p className="mt-0.5 text-sm text-muted">
+              4 题、每题 45 秒即兴作答，按托福标准打分并给出高分范例。
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full bg-surface-2 px-3 py-1.5 text-xs font-bold text-coral-deep transition-colors group-hover:bg-coral group-hover:text-primary-fg">
+            去挑战 →
           </span>
         </Link>
       </main>
