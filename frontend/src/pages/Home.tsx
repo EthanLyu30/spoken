@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Flame } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Flame, Sparkles, Wand2 } from "lucide-react";
 import { BuddyHero } from "../components/BuddyHero";
 import { JourneyPath } from "../components/JourneyPath";
 import { Wordmark } from "../components/Wordmark";
@@ -75,6 +76,27 @@ export default function Home() {
 
           <JourneyPath key={chapter.title} scenarios={chapterScenarios} />
         </section>
+
+        <Link
+          to="/custom"
+          className="card group mt-8 flex items-center gap-4 p-5 transition-transform hover:-translate-y-0.5 md:p-6"
+        >
+          <span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-coral text-primary-fg shadow-pop">
+            <Wand2 className="h-7 w-7" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-1.5 font-display text-lg font-semibold text-ink">
+              自定义场景
+              <Sparkles className="h-4 w-4 text-coral-deep" />
+            </p>
+            <p className="mt-0.5 text-sm text-muted">
+              一句话描述你想练的场景，Pip 立刻变身角色陪你即兴对话。
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full bg-surface-2 px-3 py-1.5 text-xs font-bold text-coral-deep transition-colors group-hover:bg-coral group-hover:text-primary-fg">
+            去创建 →
+          </span>
+        </Link>
       </main>
 
       <footer className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-3 px-5 py-8 sm:px-8">

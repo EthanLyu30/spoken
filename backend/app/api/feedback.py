@@ -15,11 +15,14 @@ router = APIRouter(tags=["feedback"])
 async def feedback(
     req: FeedbackRequest, client: DeepSeekClient = Depends(get_client)
 ) -> FeedbackResponse:
-    scenario = catalog.get_scenario(req.scenario_id)
-    if scenario is None:
-        raise HTTPException(
-            status_code=404, detail=f"Unknown scenario: {req.scenario_id}"
-        )
+    if req.custom is not None:
+        scenario = catalog.scene_from_custom(req.custom)
+    else:
+        scenario = catalog.get_scenario(req.scenario_id)
+        if scenario is None:
+            raise HTTPException(
+                status_code=404, detail=f"Unknown scenario: {req.scenario_id}"
+            )
     if not any(m.role == "user" for m in req.messages):
         raise HTTPException(
             status_code=400, detail="Need at least one learner turn to give feedback"

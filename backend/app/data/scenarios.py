@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.schemas.custom import CustomScene
 from app.schemas.scenario import ScenarioPublic
 
 
@@ -344,6 +345,30 @@ _BY_ID: dict[str, ScenarioDef] = {s.id: s for s in SCENARIOS}
 def get_scenario(scenario_id: str) -> ScenarioDef | None:
     """Return the full scenario definition (including persona) or ``None``."""
     return _BY_ID.get(scenario_id)
+
+
+def scene_from_custom(custom: CustomScene) -> ScenarioDef:
+    """Wrap a user-defined scene as a transient ``ScenarioDef``.
+
+    This lets the normal role-play / feedback code paths run on a scenario that
+    is not in the catalogue (it never gets registered in ``_BY_ID``).
+    """
+    return ScenarioDef(
+        id="custom",
+        slug="custom",
+        title=custom.title,
+        title_zh=custom.title_zh or custom.title,
+        category="Custom",
+        category_zh="自定义",
+        subtitle=custom.title_zh or custom.title,
+        goal=custom.goal,
+        difficulty=2,
+        minutes=5,
+        icon="MessageCircle",
+        partner_role=custom.partner_role,
+        opening_line=custom.opening_line,
+        persona=custom.persona,
+    )
 
 
 def list_public() -> list[ScenarioPublic]:
