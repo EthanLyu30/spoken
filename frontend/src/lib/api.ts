@@ -273,6 +273,39 @@ export function getDailyLines(n = 5, signal?: AbortSignal): Promise<DailyLine[]>
   );
 }
 
+export interface InterviewResult {
+  question: string;
+  answer: string;
+  score: number;
+  level: string;
+  feedback: string;
+  sample_answer: string;
+}
+
+export interface InterviewScore {
+  overall: number;
+  results: InterviewResult[];
+}
+
+/** TOEFL-style independent speaking questions for the timed drill. */
+export function getInterviewQuestions(n = 4, signal?: AbortSignal): Promise<string[]> {
+  return request<{ questions: string[] }>(`/api/interview/questions?n=${n}`, { signal }).then(
+    (r) => r.questions,
+  );
+}
+
+/** Rate the spoken answers (ETS-style) and return feedback + sample answers. */
+export function scoreInterview(
+  items: { question: string; answer: string }[],
+  signal?: AbortSignal,
+): Promise<InterviewScore> {
+  return request<InterviewScore>("/api/interview/score", {
+    method: "POST",
+    body: JSON.stringify({ items }),
+    signal,
+  });
+}
+
 export interface Word {
   id: number;
   text: string;
