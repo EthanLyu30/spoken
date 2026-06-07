@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.orm import Session
 
 from app.models.practice import PracticeRecord
@@ -14,6 +14,8 @@ from app.schemas.practice import PracticeCreate
 
 TODAY_GOAL = 3
 XP_PER_LEVEL = 250
+# Keep storage bounded: only retain the most recent N practice records.
+PRACTICE_KEEP = 1000
 
 
 def create_record(db: Session, payload: PracticeCreate) -> PracticeRecord:
@@ -26,7 +28,18 @@ def create_record(db: Session, payload: PracticeCreate) -> PracticeRecord:
     db.add(record)
     db.commit()
     db.refresh(record)
+    prune_records(db)
     return record
+
+
+def prune_records(db: Session, keep: int = PRACTICE_KEEP) -> None:
+    """Delete practice records older than the most recent ``keep``."""
+    stale_ids = list(
+        db.scalars(select(PracticeRecord.id).order_by(desc(PracticeRecord.created_at)).offset(keep))
+    )
+    if stale_ids:
+        db.execute(delete(PracticeRecord).where(PracticeRecord.id.in_(stale_ids)))
+        db.commit()
 
 
 def list_records(db: Session, kind: str | None = None, limit: int = 100) -> list[PracticeRecord]:
