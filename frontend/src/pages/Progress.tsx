@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ChevronRight } from "lucide-react";
 import type { EChartsOption } from "echarts";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
@@ -171,23 +171,35 @@ export default function Progress() {
 
             <section className="card p-6">
               <h2 className="font-display text-lg font-semibold text-ink">历史记录</h2>
+              <p className="text-sm text-muted">点任意一条，回看小结与对话</p>
               <ul className="mt-3 divide-y divide-border">
                 {sessions.map((s) => {
                   const sc = getScenario(s.scenario_id);
+                  const label = sc
+                    ? `${sc.titleZh} · ${sc.title}`
+                    : s.scenario_id === "custom"
+                      ? "自定义场景"
+                      : s.scenario_id;
                   return (
-                    <li key={s.id} className="flex items-center justify-between gap-3 py-3">
-                      <div className="min-w-0">
-                        <p className="truncate font-semibold text-ink">
-                          {sc ? `${sc.titleZh} · ${sc.title}` : s.scenario_id}
-                        </p>
-                        <p className="text-xs text-muted">{formatTime(s.created_at)}</p>
-                      </div>
-                      <span
-                        className="shrink-0 rounded-full px-3 py-1 text-sm font-bold tabnum"
-                        style={{ background: "#fff5d8", color: "#cf9612" }}
+                    <li key={s.id}>
+                      <Link
+                        to={`/session/${s.id}`}
+                        className="-mx-2 flex items-center justify-between gap-3 rounded-2xl px-2 py-3 transition-colors hover:bg-surface-2"
                       >
-                        {s.overall}
-                      </span>
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-ink">{label}</p>
+                          <p className="text-xs text-muted">{formatTime(s.created_at)}</p>
+                        </div>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          <span
+                            className="rounded-full px-3 py-1 text-sm font-bold tabnum"
+                            style={{ background: "#fff5d8", color: "#cf9612" }}
+                          >
+                            {s.overall}
+                          </span>
+                          <ChevronRight className="h-4 w-4 text-muted" />
+                        </span>
+                      </Link>
                     </li>
                   );
                 })}
