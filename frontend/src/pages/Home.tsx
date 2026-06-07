@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Flame, Sparkles, Timer, Wand2 } from "lucide-react";
+import { Calendar, Sparkles, Timer, Wand2 } from "lucide-react";
 import { BuddyHero } from "../components/BuddyHero";
 import { DailyScenePick } from "../components/DailyScenePick";
 import { JourneyPath } from "../components/JourneyPath";
@@ -10,8 +10,9 @@ import { StatChip } from "../components/StatChip";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { chapters, getScenario, type Scenario } from "../data/scenarios";
-import { userProgress } from "../data/progress";
 import { cn } from "../lib/utils";
+
+const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 function greetingFor(d: Date): string {
   const h = d.getHours();
@@ -22,7 +23,10 @@ function greetingFor(d: Date): string {
 }
 
 export default function Home() {
-  const greeting = greetingFor(new Date());
+  const now = new Date();
+  const greeting = greetingFor(now);
+  const dateValue = `${now.getMonth() + 1}/${now.getDate()}`;
+  const weekday = WEEKDAYS[now.getDay()];
   const [activeChapter, setActiveChapter] = useState(0);
   const chapter = chapters[activeChapter];
   const chapterScenarios = chapter.ids
@@ -36,11 +40,11 @@ export default function Home() {
       <header className="mx-auto flex w-full max-w-5xl items-center justify-between px-5 pt-6 sm:px-8">
         <Wordmark />
         <StatChip
-          icon={<Flame className="h-4 w-4" />}
-          value={userProgress.streakDays}
-          label="天连续"
-          tint="#fff0dd"
-          fg="#e07f1c"
+          icon={<Calendar className="h-4 w-4" />}
+          value={dateValue}
+          label={weekday}
+          tint="#e6f4fc"
+          fg="#2c8fc6"
         />
       </header>
 
