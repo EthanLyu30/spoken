@@ -18,6 +18,7 @@ class PracticeSession(Base):
     __tablename__ = "sessions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    client_id: Mapped[str] = mapped_column(String(64), default="anon", index=True)
     scenario_id: Mapped[str] = mapped_column(String(64), index=True)
     overall: Mapped[int] = mapped_column(Integer, default=0)
     summary: Mapped[str] = mapped_column(Text, default="")

@@ -22,6 +22,7 @@ class PracticeRecord(Base):
     __tablename__ = "practice_records"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    client_id: Mapped[str] = mapped_column(String(64), default="anon", index=True)
     kind: Mapped[str] = mapped_column(String(24), index=True)  # pronunciation | interview
     score: Mapped[float] = mapped_column(Float, default=0.0)  # native scale per kind
     title: Mapped[str] = mapped_column(String(200), default="")

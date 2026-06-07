@@ -35,12 +35,16 @@ def _migrate_sqlite() -> None:
         return
     from sqlalchemy import text
 
+    _CID = "ADD COLUMN client_id VARCHAR(64) NOT NULL DEFAULT 'anon'"
     additions = {
         "words": {
             "box": "ALTER TABLE words ADD COLUMN box INTEGER NOT NULL DEFAULT 0",
             "due_at": "ALTER TABLE words ADD COLUMN due_at DATETIME",
             "last_reviewed": "ALTER TABLE words ADD COLUMN last_reviewed DATETIME",
+            "client_id": f"ALTER TABLE words {_CID}",
         },
+        "sessions": {"client_id": f"ALTER TABLE sessions {_CID}"},
+        "practice_records": {"client_id": f"ALTER TABLE practice_records {_CID}"},
     }
     with engine.begin() as conn:
         for table, cols in additions.items():

@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.deps import get_client_id
 from app.db import get_db
 from app.models.session import PracticeSession
 from app.schemas.chat import ChatMessage
@@ -31,19 +32,25 @@ def _detail(session: PracticeSession) -> SessionDetail:
 
 @router.post("/sessions", response_model=SessionDetail, status_code=201)
 def save_session(
-    payload: SaveSessionRequest, db: Session = Depends(get_db)
+    payload: SaveSessionRequest,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
 ) -> SessionDetail:
-    return _detail(repo.create_session(db, payload))
+    return _detail(repo.create_session(db, client_id, payload))
 
 
 @router.get("/sessions", response_model=list[SessionSummary])
-def list_sessions(db: Session = Depends(get_db)) -> list[SessionSummary]:
-    return [SessionSummary.model_validate(s) for s in repo.list_sessions(db)]
+def list_sessions(
+    db: Session = Depends(get_db), client_id: str = Depends(get_client_id)
+) -> list[SessionSummary]:
+    return [SessionSummary.model_validate(s) for s in repo.list_sessions(db, client_id)]
 
 
 @router.get("/sessions/{session_id}", response_model=SessionDetail)
-def get_session(session_id: int, db: Session = Depends(get_db)) -> SessionDetail:
-    session = repo.get_session(db, session_id)
+def get_session(
+    session_id: int, db: Session = Depends(get_db), client_id: str = Depends(get_client_id)
+) -> SessionDetail:
+    session = repo.get_session(db, client_id, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return _detail(session)

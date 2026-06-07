@@ -3,8 +3,9 @@
 # Then set the secret env vars (sync:false) in the dashboard:
 #   DEEPSEEK_API_KEY, XF_APP_ID, XF_API_KEY, XF_API_SECRET,
 #   CORS_ORIGINS = your frontend origin (e.g. https://spoken.vercel.app)
-# The container binds $PORT automatically. Free tier has no persistent disk,
-# so the SQLite history resets on redeploy — fine for a demo.
+#   DATABASE_URL = a free Postgres URL (Neon/Supabase) so data persists across
+#                  restarts. Leave it unset to use ephemeral SQLite (resets on
+#                  redeploy). The container binds $PORT automatically.
 services:
   - type: web
     name: spoken-backend
@@ -23,4 +24,6 @@ services:
       - key: XF_API_SECRET
         sync: false
       - key: CORS_ORIGINS
+        sync: false
+      - key: DATABASE_URL
         sync: false

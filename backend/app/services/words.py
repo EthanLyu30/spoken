@@ -36,12 +36,15 @@ async def define_word(text: str, client: DeepSeekClient) -> tuple[str, str]:
         return "", ""
 
 
-def find_by_text(db: Session, text: str) -> WordEntry | None:
-    return db.scalars(select(WordEntry).where(WordEntry.text == text)).first()
+def find_by_text(db: Session, client_id: str, text: str) -> WordEntry | None:
+    return db.scalars(
+        select(WordEntry).where(WordEntry.text == text, WordEntry.client_id == client_id)
+    ).first()
 
 
 def create_word(
     db: Session,
+    client_id: str,
     text: str,
     scenario_id: str,
     meaning: str,
@@ -49,6 +52,7 @@ def create_word(
     kind: str = "word",
 ) -> WordEntry:
     entry = WordEntry(
+        client_id=client_id,
         text=text,
         scenario_id=scenario_id,
         meaning=meaning,
@@ -61,19 +65,29 @@ def create_word(
     return entry
 
 
-def list_words(db: Session) -> list[WordEntry]:
-    return list(db.scalars(select(WordEntry).order_by(desc(WordEntry.created_at))))
+def list_words(db: Session, client_id: str) -> list[WordEntry]:
+    return list(
+        db.scalars(
+            select(WordEntry)
+            .where(WordEntry.client_id == client_id)
+            .order_by(desc(WordEntry.created_at))
+        )
+    )
 
 
-def get_word(db: Session, word_id: int) -> WordEntry | None:
-    return db.get(WordEntry, word_id)
+def get_word(db: Session, client_id: str, word_id: int) -> WordEntry | None:
+    return db.scalars(
+        select(WordEntry).where(WordEntry.id == word_id, WordEntry.client_id == client_id)
+    ).first()
 
 
-def list_due(db: Session, kind: str | None = None) -> list[WordEntry]:
+def list_due(db: Session, client_id: str, kind: str | None = None) -> list[WordEntry]:
     """Words whose review is due (not yet mastered), soonest first."""
     now = datetime.utcnow()
     stmt = select(WordEntry).where(
-        WordEntry.due_at <= now, WordEntry.mastered.is_(False)
+        WordEntry.client_id == client_id,
+        WordEntry.due_at <= now,
+        WordEntry.mastered.is_(False),
     )
     if kind:
         stmt = stmt.where(WordEntry.kind == kind)

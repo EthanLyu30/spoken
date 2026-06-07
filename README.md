@@ -143,6 +143,8 @@ docker compose up --build
 - SQLite 持久化在 `backend-data` 卷
 
 > 云端托管（Render 后端 + Vercel 前端，含一键 Blueprint `render.yaml`）见 **[docs/DEPLOY.md](docs/DEPLOY.md)**。
+>
+> 数据按**设备隔离**（免登录，每个浏览器各自的生词本 / 记录）；是否持久取决于是否接了 Postgres（不接则用临时 SQLite，重启重置）—— 详见部署指南。
 
 ### 🔑 环境变量
 
