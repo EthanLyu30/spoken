@@ -58,3 +58,27 @@ def test_account_data_is_isolated_from_devices():
 def test_register_validates_input():
     assert client.post("/api/auth/register", json={"email": "not-an-email", "password": "secret1"}).status_code == 422
     assert client.post("/api/auth/register", json={"email": "short@b.com", "password": "123"}).status_code == 422
+
+
+def test_register_sets_default_display_name_from_email():
+    r = client.post("/api/auth/register", json={"email": "alice@b.com", "password": "secret1"})
+    assert r.status_code == 201 and r.json()["user"]["display_name"] == "alice"
+
+
+def test_update_profile_name_and_avatar():
+    reg = client.post("/api/auth/register", json={"email": "edit@b.com", "password": "secret1"})
+    auth = {"Authorization": f"Bearer {reg.json()['token']}"}
+    avatar = "data:image/png;base64,iVBORw0KGgo="
+    p = client.patch("/api/auth/me", json={"display_name": "  Pip Fan  ", "avatar_url": avatar}, headers=auth)
+    assert p.status_code == 200
+    assert p.json()["display_name"] == "Pip Fan"  # trimmed
+    assert p.json()["avatar_url"] == avatar
+    # Persisted: a fresh /me reflects the edit.
+    assert client.get("/api/auth/me", headers=auth).json()["display_name"] == "Pip Fan"
+
+
+def test_update_profile_rejects_bad_avatar_and_requires_auth():
+    reg = client.post("/api/auth/register", json={"email": "bad@b.com", "password": "secret1"})
+    auth = {"Authorization": f"Bearer {reg.json()['token']}"}
+    assert client.patch("/api/auth/me", json={"avatar_url": "http://evil/x.png"}, headers=auth).status_code == 422
+    assert client.patch("/api/auth/me", json={"display_name": "x"}).status_code == 401

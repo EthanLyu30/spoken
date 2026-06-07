@@ -58,12 +58,37 @@ def _migrate_sqlite() -> None:
                 conn.exec_driver_sql("UPDATE words SET due_at = created_at WHERE due_at IS NULL")
 
 
+def _migrate_users() -> None:
+    """Add the editable-profile columns to an existing ``users`` table.
+
+    ``create_all`` won't alter a table that already exists (shipped earlier with
+    the account feature), so add ``display_name`` / ``avatar_url`` in place. Works
+    on both SQLite (PRAGMA check) and Postgres (ADD COLUMN IF NOT EXISTS).
+    """
+    cols = {
+        "display_name": "VARCHAR(40) NOT NULL DEFAULT ''",
+        "avatar_url": "TEXT NOT NULL DEFAULT ''",
+    }
+    with engine.begin() as conn:
+        if _url.startswith("sqlite"):
+            existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(users)")}
+            if not existing:
+                return  # table not created yet; create_all handles fresh DBs
+            for col, ddl in cols.items():
+                if col not in existing:
+                    conn.exec_driver_sql(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
+        else:
+            for col, ddl in cols.items():
+                conn.exec_driver_sql(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {ddl}")
+
+
 def init_db() -> None:
     """Create tables (idempotent). Importing models registers their mappers."""
     import app.models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _migrate_sqlite()
+    _migrate_users()
 
 
 def get_db() -> Iterator[Session]:
