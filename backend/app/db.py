@@ -33,7 +33,6 @@ def _migrate_sqlite() -> None:
     """
     if not _url.startswith("sqlite"):
         return
-    from sqlalchemy import text
 
     _CID = "ADD COLUMN client_id VARCHAR(64) NOT NULL DEFAULT 'anon'"
     additions = {

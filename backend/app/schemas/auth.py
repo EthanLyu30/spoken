@@ -60,6 +60,8 @@ class AuthResponse(BaseModel):
 
 
 _MAX_AVATAR = 400_000  # chars; a compressed ~128px data URL is far smaller
+# Raster only: an <img> won't run scripts inside an SVG, but reject it anyway.
+_AVATAR_PREFIXES = ("data:image/png", "data:image/jpeg", "data:image/webp", "data:image/gif")
 
 
 class ProfileUpdate(BaseModel):
@@ -83,7 +85,7 @@ class ProfileUpdate(BaseModel):
     def _avatar(cls, v: str | None) -> str | None:
         if not v:  # None or "" both mean "clear / leave default"
             return v
-        if not v.startswith("data:image/"):
+        if not v.startswith(_AVATAR_PREFIXES):
             raise ValueError("头像格式不支持")
         if len(v) > _MAX_AVATAR:
             raise ValueError("头像太大了，请换张小图")

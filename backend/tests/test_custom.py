@@ -53,6 +53,23 @@ def test_scenario_suggestion_returns_scene():
         app.dependency_overrides.clear()
 
 
+def test_scenario_suggestion_caches_per_day():
+    import app.api.custom as custom_mod
+
+    custom_mod._daily_cache.clear()
+    stub = _Stub(json.dumps(_SCENE))
+    app.dependency_overrides[get_client] = lambda: stub
+    try:
+        assert client.get("/api/scenario-suggestion").status_code == 200
+        assert client.get("/api/scenario-suggestion").status_code == 200
+        assert len(stub.calls) == 1  # second request served from the daily cache
+        assert client.get("/api/scenario-suggestion?fresh=1").status_code == 200
+        assert len(stub.calls) == 2  # fresh=1 bypasses the cache
+    finally:
+        app.dependency_overrides.clear()
+        custom_mod._daily_cache.clear()
+
+
 def test_scenario_suggestion_service_error_503():
     class _Boom:
         async def chat(self, messages, **_kwargs):
@@ -60,7 +77,8 @@ def test_scenario_suggestion_service_error_503():
 
     app.dependency_overrides[get_client] = lambda: _Boom()
     try:
-        resp = client.get("/api/scenario-suggestion")
+        # fresh=1 bypasses the daily cache so the error path is actually hit.
+        resp = client.get("/api/scenario-suggestion?fresh=1")
         assert resp.status_code == 503
     finally:
         app.dependency_overrides.clear()
