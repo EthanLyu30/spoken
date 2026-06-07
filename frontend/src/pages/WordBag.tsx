@@ -5,7 +5,8 @@ import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import { Button } from "../components/ui/Button";
-import { deleteWord, getWords, patchWord, postWord, reviewWord, type Word } from "../lib/api";
+import { type Word } from "../lib/api";
+import { useWords } from "../store/words";
 import { speakText } from "../lib/speech";
 import { getScenario } from "../data/scenarios";
 import { themeFor } from "../lib/theme";
@@ -23,50 +24,38 @@ function isDue(w: Word): boolean {
 }
 
 export default function WordBag() {
-  const [words, setWords] = useState<Word[] | null>(null);
-  const [error, setError] = useState(false);
+  const words = useWords((s) => s.words);
+  const fetchedOnce = useWords((s) => s.fetchedOnce);
+  const error = useWords((s) => s.error);
+  const ensureLoaded = useWords((s) => s.ensureLoaded);
+  const collect = useWords((s) => s.collect);
+  const removeWord = useWords((s) => s.remove);
+  const toggleMaster = useWords((s) => s.toggleMaster);
+  const reviewWordId = useWords((s) => s.review);
+
   const [open, setOpen] = useState<number | null>(null);
   const [review, setReview] = useState(false);
   const [deck, setDeck] = useState<Word[]>([]); // snapshot for the review session
   const [tab, setTab] = useState<"word" | "sentence">("word");
   const [newWord, setNewWord] = useState("");
-  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
-    const ctrl = new AbortController();
-    getWords(ctrl.signal)
-      .then(setWords)
-      .catch(() => {
-        if (!ctrl.signal.aborted) setError(true);
-      });
-    return () => ctrl.abort();
-  }, []);
+    ensureLoaded();
+  }, [ensureLoaded]);
 
-  async function toggleMaster(w: Word) {
-    const u = await patchWord(w.id, !w.mastered).catch(() => null);
-    if (u) setWords((ws) => (ws ? ws.map((x) => (x.id === w.id ? u : x)) : ws));
-  }
-  async function remove(w: Word) {
-    await deleteWord(w.id).catch(() => undefined);
-    setWords((ws) => (ws ? ws.filter((x) => x.id !== w.id) : ws));
-  }
-  async function addWord() {
+  function addWord() {
     const text = newWord.trim();
-    if (!text || adding) return;
-    setAdding(true);
-    try {
-      const w = await postWord({ text, kind: "word" });
-      setWords((ws) => (ws && !ws.some((x) => x.id === w.id) ? [w, ...ws] : ws));
-      setNewWord("");
-      setTab("word");
-    } catch {
-      /* ignore */
-    } finally {
-      setAdding(false);
-    }
+    if (!text) return;
+    collect({ text, kind: "word" }); // optimistic —释义/例句 fill in shortly
+    setNewWord("");
+    setTab("word");
   }
 
-  const all = words ?? [];
+  const all = words;
+  const hasCache = all.length > 0;
+  const showLoading = !hasCache && !fetchedOnce && !error;
+  const showError = !hasCache && error;
+  const showEmpty = !hasCache && fetchedOnce && !error;
   const kindOf = (w: Word) => (w.kind === "sentence" ? "sentence" : "word");
   const wordCount = all.filter((w) => kindOf(w) === "word").length;
   const sentCount = all.filter((w) => kindOf(w) === "sentence").length;
@@ -79,9 +68,6 @@ export default function WordBag() {
     if (!pool.length) return;
     setDeck(pool);
     setReview(true);
-  }
-  function onReviewed(updated: Word) {
-    setWords((ws) => (ws ? ws.map((x) => (x.id === updated.id ? updated : x)) : ws));
   }
 
   return (
@@ -110,14 +96,14 @@ export default function WordBag() {
           <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">我的生词本</h1>
         </div>
 
-        {words === null && !error && (
+        {showLoading && (
           <section className="card grid place-items-center p-10 text-center">
             <Buddy mood="idle" size={110} />
             <p className="mt-3 text-muted">正在加载…</p>
           </section>
         )}
 
-        {error && (
+        {showError && (
           <section className="card grid place-items-center gap-3 p-10 text-center">
             <Buddy mood="idle" size={110} />
             <p className="font-semibold text-ink">读取失败，请确认后端在运行。</p>
@@ -127,7 +113,7 @@ export default function WordBag() {
           </section>
         )}
 
-        {words && all.length === 0 && (
+        {showEmpty && (
           <section className="card grid place-items-center gap-2 p-10 text-center">
             <Buddy mood="happy" size={140} />
             <h2 className="mt-2 font-display text-xl font-semibold text-ink">还没有收藏</h2>
@@ -135,7 +121,7 @@ export default function WordBag() {
           </section>
         )}
 
-        {words && all.length > 0 && (
+        {hasCache && (
           <>
             <div className="mb-4 flex gap-2">
               {(["word", "sentence"] as const).map((k) => (
@@ -172,10 +158,10 @@ export default function WordBag() {
                 <button
                   type="button"
                   onClick={addWord}
-                  disabled={adding || !newWord.trim()}
+                  disabled={!newWord.trim()}
                   className="inline-flex shrink-0 items-center gap-1 rounded-full bg-coral px-4 py-2 text-sm font-bold text-primary-fg shadow-soft transition-transform active:translate-y-0.5 disabled:opacity-40"
                 >
-                  <Plus className="h-4 w-4" /> {adding ? "添加中…" : "添加"}
+                  <Plus className="h-4 w-4" /> 添加
                 </button>
               </div>
             )}
@@ -185,7 +171,7 @@ export default function WordBag() {
                 {tab === "word" ? "还没有收藏单词，上面加一个吧。" : "还没有收藏句子，去「金句」收藏几句。"}
               </p>
             ) : review ? (
-              <ReviewDeck deck={deck} onReviewed={onReviewed} onDone={() => setReview(false)} />
+              <ReviewDeck deck={deck} review={reviewWordId} onDone={() => setReview(false)} />
             ) : (
               <ul className="space-y-3">
                 {active.map((w) => {
@@ -242,14 +228,14 @@ export default function WordBag() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => toggleMaster(w)}
+                              onClick={() => toggleMaster(w.id)}
                               className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-ink"
                             >
                               <Check className="h-3.5 w-3.5" /> {w.mastered ? "取消掌握" : "标记掌握"}
                             </button>
                             <button
                               type="button"
-                              onClick={() => remove(w)}
+                              onClick={() => removeWord(w.id)}
                               className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-[#e6503d]"
                             >
                               <Trash2 className="h-3.5 w-3.5" /> 删除
@@ -274,16 +260,15 @@ export default function WordBag() {
 /** Spaced-repetition review: flip the card, then grade 记得 / 忘了. */
 function ReviewDeck({
   deck,
-  onReviewed,
+  review,
   onDone,
 }: {
   deck: Word[];
-  onReviewed: (w: Word) => void;
+  review: (id: number, remembered: boolean) => void;
   onDone: () => void;
 }) {
   const [i, setI] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [stats, setStats] = useState({ know: 0, again: 0 });
   const w = deck[i];
 
@@ -301,15 +286,11 @@ function ReviewDeck({
     );
   }
 
-  async function answer(remembered: boolean) {
-    if (busy) return;
-    setBusy(true);
-    const updated = await reviewWord(w.id, remembered).catch(() => null);
-    if (updated) onReviewed(updated);
+  function answer(remembered: boolean) {
+    review(w.id, remembered); // optimistic — the store syncs the SRS schedule in the background
     setStats((s) => (remembered ? { ...s, know: s.know + 1 } : { ...s, again: s.again + 1 }));
     setFlipped(false);
     setI((x) => x + 1);
-    setBusy(false);
   }
 
   return (
@@ -342,12 +323,10 @@ function ReviewDeck({
         <span className="text-xs text-muted">点卡片翻面看释义</span>
       </div>
       <div className="flex gap-3">
-        <Button variant="soft" disabled={busy} onClick={() => answer(false)}>
+        <Button variant="soft" onClick={() => answer(false)}>
           忘了
         </Button>
-        <Button disabled={busy} onClick={() => answer(true)}>
-          记得 ✓
-        </Button>
+        <Button onClick={() => answer(true)}>记得 ✓</Button>
       </div>
     </section>
   );

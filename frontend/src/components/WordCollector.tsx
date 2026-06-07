@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Check, Loader2, Plus } from "lucide-react";
-import { postWord } from "../lib/api";
+import { Check, Plus } from "lucide-react";
+import { useWords } from "../store/words";
 
 /**
  * Select any word/phrase inside a [data-collect] region (chat, report, daily
@@ -18,7 +18,8 @@ function clean(raw: string): string | null {
 export function WordCollector() {
   const [text, setText] = useState<string | null>(null);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  const [state, setState] = useState<"idle" | "saving" | "done">("idle");
+  const [state, setState] = useState<"idle" | "done">("idle");
+  const collect = useWords((s) => s.collect);
 
   useEffect(() => {
     function onSelect() {
@@ -51,19 +52,14 @@ export function WordCollector() {
     };
   }, []);
 
-  async function add() {
-    if (!text || state === "saving") return;
-    setState("saving");
-    try {
-      await postWord({ text, kind: "word" });
-      setState("done");
-      window.setTimeout(() => {
-        setText(null);
-        window.getSelection()?.removeAllRanges();
-      }, 1000);
-    } catch {
-      setState("idle");
-    }
+  function add() {
+    if (!text) return;
+    collect({ text, kind: "word" }); // optimistic — saved in the background
+    setState("done");
+    window.setTimeout(() => {
+      setText(null);
+      window.getSelection()?.removeAllRanges();
+    }, 1000);
   }
 
   if (!text || !pos) return null;
@@ -78,10 +74,6 @@ export function WordCollector() {
       {state === "done" ? (
         <>
           <Check className="h-3.5 w-3.5" /> 已加入生词本
-        </>
-      ) : state === "saving" ? (
-        <>
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> 加入中…
         </>
       ) : (
         <>

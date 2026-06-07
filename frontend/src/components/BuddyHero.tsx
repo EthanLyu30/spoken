@@ -5,7 +5,8 @@ import { Buddy } from "./Buddy";
 import { Ring } from "./ui/Ring";
 import { ProgressBar } from "./ui/ProgressBar";
 import { StatChip } from "./StatChip";
-import { getStats, getWords, type Stats } from "../lib/api";
+import { getStats, type Stats } from "../lib/api";
+import { useWords } from "../store/words";
 
 interface BuddyHeroProps {
   greeting: string;
@@ -14,16 +15,16 @@ interface BuddyHeroProps {
 /** Home hero: Pip greets the learner, with real level / XP / streak / daily goal. */
 export function BuddyHero({ greeting }: BuddyHeroProps) {
   const [stats, setStats] = useState<Stats | null>(null);
-  const [wordCount, setWordCount] = useState<number | null>(null);
+  const words = useWords((s) => s.words);
+  const ensureLoaded = useWords((s) => s.ensureLoaded);
+  const wordCount = words.filter((w) => w.kind !== "sentence").length;
 
   useEffect(() => {
     const ctrl = new AbortController();
     getStats(ctrl.signal).then(setStats).catch(() => undefined);
-    getWords(ctrl.signal)
-      .then((ws) => setWordCount(ws.filter((w) => w.kind !== "sentence").length))
-      .catch(() => undefined);
+    ensureLoaded();
     return () => ctrl.abort();
-  }, []);
+  }, [ensureLoaded]);
 
   const level = stats?.level ?? 1;
   const xp = stats?.xp ?? 0;
@@ -78,7 +79,7 @@ export function BuddyHero({ greeting }: BuddyHeroProps) {
             <Link to="/words" className="transition-transform hover:-translate-y-0.5" aria-label="打开生词本">
               <StatChip
                 icon={<Sparkles className="h-4 w-4" />}
-                value={wordCount ?? 0}
+                value={wordCount}
                 label="收集词"
                 tint="#e6f4fc"
                 fg="#2c8fc6"
