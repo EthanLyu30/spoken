@@ -8,6 +8,9 @@ from sqlalchemy.orm import Session
 from app.models.session import PracticeSession, SkillScore, Turn
 from app.schemas.session import SaveSessionRequest
 
+# Keep storage bounded: only retain the most recent N sessions.
+SESSION_KEEP = 200
+
 
 def create_session(db: Session, payload: SaveSessionRequest) -> PracticeSession:
     session = PracticeSession(
@@ -27,7 +30,21 @@ def create_session(db: Session, payload: SaveSessionRequest) -> PracticeSession:
     db.add(session)
     db.commit()
     db.refresh(session)
+    prune_sessions(db)
     return session
+
+
+def prune_sessions(db: Session, keep: int = SESSION_KEEP) -> None:
+    """Delete sessions older than the most recent ``keep`` (cascades to turns/scores)."""
+    stale = list(
+        db.scalars(
+            select(PracticeSession).order_by(desc(PracticeSession.created_at)).offset(keep)
+        )
+    )
+    if stale:
+        for s in stale:
+            db.delete(s)
+        db.commit()
 
 
 def list_sessions(db: Session, limit: int = 50) -> list[PracticeSession]:

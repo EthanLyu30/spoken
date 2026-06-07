@@ -26,6 +26,21 @@ def test_practice_kind_filter():
     assert only and all(r["kind"] == "interview" for r in only)
 
 
+def test_prune_records_keeps_only_newest():
+    from app.db import SessionLocal
+    from app.services import practice as repo
+
+    for _ in range(4):
+        client.post("/api/practice", json={"kind": "pronunciation", "score": 60})
+    db = SessionLocal()
+    try:
+        repo.prune_records(db, keep=3)
+    finally:
+        db.close()
+    # Pruning retains exactly the newest `keep` records across the whole table.
+    assert len(client.get("/api/practice?limit=1000").json()) == 3
+
+
 def test_stats_shape_and_activity():
     client.post("/api/practice", json={"kind": "pronunciation", "score": 70})
     s = client.get("/api/stats").json()
