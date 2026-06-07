@@ -65,6 +65,16 @@ docker compose up -d --build
 
 ---
 
+## 国内访问提速（自定义域名 + 保活）
+
+国内直连 Vercel 的 `*.vercel.app` 有时会被 DNS 污染 / 路由很慢，Render 免费档闲置 ~15 分钟会休眠、冷启动要几十秒。低成本缓解：
+
+- **自定义域名**：买个域名，在 Vercel 项目 **Settings → Domains** 添加并按提示配 DNS（自有域名比 `*.vercel.app` 稳）。加好后把后端 `CORS_ORIGINS` 加上新域名（多个用逗号分隔）。
+- **保活后端**：仓库已带 `.github/workflows/keepalive.yml`，每 ~10 分钟 ping 一次 `/api/health` 让 Render 别睡（可在仓库 **Settings → Variables** 设 `BACKEND_HEALTH_URL` 覆盖默认地址）。GitHub 定时任务是「尽力而为」、可能延迟；要更稳可再挂一个 [UptimeRobot](https://uptimerobot.com)（免费，5 分钟间隔）。
+- **想要国内更快**：把后端迁到香港（如 fly.io `hkg`），离用户和 DeepSeek 都近；或走 ICP 备案 + 国内 CDN（最快但最折腾）。免费版 Cloudflare 在大陆无节点，通常帮助有限、甚至更慢。
+
+---
+
 ## 验证（任一方式）
 
 1. `GET <后端>/api/health` → `{"status":"ok"}`

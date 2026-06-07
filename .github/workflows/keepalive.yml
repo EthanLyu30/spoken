@@ -1,0 +1,30 @@
+name: Keep backend warm
+
+# Render's free tier sleeps after ~15 min idle, so the first request after a nap
+# pays a ~30-60s cold start. A periodic ping keeps it warm during the day.
+# NOTE: GitHub's cron is best-effort and often runs late; for rock-solid uptime
+# add an external pinger too (e.g. UptimeRobot, free, 5-min interval).
+
+on:
+  schedule:
+    - cron: "*/10 * * * *" # every ~10 minutes (best-effort)
+  workflow_dispatch: {}
+
+permissions: {} # no repo access needed; the job only makes an outbound request
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        env:
+          URL: ${{ vars.BACKEND_HEALTH_URL || 'https://spoken-backend.onrender.com/api/health' }}
+        run: |
+          for i in 1 2 3; do
+            if curl -fsS --max-time 40 "$URL"; then
+              echo ""; echo "warm ✔"; exit 0
+            fi
+            echo "attempt $i failed, retrying…"; sleep 15
+          done
+          # Don't fail the job on a transient miss (avoids cold-start email spam).
+          echo "ping did not succeed; backend may be cold-starting"
