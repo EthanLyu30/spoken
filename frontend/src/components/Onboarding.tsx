@@ -123,6 +123,7 @@ export function Onboarding() {
 }
 
 /** Re-open the onboarding from settings. */
+// eslint-disable-next-line react-refresh/only-export-components
 export function resetOnboarding() {
   try {
     localStorage.removeItem(KEY);
