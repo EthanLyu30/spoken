@@ -25,33 +25,33 @@ import {
   getPractice,
   getSessions,
   getStats,
-  getWords,
   type PracticeRecord,
   type SessionSummary,
   type Stats,
-  type Word,
 } from "../lib/api";
 import { EChart } from "../components/EChart";
 import { listBrowserVoices, primeBrowserVoices, speakText } from "../lib/speech";
 import { useVoice, VOICE_OPTIONS, type VoiceEngine } from "../store/voice";
+import { useWords } from "../store/words";
 import { resetOnboarding } from "../lib/onboarding";
 import { tokens } from "../lib/tokens";
 import { cn } from "../lib/utils";
 
 export default function Profile() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [words, setWords] = useState<Word[]>([]);
+  const words = useWords((s) => s.words);
+  const ensureLoaded = useWords((s) => s.ensureLoaded);
   const [stats, setStats] = useState<Stats | null>(null);
   const [practice, setPractice] = useState<PracticeRecord[]>([]);
 
   useEffect(() => {
     const ctrl = new AbortController();
     getSessions(ctrl.signal).then(setSessions).catch(() => undefined);
-    getWords(ctrl.signal).then(setWords).catch(() => undefined);
+    ensureLoaded();
     getStats(ctrl.signal).then(setStats).catch(() => undefined);
     getPractice(undefined, 100, ctrl.signal).then(setPractice).catch(() => undefined);
     return () => ctrl.abort();
-  }, []);
+  }, [ensureLoaded]);
 
   const sessionCount = sessions.length;
   const wordCount = words.length;

@@ -8,7 +8,8 @@ import { Button } from "../components/ui/Button";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { useSession } from "../store/session";
 import { useCustomScene } from "../store/custom";
-import { deleteWord, postFeedback, postWord, type FeedbackResponse } from "../lib/api";
+import { postFeedback, type FeedbackResponse } from "../lib/api";
+import { useWords } from "../store/words";
 import { persistSessionOnce } from "../lib/sessionSave";
 import { getScenario } from "../data/scenarios";
 
@@ -30,8 +31,15 @@ export default function Report() {
   const [loading, setLoading] = useState(hasSession);
   const [error, setError] = useState<string | null>(null);
   // phrase index -> saved word id, so the chip can toggle collect / un-collect.
-  const [savedWords, setSavedWords] = useState<Map<number, number>>(new Map());
+  const words = useWords((s) => s.words);
+  const ensureWords = useWords((s) => s.ensureLoaded);
+  const collect = useWords((s) => s.collect);
+  const removeWord = useWords((s) => s.remove);
   const reqId = useRef(0);
+
+  useEffect(() => {
+    ensureWords();
+  }, [ensureWords]);
 
   useEffect(() => {
     if (!hasSession || !scenarioId) return;
@@ -182,43 +190,37 @@ export default function Report() {
                   <p className="mt-3 text-sm text-muted">继续积累地道表达吧！</p>
                 ) : (
                   <ul className="mt-4 space-y-2.5">
-                    {feedback.phrases.map((p, i) => (
-                      <li key={i} className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full bg-surface-2 px-3 py-1 text-sm font-semibold text-ink">
-                          {p.text}
-                        </span>
-                        <span className="text-xs text-muted">{p.note}</span>
-                        <button
-                          type="button"
-                          title={savedWords.has(i) ? "再次点击取消收藏" : "收藏到生词本"}
-                          onClick={() => {
-                            const existing = savedWords.get(i);
-                            if (existing !== undefined) {
-                              setSavedWords((s) => {
-                                const n = new Map(s);
-                                n.delete(i);
-                                return n;
+                    {feedback.phrases.map((p, i) => {
+                      const collected = words.some((w) => w.text === p.text);
+                      return (
+                        <li key={i} className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-surface-2 px-3 py-1 text-sm font-semibold text-ink">
+                            {p.text}
+                          </span>
+                          <span className="text-xs text-muted">{p.note}</span>
+                          <button
+                            type="button"
+                            title={collected ? "再次点击取消收藏" : "收藏到生词本"}
+                            onClick={() => {
+                              const existing = words.find((w) => w.text === p.text);
+                              if (existing) {
+                                removeWord(existing.id);
+                                return;
+                              }
+                              collect({
+                                text: p.text,
+                                meaning: p.note,
+                                scenario_id: scenarioId ?? "",
+                                kind: "word",
                               });
-                              deleteWord(existing).catch(() =>
-                                setSavedWords((s) => new Map(s).set(i, existing)),
-                              );
-                              return;
-                            }
-                            postWord({
-                              text: p.text,
-                              meaning: p.note,
-                              scenario_id: scenarioId ?? "",
-                              kind: "word",
-                            })
-                              .then((w) => setSavedWords((s) => new Map(s).set(i, w.id)))
-                              .catch(() => undefined);
-                          }}
-                          className="text-[0.66rem] font-bold uppercase tracking-wide text-coral-deep"
-                        >
-                          {savedWords.has(i) ? "已收藏 ✓" : "+ 收藏"}
-                        </button>
-                      </li>
-                    ))}
+                            }}
+                            className="text-[0.66rem] font-bold uppercase tracking-wide text-coral-deep"
+                          >
+                            {collected ? "已收藏 ✓" : "+ 收藏"}
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </section>

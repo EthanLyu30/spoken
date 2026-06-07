@@ -3,7 +3,8 @@ import { Check, RefreshCw, Search, Sparkles, Volume2 } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { PronounceButton } from "../components/PronounceButton";
-import { deleteWord, getDailyLines, getWords, postWord, type DailyLine } from "../lib/api";
+import { getDailyLines, type DailyLine } from "../lib/api";
+import { useWords } from "../store/words";
 import { speakText } from "../lib/speech";
 import {
   categoryLabels,
@@ -43,8 +44,14 @@ export default function Daily() {
   const [page, setPage] = useState(0);
   const [aiLines, setAiLines] = useState<DailyLine[] | null>(null);
   const [genState, setGenState] = useState<"idle" | "loading" | "error">("idle");
-  // text -> word id, so the collect button can toggle (collect / un-collect).
-  const [saved, setSaved] = useState<Map<string, number>>(new Map());
+
+  // Collected state comes from the shared word store (cached + optimistic), so
+  // the collect button flips instantly and stays in sync across pages.
+  const words = useWords((s) => s.words);
+  const ensureLoaded = useWords((s) => s.ensureLoaded);
+  const collect = useWords((s) => s.collect);
+  const removeWord = useWords((s) => s.remove);
+  const savedIds = useMemo(() => new Map(words.map((w) => [w.text, w.id])), [words]);
 
   const pool = useMemo(() => (cat === "all" ? quotes : quotes.filter((q) => q.category === cat)), [cat]);
   const base = dayOfYear() * SET_SIZE;
@@ -56,12 +63,8 @@ export default function Daily() {
   const fromAi = aiLines !== null;
 
   useEffect(() => {
-    const ctrl = new AbortController();
-    getWords(ctrl.signal)
-      .then((ws) => setSaved(new Map(ws.map((w) => [w.text, w.id]))))
-      .catch(() => undefined);
-    return () => ctrl.abort();
-  }, []);
+    ensureLoaded();
+  }, [ensureLoaded]);
 
   function pickCat(next: QuoteCategory | "all") {
     setCat(next);
@@ -69,26 +72,15 @@ export default function Daily() {
     setAiLines(null);
   }
 
-  async function toggleSave(q: Line) {
-    const existingId = saved.get(q.text);
+  function toggleSave(q: Line) {
+    const existingId = savedIds.get(q.text);
     if (existingId !== undefined) {
-      // Un-collect: remove optimistically, restore on failure.
-      setSaved((s) => {
-        const n = new Map(s);
-        n.delete(q.text);
-        return n;
-      });
-      deleteWord(existingId).catch(() => setSaved((s) => new Map(s).set(q.text, existingId)));
+      removeWord(existingId);
       return;
     }
     const src = sourceOf(q);
     const meaning = `${q.zh} —— ${q.author}${src ? `《${src}》` : ""}`;
-    try {
-      const w = await postWord({ text: q.text, meaning, kind: "sentence" });
-      setSaved((s) => new Map(s).set(q.text, w.id));
-    } catch {
-      /* ignore */
-    }
+    collect({ text: q.text, meaning, kind: "sentence" });
   }
 
   function shuffle() {
@@ -197,15 +189,15 @@ export default function Daily() {
                   <button
                     type="button"
                     onClick={() => toggleSave(q)}
-                    title={saved.has(q.text) ? "再次点击取消收藏" : "收藏到生词本"}
+                    title={savedIds.has(q.text) ? "再次点击取消收藏" : "收藏到生词本"}
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold shadow-soft transition-transform hover:-translate-y-0.5",
-                      saved.has(q.text)
+                      savedIds.has(q.text)
                         ? "bg-leaf/15 text-leaf-deep"
                         : "border border-border bg-surface text-ink",
                     )}
                   >
-                    <Check className="h-3.5 w-3.5" /> {saved.has(q.text) ? "已收藏" : "收藏"}
+                    <Check className="h-3.5 w-3.5" /> {savedIds.has(q.text) ? "已收藏" : "收藏"}
                   </button>
                   <PronounceButton text={q.text} />
                   {!fromAi && (
