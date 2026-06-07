@@ -17,7 +17,8 @@ import {
 import { getScenario } from "../data/scenarios";
 import { scenarioIcons } from "../lib/icons";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
-import { postChat, postAsr, postHint, streamChat, type ChatMessage } from "../lib/api";
+import { postChat, postAsr, postHint, postFeedback, streamChat, type ChatMessage } from "../lib/api";
+import { persistSessionOnce } from "../lib/sessionSave";
 import { speakText, type Speaking } from "../lib/speech";
 import { useSession } from "../store/session";
 import { useCustomScene } from "../store/custom";
@@ -68,6 +69,7 @@ export default function Conversation() {
   const recorderRef = useRef<ActiveRecorder | null>(null);
   const callRef = useRef<VoiceCall | null>(null);
   const messagesRef = useRef<ChatMessage[]>(messages);
+  const goingToReportRef = useRef(false); // true when leaving via 看小结 (report saves)
 
   const navigate = useNavigate();
   const setSession = useSession((s) => s.setSession);
@@ -80,6 +82,7 @@ export default function Conversation() {
 
   function finish() {
     if (!id) return;
+    goingToReportRef.current = true; // the report page will save this session
     callRef.current?.end();
     setSession(id, messages);
     navigate(`/report/${id}`);
@@ -138,13 +141,25 @@ export default function Conversation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, muted, callPhase, streaming]);
 
-  // Stop audio / recording / call on unmount.
+  // Stop audio / recording / call on unmount. If the learner had a real
+  // exchange but left without opening the debrief, still save the session in
+  // the background so the practice counts.
   useEffect(() => {
     return () => {
       speakingRef.current?.stop();
       recorderRef.current?.stop().catch(() => undefined);
       callRef.current?.end();
+      if (!goingToReportRef.current && id) {
+        const msgs = messagesRef.current;
+        if (msgs.some((m) => m.role === "user")) {
+          const custom = isCustom ? customScene ?? undefined : undefined;
+          postFeedback(id, msgs, undefined, custom)
+            .then((f) => persistSessionOnce(id, msgs, f))
+            .catch(() => undefined);
+        }
+      }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Play a line of Pip's speech; resolves when playback finishes.

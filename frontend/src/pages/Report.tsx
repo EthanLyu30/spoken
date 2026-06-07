@@ -8,16 +8,14 @@ import { Button } from "../components/ui/Button";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { useSession } from "../store/session";
 import { useCustomScene } from "../store/custom";
-import { deleteWord, postFeedback, postSession, postWord, type FeedbackResponse } from "../lib/api";
+import { deleteWord, postFeedback, postWord, type FeedbackResponse } from "../lib/api";
+import { persistSessionOnce } from "../lib/sessionSave";
 import { getScenario } from "../data/scenarios";
 
 const SCORE_COLORS = ["#ff6f5e", "#ff9f45", "#41c08c", "#57b7e8"];
 
 const backLink =
   "inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5";
-
-// Dedupe saves across StrictMode remounts / re-renders.
-const savedSignatures = new Set<string>();
 
 export default function Report() {
   const scenarioId = useSession((s) => s.scenarioId);
@@ -45,18 +43,7 @@ export default function Report() {
       .then((f) => {
         if (myId !== reqId.current) return;
         setFeedback(f);
-        const sig = `${scenarioId}|${messages.length}|${f.overall}`;
-        if (!savedSignatures.has(sig)) {
-          savedSignatures.add(sig);
-          postSession({
-            scenario_id: scenarioId,
-            messages,
-            overall: f.overall,
-            summary: f.summary,
-            tip: f.tip,
-            scores: f.scores,
-          }).catch(() => undefined);
-        }
+        void persistSessionOnce(scenarioId, messages, f);
       })
       .catch(() => {
         if (!ctrl.signal.aborted && myId === reqId.current)
