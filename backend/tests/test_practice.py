@@ -34,10 +34,10 @@ def test_prune_records_keeps_only_newest():
         client.post("/api/practice", json={"kind": "pronunciation", "score": 60})
     db = SessionLocal()
     try:
-        repo.prune_records(db, keep=3)
+        repo.prune_records(db, "anon", keep=3)
     finally:
         db.close()
-    # Pruning retains exactly the newest `keep` records across the whole table.
+    # Pruning retains exactly the newest `keep` records for this client.
     assert len(client.get("/api/practice?limit=1000").json()) == 3
 
 

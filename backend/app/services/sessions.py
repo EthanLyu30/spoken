@@ -12,8 +12,9 @@ from app.schemas.session import SaveSessionRequest
 SESSION_KEEP = 200
 
 
-def create_session(db: Session, payload: SaveSessionRequest) -> PracticeSession:
+def create_session(db: Session, client_id: str, payload: SaveSessionRequest) -> PracticeSession:
     session = PracticeSession(
+        client_id=client_id,
         scenario_id=payload.scenario_id,
         overall=payload.overall,
         summary=payload.summary,
@@ -30,15 +31,18 @@ def create_session(db: Session, payload: SaveSessionRequest) -> PracticeSession:
     db.add(session)
     db.commit()
     db.refresh(session)
-    prune_sessions(db)
+    prune_sessions(db, client_id)
     return session
 
 
-def prune_sessions(db: Session, keep: int = SESSION_KEEP) -> None:
-    """Delete sessions older than the most recent ``keep`` (cascades to turns/scores)."""
+def prune_sessions(db: Session, client_id: str, keep: int = SESSION_KEEP) -> None:
+    """Delete this client's sessions older than its most recent ``keep`` (cascades)."""
     stale = list(
         db.scalars(
-            select(PracticeSession).order_by(desc(PracticeSession.created_at)).offset(keep)
+            select(PracticeSession)
+            .where(PracticeSession.client_id == client_id)
+            .order_by(desc(PracticeSession.created_at))
+            .offset(keep)
         )
     )
     if stale:
@@ -47,10 +51,19 @@ def prune_sessions(db: Session, keep: int = SESSION_KEEP) -> None:
         db.commit()
 
 
-def list_sessions(db: Session, limit: int = 50) -> list[PracticeSession]:
-    stmt = select(PracticeSession).order_by(desc(PracticeSession.created_at)).limit(limit)
+def list_sessions(db: Session, client_id: str, limit: int = 50) -> list[PracticeSession]:
+    stmt = (
+        select(PracticeSession)
+        .where(PracticeSession.client_id == client_id)
+        .order_by(desc(PracticeSession.created_at))
+        .limit(limit)
+    )
     return list(db.scalars(stmt))
 
 
-def get_session(db: Session, session_id: int) -> PracticeSession | None:
-    return db.get(PracticeSession, session_id)
+def get_session(db: Session, client_id: str, session_id: int) -> PracticeSession | None:
+    return db.scalars(
+        select(PracticeSession).where(
+            PracticeSession.id == session_id, PracticeSession.client_id == client_id
+        )
+    ).first()

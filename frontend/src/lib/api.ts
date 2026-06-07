@@ -5,6 +5,7 @@
  * (see vite.config.ts). In other environments, set VITE_API_BASE_URL.
  */
 import { useVoice } from "../store/voice";
+import { getClientId } from "./clientId";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const DEFAULT_TIMEOUT = 60_000; // generous: DeepSeek replies can be slow
@@ -30,8 +31,12 @@ export function withTimeout(signal: AbortSignal | undefined | null, ms: number):
 
 async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...init,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Client-Id": getClientId(),
+      ...(init?.headers as Record<string, string> | undefined),
+    },
     signal: withTimeout(init?.signal, timeoutMs),
   });
   if (!res.ok) {
@@ -468,6 +473,10 @@ export function patchWord(id: number, mastered: boolean, signal?: AbortSignal): 
 }
 
 export async function deleteWord(id: number, signal?: AbortSignal): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/words/${id}`, { method: "DELETE", signal });
+  const res = await fetch(`${BASE_URL}/api/words/${id}`, {
+    method: "DELETE",
+    headers: { "X-Client-Id": getClientId() },
+    signal,
+  });
   if (!res.ok) throw new Error(`delete word failed: ${res.status}`);
 }

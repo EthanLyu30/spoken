@@ -18,6 +18,7 @@ class WordEntry(Base):
     __tablename__ = "words"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    client_id: Mapped[str] = mapped_column(String(64), default="anon", index=True)
     text: Mapped[str] = mapped_column(String(128), index=True)
     meaning: Mapped[str] = mapped_column(Text, default="")
     example: Mapped[str] = mapped_column(Text, default="")
