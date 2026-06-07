@@ -11,7 +11,7 @@
 [![LLM](https://img.shields.io/badge/LLM-DeepSeek-7c3aed)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
 
-🔗 **在线体验 / Live demo**：<https://spoken-gamma.vercel.app>
+🔗 **在线体验 / Live demo**：<https://spokenai.org>
 
 中文 · [English](README.en.md)
 
