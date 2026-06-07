@@ -39,6 +39,8 @@ interface WordsState {
   toggleMaster: (id: number) => void;
   /** Record an SRS review result; the card is assumed already advanced in the UI. */
   review: (id: number, remembered: boolean) => void;
+  /** Drop the cache so the next load refetches (used on login/logout). */
+  reset: () => void;
 }
 
 export const useWords = create<WordsState>()(
@@ -129,6 +131,8 @@ export const useWords = create<WordsState>()(
           .then((u) => set((s) => ({ words: s.words.map((w) => (w.id === id ? u : w)) })))
           .catch(() => undefined);
       },
+
+      reset: () => set({ words: [], fetchedOnce: false, refreshing: false, error: false }),
     }),
     {
       name: "spoken-words",

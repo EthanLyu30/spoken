@@ -5,10 +5,17 @@
  * (see vite.config.ts). In other environments, set VITE_API_BASE_URL.
  */
 import { useVoice } from "../store/voice";
+import { getToken } from "./authToken";
 import { getClientId } from "./clientId";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const DEFAULT_TIMEOUT = 60_000; // generous: DeepSeek replies can be slow
+
+/** Bearer header when logged in; empty when browsing anonymously. */
+function authHeader(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export interface HealthResponse {
   status: string;
@@ -35,12 +42,22 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
     headers: {
       "Content-Type": "application/json",
       "X-Client-Id": getClientId(),
+      ...authHeader(),
       ...(init?.headers as Record<string, string> | undefined),
     },
     signal: withTimeout(init?.signal, timeoutMs),
   });
   if (!res.ok) {
-    throw new Error(`${init?.method ?? "GET"} ${path} failed: ${res.status}`);
+    // Surface the backend's message (FastAPI `detail`) when present, e.g. the
+    // Chinese login/register errors; fall back to a generic status string.
+    let detail = "";
+    try {
+      const data = await res.json();
+      if (data && typeof data.detail === "string") detail = data.detail;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(detail || `${init?.method ?? "GET"} ${path} failed: ${res.status}`);
   }
   return res.json() as Promise<T>;
 }
@@ -475,8 +492,52 @@ export function patchWord(id: number, mastered: boolean, signal?: AbortSignal): 
 export async function deleteWord(id: number, signal?: AbortSignal): Promise<void> {
   const res = await fetch(`${BASE_URL}/api/words/${id}`, {
     method: "DELETE",
-    headers: { "X-Client-Id": getClientId() },
+    headers: { "X-Client-Id": getClientId(), ...authHeader() },
     signal,
   });
   if (!res.ok) throw new Error(`delete word failed: ${res.status}`);
+}
+
+// --- Accounts (optional; the app also works anonymously per-device) ---
+
+export interface AuthUser {
+  id: number;
+  email: string;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: AuthUser;
+}
+
+/** Create an account; binds the current device's anonymous data to it. */
+export function registerUser(
+  email: string,
+  password: string,
+  signal?: AbortSignal,
+): Promise<AuthResponse> {
+  return request<AuthResponse>("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+    signal,
+  });
+}
+
+/** Log in to an existing account. */
+export function loginUser(
+  email: string,
+  password: string,
+  signal?: AbortSignal,
+): Promise<AuthResponse> {
+  return request<AuthResponse>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+    signal,
+  });
+}
+
+/** The authenticated account; rejects if the token is missing or expired. */
+export function getMe(signal?: AbortSignal): Promise<AuthUser> {
+  return request<AuthUser>("/api/auth/me", { signal });
 }

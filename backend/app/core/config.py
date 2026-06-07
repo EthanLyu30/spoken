@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     app_name: str = "Spoken"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # Auth (JWT). Set a strong JWT_SECRET in production; the dev fallback is only
+    # for local use. Tokens are short-lived so rotating the secret just forces
+    # everyone to log in again.
+    jwt_secret: str = ""
+    jwt_expire_days: int = 30
+
     # Persistence
     database_url: str = "sqlite:///./spoken.db"
 
