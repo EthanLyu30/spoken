@@ -503,6 +503,8 @@ export async function deleteWord(id: number, signal?: AbortSignal): Promise<void
 export interface AuthUser {
   id: number;
   email: string;
+  display_name: string;
+  avatar_url: string;
   created_at: string;
 }
 
@@ -540,4 +542,16 @@ export function loginUser(
 /** The authenticated account; rejects if the token is missing or expired. */
 export function getMe(signal?: AbortSignal): Promise<AuthUser> {
   return request<AuthUser>("/api/auth/me", { signal });
+}
+
+/** Edit the logged-in account's display name and/or avatar (a small data URL). */
+export function updateProfile(
+  patch: { display_name?: string; avatar_url?: string },
+  signal?: AbortSignal,
+): Promise<AuthUser> {
+  return request<AuthUser>("/api/auth/me", {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+    signal,
+  });
 }

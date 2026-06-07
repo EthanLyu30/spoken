@@ -17,9 +17,7 @@ import {
 } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
-import { Buddy } from "../components/Buddy";
 import { Ring } from "../components/ui/Ring";
-import { ProgressBar } from "../components/ui/ProgressBar";
 import type { EChartsOption } from "echarts";
 import {
   getPractice,
@@ -34,7 +32,7 @@ import { listBrowserVoices, primeBrowserVoices, speakText } from "../lib/speech"
 import { useVoice, VOICE_OPTIONS, type VoiceEngine } from "../store/voice";
 import { useWords } from "../store/words";
 import { useAuth } from "../store/auth";
-import { AuthPanel } from "../components/AuthPanel";
+import { ProfileHero } from "../components/ProfileHero";
 import { resetOnboarding } from "../lib/onboarding";
 import { tokens } from "../lib/tokens";
 import { cn } from "../lib/utils";
@@ -101,24 +99,7 @@ export default function Profile() {
       <PlayfulBackground />
 
       <main className="mx-auto w-full max-w-3xl px-5 py-8">
-        <section className="card flex flex-col items-center gap-3 p-6 text-center">
-          <Buddy mood="happy" size={120} />
-          <div>
-            <h1 className="font-display text-2xl font-semibold text-ink">我的小屋</h1>
-            <p className="text-sm text-muted">Lv.{level} · 和 Pip 一起成长</p>
-          </div>
-          <div className="w-full max-w-xs">
-            <div className="mb-1 flex justify-between text-xs font-semibold text-muted">
-              <span>Lv.{level}</span>
-              <span className="tabnum">
-                {xp} / {xpNext} XP
-              </span>
-            </div>
-            <ProgressBar value={(xp / xpNext) * 100} color="var(--tangerine)" />
-          </div>
-        </section>
-
-        <AuthPanel />
+        <ProfileHero level={level} xp={xp} xpNext={xpNext} />
 
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat icon={<MessageSquare className="h-4 w-4" />} value={sessionCount} label="练习次数" />

@@ -1,6 +1,12 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { getMe, loginUser, registerUser, type AuthUser } from "../lib/api";
+import {
+  getMe,
+  loginUser,
+  registerUser,
+  updateProfile as updateProfileApi,
+  type AuthUser,
+} from "../lib/api";
 import { clearToken, setToken } from "../lib/authToken";
 import { useWords } from "./words";
 
@@ -18,6 +24,8 @@ interface AuthState {
   logout: () => void;
   /** Validate the persisted token against the server; clears it if stale. */
   refresh: () => Promise<void>;
+  /** Edit display name / avatar of the logged-in account. */
+  updateProfile: (patch: { display_name?: string; avatar_url?: string }) => Promise<void>;
 }
 
 function swapOwner() {
@@ -58,6 +66,10 @@ export const useAuth = create<AuthState>()(
           clearToken();
           set({ user: null });
         }
+      },
+
+      updateProfile: async (patch) => {
+        set({ user: await updateProfileApi(patch) });
       },
     }),
     {
