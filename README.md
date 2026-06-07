@@ -140,6 +140,8 @@ docker compose up --build
 - 后端文档 <http://localhost:8000/docs>
 - SQLite 持久化在 `backend-data` 卷
 
+> 云端托管（Render 后端 + Vercel 前端，含一键 Blueprint `render.yaml`）见 **[docs/DEPLOY.md](docs/DEPLOY.md)**。
+
 ### 🔑 环境变量
 
 写入 `backend/.env`（**切勿提交**）：
