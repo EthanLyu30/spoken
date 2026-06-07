@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
-import { init, use, type ECharts, type EChartsCoreOption } from "echarts/core";
+import { init, use as registerEcharts, type ECharts, type EChartsCoreOption } from "echarts/core";
 import { LineChart, RadarChart } from "echarts/charts";
 import { GridComponent, TooltipComponent } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 
 // Register only what we use, so we don't ship all of ECharts.
-use([LineChart, RadarChart, GridComponent, TooltipComponent, CanvasRenderer]);
+registerEcharts([LineChart, RadarChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
 interface EChartProps {
   option: EChartsCoreOption;

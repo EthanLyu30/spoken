@@ -4,6 +4,7 @@
 
 **在真实场景下用语音和 AI 对话练口语，并获得发音、语法与表达的量化反馈。**
 
+[![CI](https://github.com/EthanLyu30/spoken/actions/workflows/ci.yml/badge.svg)](https://github.com/EthanLyu30/spoken/actions/workflows/ci.yml)
 [![Backend](https://img.shields.io/badge/backend-FastAPI-009688)]()
 [![Frontend](https://img.shields.io/badge/frontend-React%2BTS-61dafb)]()
 [![Voice](https://img.shields.io/badge/voice-iFlytek-blue)]()
