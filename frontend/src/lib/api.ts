@@ -104,9 +104,9 @@ export function createCustomScene(
   });
 }
 
-/** A fresh, ready-to-play scene to feature as the day's recommendation. */
-export function getScenarioSuggestion(signal?: AbortSignal): Promise<CustomScene> {
-  return request<CustomScene>("/api/scenario-suggestion", { signal });
+/** The day's featured scene (cached server-side per day); `fresh` regenerates. */
+export function getScenarioSuggestion(fresh = false, signal?: AbortSignal): Promise<CustomScene> {
+  return request<CustomScene>(`/api/scenario-suggestion${fresh ? "?fresh=1" : ""}`, { signal });
 }
 
 /**

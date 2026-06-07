@@ -5,7 +5,9 @@ full English role-play spec. The spec is returned to the client, which then
 carries it back inline on chat / feedback requests (see ``ChatRequest.custom``).
 """
 
+import asyncio
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import ValidationError
@@ -72,13 +74,38 @@ async def custom_scenario(
     return await _generate(client, messages, temperature=0.8)
 
 
+# The default daily pick is cached server-side per (UTC) day so only the first
+# request each day pays the generation latency (Render -> DeepSeek round trip);
+# everyone else is served instantly. "换一个" (fresh=1) always regenerates.
+_daily_cache: dict[str, CustomScene] = {}
+_daily_lock = asyncio.Lock()
+
+
+def _utc_day() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
 @router.get("/scenario-suggestion", response_model=CustomScene)
 async def scenario_suggestion(
+    fresh: bool = False,
     client: DeepSeekClient = Depends(get_client),
 ) -> CustomScene:
-    """A fresh, ready-to-play scenario the client features as the day's pick."""
+    """A ready-to-play scenario featured as the day's pick (cached per day)."""
     messages = [
         {"role": "system", "content": _SUGGEST},
         {"role": "user", "content": "Suggest today's scene."},
     ]
-    return await _generate(client, messages, temperature=1.0)
+    if fresh:
+        return await _generate(client, messages, temperature=1.0)
+
+    day = _utc_day()
+    cached = _daily_cache.get(day)
+    if cached is not None:
+        return cached
+    async with _daily_lock:  # dedupe concurrent first-of-day generations
+        cached = _daily_cache.get(day)
+        if cached is None:
+            cached = await _generate(client, messages, temperature=1.0)
+            _daily_cache.clear()  # keep only the current day
+            _daily_cache[day] = cached
+        return cached

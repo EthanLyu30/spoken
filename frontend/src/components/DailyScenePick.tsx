@@ -37,10 +37,10 @@ export function DailyScenePick() {
   const setActive = useCustomScene((s) => s.setScene);
   const navigate = useNavigate();
 
-  const load = useCallback((signal?: AbortSignal) => {
+  const load = useCallback((signal?: AbortSignal, fresh = false) => {
     setLoading(true);
     setError(false);
-    return getScenarioSuggestion(signal)
+    return getScenarioSuggestion(fresh, signal)
       .then((s) => {
         setScene(s);
         saveCached(s);
@@ -104,7 +104,7 @@ export function DailyScenePick() {
             </button>
             <button
               type="button"
-              onClick={() => void load()}
+              onClick={() => void load(undefined, true)}
               disabled={loading}
               className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2.5 text-sm font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5 disabled:opacity-50"
             >
