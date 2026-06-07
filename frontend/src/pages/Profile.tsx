@@ -33,6 +33,8 @@ import { EChart } from "../components/EChart";
 import { listBrowserVoices, primeBrowserVoices, speakText } from "../lib/speech";
 import { useVoice, VOICE_OPTIONS, type VoiceEngine } from "../store/voice";
 import { useWords } from "../store/words";
+import { useAuth } from "../store/auth";
+import { AuthPanel } from "../components/AuthPanel";
 import { resetOnboarding } from "../lib/onboarding";
 import { tokens } from "../lib/tokens";
 import { cn } from "../lib/utils";
@@ -41,9 +43,12 @@ export default function Profile() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const words = useWords((s) => s.words);
   const ensureLoaded = useWords((s) => s.ensureLoaded);
+  const userId = useAuth((s) => s.user?.id ?? null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [practice, setPractice] = useState<PracticeRecord[]>([]);
 
+  // Re-fetch when the account changes (login/logout) so stats/history follow
+  // the new owner; the word bag is reset+refetched by the auth store itself.
   useEffect(() => {
     const ctrl = new AbortController();
     getSessions(ctrl.signal).then(setSessions).catch(() => undefined);
@@ -51,7 +56,7 @@ export default function Profile() {
     getStats(ctrl.signal).then(setStats).catch(() => undefined);
     getPractice(undefined, 100, ctrl.signal).then(setPractice).catch(() => undefined);
     return () => ctrl.abort();
-  }, [ensureLoaded]);
+  }, [ensureLoaded, userId]);
 
   const sessionCount = sessions.length;
   const wordCount = words.length;
@@ -112,6 +117,8 @@ export default function Profile() {
             <ProgressBar value={(xp / xpNext) * 100} color="var(--tangerine)" />
           </div>
         </section>
+
+        <AuthPanel />
 
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat icon={<MessageSquare className="h-4 w-4" />} value={sessionCount} label="练习次数" />

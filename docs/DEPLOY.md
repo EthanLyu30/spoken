@@ -48,14 +48,17 @@ docker compose up -d --build
 | `XF_APP_ID` / `XF_API_KEY` / `XF_API_SECRET` | 讯飞：ASR、发音评测、讯飞音色 | 语音功能需要 |
 | `CORS_ORIGINS` | 允许的前端来源（分离部署时设为前端域名） | 分离部署需要 |
 | `DATABASE_URL` | 数据库连接串；默认临时 SQLite，设为 Postgres 则持久化 | 想持久化时需要 |
+| `JWT_SECRET` | 账号登录令牌（JWT）签名密钥，建议 32+ 位随机串；不设则用仅限本地的弱默认值 | 用账号功能时需要 |
 
 > 仅配 `DEEPSEEK_API_KEY` 即可跑通文字对话 / 限时问答 / 金句 / 自定义场景，朗读默认走浏览器语音；配上 `XF_*` 解锁语音识别、发音评测、讯飞音色。
+> 生成一个强 `JWT_SECRET`：`python -c "import secrets; print(secrets.token_urlsafe(48))"`。
 
 ---
 
 ## 数据持久化与多设备
 
-- **多设备隔离（已内置，免登录）**：前端会在浏览器生成一个随机 `client_id`（存 localStorage），随每个请求带上 `X-Client-Id`；后端按它隔离数据，**每个浏览器只看到自己的生词本 / 记录 / 统计**。换浏览器或清缓存即换新身份（不是真正账号，演示足够）。
+- **多设备隔离（已内置，免登录）**：前端会在浏览器生成一个随机 `client_id`（存 localStorage），随每个请求带上 `X-Client-Id`；后端按它隔离数据，**每个浏览器只看到自己的生词本 / 记录 / 统计**。换浏览器或清缓存即换新身份。
+- **账号（可选，跨设备续进度）**：在「我的」页用邮箱注册 / 登录。登录后数据按账号隔离（`u:<id>`），换设备登录即可续上生词本与进度；注册时会把当前设备匿名收藏的数据自动绑定到账号。需在后端设 `JWT_SECRET`；不登录则仍走上面的免登录隔离。
 - **持久化（接 Postgres）**：默认 SQLite 在 Render 免费档是临时的（重启即重置）。要数据不丢：
   1. 在 [Neon](https://neon.tech) 或 [Supabase](https://supabase.com) 建一个**免费 Postgres**，复制连接串（形如 `postgresql://user:pass@host/db`）。
   2. 在 Render 后端的环境变量里设 `DATABASE_URL=<该连接串>`，保存后会重部署。

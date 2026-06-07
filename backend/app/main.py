@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     asr,
+    auth,
     chat,
     custom,
     daily,
@@ -44,6 +45,7 @@ app.add_middleware(
 
 # API routes are mounted under /api
 app.include_router(health.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
 app.include_router(scenarios.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(feedback.router, prefix="/api")
