@@ -1,14 +1,14 @@
 # Screenshots
 
-Drop UI screenshots here and reference them from the main `README.md`. Suggested
-shots (PNG, ~1280px wide):
+UI screenshots used by the main `README.md`, captured from the demo recording:
 
-- `home.png` — journey-map home with real stats
-- `chat.png` — scenario conversation (streaming reply)
-- `report.png` — post-session debrief
-- `daily.png` — daily lines with source + usage
-- `interview.png` — timed TOEFL-style Q&A (question + result)
-- `profile.png` — profile with growth curves and voice settings
+- `home.png` — home hero: real stats (level / XP / streak), custom-scene card, chapter tabs
+- `journey.png` — the winding journey-map of scenarios
+- `chat.png` — live scenario conversation with Pip (streaming reply)
+- `interview.png` — timed TOEFL-style Q&A result: score, feedback, sample answer
+- `daily.png` — daily lines with real source + usage note
+- `custom.png` — custom-scene creator
+- `wordbag.png` — the word bag (单词 / 句子 tabs)
+- `profile.png` — profile with practice-history growth curves
 
-After adding the files, the table in `README.md` can be switched from file paths
-to `![](docs/screenshots/home.png)` image embeds.
+Replace any of these with a fresh capture of the same screen to update the README.
