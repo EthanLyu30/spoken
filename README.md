@@ -152,9 +152,13 @@ docker compose up --build
 
 ## 🎬 Demo 视频
 
-完整功能演示：**[▶️ 点此观看（待补充 Bilibili 链接）](#)**
+完整功能演示（约 4.5 分钟，含语音讲解）：
 
-> 视频文件较大，未直接放入仓库。可上传 Bilibili，或作为 GitHub Release 附件 / 拖入 Issue 获取 CDN 链接后替换上方链接（README 即可内嵌播放）。
+**[▶️ 点此观看 Demo](https://github.com/EthanLyu30/spoken/blob/main/docs/demo.mp4)**
+
+<video src="https://github.com/EthanLyu30/spoken/raw/main/docs/demo.mp4" controls width="720"></video>
+
+> 若上方播放器未显示（部分环境会折叠 HTML），点上面的链接即可在 GitHub 内置播放器观看。
 
 ---
 
