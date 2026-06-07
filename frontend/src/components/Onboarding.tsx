@@ -2,8 +2,7 @@ import { useState } from "react";
 import { ArrowRight, MessageCircle, Sparkles, Timer, TrendingUp } from "lucide-react";
 import { Buddy, type BuddyMood } from "./Buddy";
 import { Button } from "./ui/Button";
-
-const KEY = "spoken-onboarded";
+import { hasOnboarded, markOnboarded } from "../lib/onboarding";
 
 interface Slide {
   mood: BuddyMood;
@@ -45,13 +44,7 @@ const SLIDES: Slide[] = [
 ];
 
 export function Onboarding() {
-  const [open, setOpen] = useState(() => {
-    try {
-      return !localStorage.getItem(KEY);
-    } catch {
-      return false;
-    }
-  });
+  const [open, setOpen] = useState(() => !hasOnboarded());
   const [i, setI] = useState(0);
 
   if (!open) return null;
@@ -60,16 +53,15 @@ export function Onboarding() {
   const Icon = slide.icon;
 
   function finish() {
-    try {
-      localStorage.setItem(KEY, "1");
-    } catch {
-      /* ignore */
-    }
+    markOnboarded();
     setOpen(false);
   }
 
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center bg-ink/40 p-5 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-[60] grid place-items-center p-5 backdrop-blur-sm"
+      style={{ background: "rgba(67,48,43,0.45)" }}
+    >
       <div className="card w-full max-w-md p-7 text-center shadow-pop">
         <div className="relative mx-auto grid place-items-center">
           <span
@@ -120,14 +112,4 @@ export function Onboarding() {
       </div>
     </div>
   );
-}
-
-/** Re-open the onboarding from settings. */
-// eslint-disable-next-line react-refresh/only-export-components
-export function resetOnboarding() {
-  try {
-    localStorage.removeItem(KEY);
-  } catch {
-    /* ignore */
-  }
 }

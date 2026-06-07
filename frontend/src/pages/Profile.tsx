@@ -34,7 +34,7 @@ import {
 import { EChart } from "../components/EChart";
 import { listBrowserVoices, primeBrowserVoices, speakText } from "../lib/speech";
 import { useVoice, VOICE_OPTIONS, type VoiceEngine } from "../store/voice";
-import { resetOnboarding } from "../components/Onboarding";
+import { resetOnboarding } from "../lib/onboarding";
 import { tokens } from "../lib/tokens";
 import { cn } from "../lib/utils";
 
