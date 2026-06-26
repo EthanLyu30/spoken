@@ -275,9 +275,31 @@ export default function Conversation() {
             { role: "user", content: userText },
           ];
           setMessages(next);
-          const r = await postChat(id, next, undefined, isCustom ? customScene ?? undefined : undefined);
-          setMessages((m) => [...m, { role: "assistant", content: r.reply }]);
-          return r.reply;
+          const custom = isCustom ? customScene ?? undefined : undefined;
+          // Stream the reply so the bubble fills in while Pip "thinks", instead
+          // of waiting for the whole text. We still return the full text so the
+          // call speaks it once complete.
+          let started = false;
+          const onText = (txt: string) => {
+            if (!started) {
+              started = true;
+              setMessages((m) => [...m, { role: "assistant", content: txt }]);
+            } else {
+              setLastAssistant(txt);
+            }
+          };
+          try {
+            const full = await streamChat(id, next, onText, undefined, custom);
+            if (started) setLastAssistant(full);
+            else setMessages((m) => [...m, { role: "assistant", content: full }]);
+            return full;
+          } catch {
+            // Streaming unavailable -> fall back to the plain endpoint.
+            const r = await postChat(id, next, undefined, custom);
+            if (started) setLastAssistant(r.reply);
+            else setMessages((m) => [...m, { role: "assistant", content: r.reply }]);
+            return r.reply;
+          }
         },
         speak: (text) => playTts(text),
         onError: (msg) => setError(msg),
