@@ -183,8 +183,8 @@ export default function Conversation() {
     });
   }
 
-  async function send() {
-    const text = input.trim();
+  async function send(textArg?: string) {
+    const text = (textArg ?? input).trim();
     if (!text || loading || booting || !id) return;
     const next: ChatMessage[] = [...messages, { role: "user", content: text }];
     setMessages(next);
@@ -236,8 +236,15 @@ export default function Conversation() {
       setError(null);
       try {
         const text = (await postAsr(await rec.stop())).trim();
-        if (text) setInput((prev) => (prev ? `${prev} ${text}` : text));
-        else setError("没听清，再说一次试试？");
+        if (text) {
+          // Speaking app: send the recognized speech right away (combining any
+          // already-typed text) instead of making the learner tap send. The box
+          // stays for typing / fixing a misheard word. send() clears it.
+          const combined = input.trim() ? `${input.trim()} ${text}` : text;
+          void send(combined);
+        } else {
+          setError("没听清，再说一次试试？");
+        }
       } catch {
         setError("语音识别失败，请检查麦克风权限或后端，或直接打字。");
       } finally {
@@ -506,7 +513,7 @@ export default function Conversation() {
               />
               <button
                 type="button"
-                onClick={send}
+                onClick={() => send()}
                 disabled={loading || booting || recording || transcribing || !input.trim()}
                 aria-label="发送"
                 className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-white shadow-soft transition-transform active:scale-95 disabled:opacity-40"
