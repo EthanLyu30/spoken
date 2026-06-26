@@ -73,4 +73,13 @@ async def chat_stream(
         except DeepSeekError:
             return  # end the stream; an empty body makes the client fall back
 
-    return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
+    return StreamingResponse(
+        gen(),
+        media_type="text/plain; charset=utf-8",
+        headers={
+            # Ask nginx-style proxies (self-hosted) and Render's edge not to
+            # buffer the response, so tokens reach the client as they're produced.
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+        },
+    )
