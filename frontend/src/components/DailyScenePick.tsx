@@ -10,12 +10,14 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function loadCached(): CustomScene | null {
+// anyDay=true returns the last cached scene regardless of date (for instant
+// display while today's loads); the default only returns today's pick.
+function loadCached(anyDay = false): CustomScene | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { date: string; scene: CustomScene };
-    return parsed.date === today() ? parsed.scene : null;
+    return anyDay || parsed.date === today() ? parsed.scene : null;
   } catch {
     return null;
   }
@@ -31,8 +33,11 @@ function saveCached(scene: CustomScene) {
 
 /** Featured, DeepSeek-generated scenario of the day. Refreshes once per day. */
 export function DailyScenePick() {
-  const [scene, setScene] = useState<CustomScene | null>(() => loadCached());
-  const [loading, setLoading] = useState(!scene);
+  // Show the last known pick immediately (even if it's yesterday's) so the card
+  // never flashes a skeleton on repeat visits; today's pick refreshes in the
+  // background if it isn't cached yet.
+  const [scene, setScene] = useState<CustomScene | null>(() => loadCached(true));
+  const [loading, setLoading] = useState(() => loadCached() === null);
   const [error, setError] = useState(false);
   const setActive = useCustomScene((s) => s.setScene);
   const navigate = useNavigate();
@@ -54,11 +59,11 @@ export function DailyScenePick() {
   }, []);
 
   useEffect(() => {
-    if (scene) return;
+    if (loadCached()) return; // today's pick already cached — nothing to fetch
     const ctrl = new AbortController();
     void load(ctrl.signal);
     return () => ctrl.abort();
-  }, [scene, load]);
+  }, [load]);
 
   function play() {
     if (!scene) return;
