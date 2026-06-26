@@ -5,8 +5,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import ValidationError
 
-from app.api.chat import get_client
-from app.data import scenarios as catalog
+from app.api.chat import _resolve_scenario, get_client
 from app.schemas.hint import HintRequest, HintResponse
 from app.services.deepseek import DeepSeekClient, DeepSeekError
 
@@ -24,9 +23,8 @@ _SYSTEM = """A Chinese learner is practising spoken English in a role-play and n
 async def hint(
     req: HintRequest, client: DeepSeekClient = Depends(get_client)
 ) -> HintResponse:
-    scenario = catalog.get_scenario(req.scenario_id)
-    if scenario is None:
-        raise HTTPException(status_code=404, detail=f"Unknown scenario: {req.scenario_id}")
+    # Resolve catalogue OR custom/daily scene (raises 404 for an unknown id).
+    scenario = _resolve_scenario(req)
 
     transcript = "\n".join(
         f"{'Partner' if m.role == 'assistant' else 'Learner'}: {m.content}"
