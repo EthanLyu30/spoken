@@ -322,7 +322,8 @@ export default function Conversation() {
     setHintLoading(true);
     setError(null);
     try {
-      const s = await postHint(id, messages);
+      const custom = isCustom ? customScene ?? undefined : undefined;
+      const s = await postHint(id, messages, undefined, custom);
       setHints(s.length ? s : ["试着先打个招呼或回应上一句～"]);
     } catch {
       setError("获取提示失败，请稍后再试。");

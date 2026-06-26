@@ -326,11 +326,12 @@ export async function postHint(
   scenarioId: string,
   messages: ChatMessage[],
   signal?: AbortSignal,
+  custom?: CustomScene,
 ): Promise<string[]> {
   const res = await fetch(`${BASE_URL}/api/hint`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ scenario_id: scenarioId, messages }),
+    body: JSON.stringify({ scenario_id: scenarioId, messages, custom }),
     signal: withTimeout(signal, 30_000),
   });
   if (!res.ok) throw new Error(`hint failed: ${res.status}`);
