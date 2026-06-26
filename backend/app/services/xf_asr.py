@@ -18,6 +18,11 @@ from app.services.xf_auth import build_auth_url
 _HOST = "iat-api.xfyun.cn"
 _PATH = "/v2/iat"
 _FRAME = 1280  # 40 ms of 16 kHz / 16-bit mono audio
+# The audio is already fully recorded by the time we get here, so there's no
+# need to replay it to iFlytek at 1x real-time (a 6 s clip -> 6 s of latency).
+# iFlytek tolerates faster-than-real-time upload for buffered audio; a small gap
+# still avoids overrunning the server. This cuts post-utterance ASR lag ~4x.
+_SEND_INTERVAL = 0.01  # 10 ms between 40 ms frames (was 40 ms)
 
 
 class XfAsrError(RuntimeError):
@@ -75,7 +80,7 @@ class XfAsrClient:
                 }
                 first = False
             await ws.send(json.dumps(frame))
-            await asyncio.sleep(0.04)  # iFlytek recommends ~40 ms between frames
+            await asyncio.sleep(_SEND_INTERVAL)  # pace uploads without 1x replay
         # Ensure a final frame if the audio length was an exact multiple.
         if total % _FRAME == 0:
             await ws.send(json.dumps({"data": {"status": 2, "audio": ""}}))
