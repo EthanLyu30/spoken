@@ -7,6 +7,7 @@ Run locally with:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.middleware import SelectiveGZipMiddleware
 from app.api import (
     asr,
     auth,
@@ -33,6 +34,16 @@ app = FastAPI(
     title=f"{settings.app_name} API",
     description="Backend for the Spoken AI English speaking-practice tool.",
     version="0.1.0",
+)
+
+# Compress JSON API payloads (Render serves them uncompressed). Added before
+# CORS so CORS stays the outermost middleware. Streaming chat and binary audio
+# are excluded so token-by-token replies and already-compressed audio pass
+# through untouched.
+app.add_middleware(
+    SelectiveGZipMiddleware,
+    exclude_prefixes=("/api/chat/stream", "/api/tts"),
+    minimum_size=500,
 )
 
 app.add_middleware(

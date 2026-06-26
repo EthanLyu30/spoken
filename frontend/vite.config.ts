@@ -21,4 +21,17 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Split rarely-changing vendor code into its own long-cached chunks so
+        // the main bundle is smaller and repeat visits reuse the cache. echarts
+        // is large and only used by Profile/Progress, so isolate it too.
+        manualChunks: {
+          react: ["react", "react-dom", "react-router-dom"],
+          echarts: ["echarts/core", "echarts/charts", "echarts/components", "echarts/renderers"],
+        },
+      },
+    },
+  },
 });
