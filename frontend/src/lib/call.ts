@@ -24,7 +24,7 @@ export interface VoiceCall {
 }
 
 const SILENCE_THRESHOLD = 0.012; // RMS below this counts as silence
-const END_SILENCE_MS = 1100; // pause that ends an utterance
+const END_SILENCE_MS = 800; // pause that ends an utterance — snappier turn-taking
 const MIN_SPEECH_MS = 350; // ignore blips shorter than this
 const MAX_UTTER_MS = 15000; // safety cap
 const LEADING_SILENCE_DROP_MS = 4000; // drop long leading silence
