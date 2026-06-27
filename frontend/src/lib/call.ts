@@ -14,8 +14,14 @@ export type CallPhase = "listening" | "thinking" | "speaking";
 export interface CallCallbacks {
   onPhase: (p: CallPhase) => void;
   transcribe: (pcm: ArrayBuffer) => Promise<string>;
-  respond: (userText: string) => Promise<string>;
-  speak: (text: string) => Promise<void>;
+  /**
+   * Generate Pip's reply to `userText` AND speak it (sentence-by-sentence).
+   * Resolves once the whole reply has finished playing. `onSpeaking` fires when
+   * the first audio is about to play, so the caller can flip the phase chip from
+   * "thinking" to "speaking". Folding generation + speech into one step lets the
+   * first sentence play while the rest is still being generated.
+   */
+  reply: (userText: string, onSpeaking: () => void) => Promise<void>;
   onError: (message: string) => void;
 }
 
@@ -77,12 +83,12 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     try {
       cb.onPhase("thinking");
       const text = (await retryOnce(() => cb.transcribe(pcm))).trim();
-      if (text) {
-        const reply = await retryOnce(() => cb.respond(text));
-        if (!ended) {
-          cb.onPhase("speaking");
-          await cb.speak(reply);
-        }
+      if (text && !ended) {
+        // reply() generates and speaks the answer; it flips us to "speaking"
+        // (via the callback) as soon as the first sentence starts.
+        await cb.reply(text, () => {
+          if (!ended) cb.onPhase("speaking");
+        });
       }
     } catch {
       if (!ended) cb.onError("这一句没接上，继续说就好～");

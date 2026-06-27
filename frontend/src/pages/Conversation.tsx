@@ -19,7 +19,7 @@ import { scenarioIcons } from "../lib/icons";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
 import { postChat, postAsr, postHint, postFeedback, streamChat, type ChatMessage } from "../lib/api";
 import { persistSessionOnce } from "../lib/sessionSave";
-import { speakText, type Speaking } from "../lib/speech";
+import { speakText, createSpeechQueue, type Speaking, type SpeechQueue } from "../lib/speech";
 import { useSession } from "../store/session";
 import { useCustomScene } from "../store/custom";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
@@ -65,6 +65,7 @@ export default function Conversation() {
 
   const endRef = useRef<HTMLDivElement>(null);
   const speakingRef = useRef<Speaking | null>(null);
+  const callQueueRef = useRef<SpeechQueue | null>(null);
   const lastSpokenRef = useRef(-1);
   const recorderRef = useRef<ActiveRecorder | null>(null);
   const callRef = useRef<VoiceCall | null>(null);
@@ -147,6 +148,7 @@ export default function Conversation() {
   useEffect(() => {
     return () => {
       speakingRef.current?.stop();
+      callQueueRef.current?.stop();
       recorderRef.current?.stop().catch(() => undefined);
       callRef.current?.end();
       if (!goingToReportRef.current && id) {
@@ -269,16 +271,21 @@ export default function Conversation() {
       callRef.current = await startVoiceCall({
         onPhase: (p) => setCallPhase(p),
         transcribe: (pcm) => postAsr(pcm),
-        respond: async (userText) => {
+        reply: async (userText, onSpeaking) => {
           const next: ChatMessage[] = [
             ...messagesRef.current,
             { role: "user", content: userText },
           ];
           setMessages(next);
           const custom = isCustom ? customScene ?? undefined : undefined;
-          // Stream the reply so the bubble fills in while Pip "thinks", instead
-          // of waiting for the whole text. We still return the full text so the
-          // call speaks it once complete.
+
+          // Speak the reply sentence-by-sentence as it streams, so the first
+          // sentence plays while the rest is still being generated. The text
+          // bubble fills in token-by-token at the same time.
+          const queue = createSpeechQueue(id);
+          callQueueRef.current = queue;
+          void queue.started.then(onSpeaking);
+
           let started = false;
           const onText = (txt: string) => {
             if (!started) {
@@ -287,21 +294,23 @@ export default function Conversation() {
             } else {
               setLastAssistant(txt);
             }
+            queue.feed(txt);
           };
           try {
             const full = await streamChat(id, next, onText, undefined, custom);
             if (started) setLastAssistant(full);
             else setMessages((m) => [...m, { role: "assistant", content: full }]);
-            return full;
+            await queue.end(full);
           } catch {
-            // Streaming unavailable -> fall back to the plain endpoint.
+            // Streaming unavailable -> plain endpoint; speak the whole reply.
             const r = await postChat(id, next, undefined, custom);
             if (started) setLastAssistant(r.reply);
             else setMessages((m) => [...m, { role: "assistant", content: r.reply }]);
-            return r.reply;
+            await queue.end(r.reply);
+          } finally {
+            if (callQueueRef.current === queue) callQueueRef.current = null;
           }
         },
-        speak: (text) => playTts(text),
         onError: (msg) => setError(msg),
       });
       setCallPhase("listening");
@@ -314,6 +323,8 @@ export default function Conversation() {
     callRef.current?.end();
     callRef.current = null;
     setCallPhase(null);
+    callQueueRef.current?.stop();
+    callQueueRef.current = null;
     speakingRef.current?.stop();
   }
 
