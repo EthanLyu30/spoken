@@ -61,6 +61,8 @@ asynchronous assessment path:
  end of chat ─────────────────────┴─► pronunciation + grammar + debrief ─► 📊
 ```
 
+> Current state: chat replies are **streamed**; in call mode **read-aloud is streamed sentence-by-sentence** (the first sentence starts playing while the rest is still being generated and synthesised, cutting perceived latency); read-aloud defaults to the browser-native voice with iFlytek optional; ASR is still buffered (sentence-level streaming ASR is a planned optimization). Full design in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
 ### Stack
 
 - **Frontend:** React 18 · TypeScript · Vite · Tailwind CSS · Zustand · ECharts.
