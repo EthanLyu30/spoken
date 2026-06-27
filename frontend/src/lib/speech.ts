@@ -4,6 +4,7 @@
  * Only one utterance plays at a time across the app.
  */
 import { fetchTtsUrl } from "./api";
+import { nextSentences } from "./sentences";
 import { useVoice } from "../store/voice";
 
 export interface Speaking {
@@ -125,4 +126,154 @@ export function speakText(text: string, scenarioId?: string): Speaking {
 export function stopSpeaking(): void {
   current?.stop();
   current = null;
+}
+
+/** Play an already-fetched object URL; resolves when it ends, errors, or stops. */
+function playUrl(url: string): Speaking {
+  const audio = new Audio(url);
+  let settle: () => void = () => {};
+  const done = new Promise<void>((r) => (settle = r));
+  let finished = false;
+  const cleanup = () => {
+    if (finished) return;
+    finished = true;
+    URL.revokeObjectURL(url);
+    settle();
+  };
+  audio.onended = cleanup;
+  audio.onerror = cleanup;
+  void audio.play().catch(cleanup);
+  return {
+    done,
+    stop: () => {
+      audio.pause();
+      cleanup();
+    },
+  };
+}
+
+export interface SpeechQueue {
+  /** Feed the cumulative reply text so far; speaks any newly-complete sentence. */
+  feed: (full: string) => void;
+  /** Final cumulative text; speaks the remaining tail, then resolves when all audio has played. */
+  end: (full: string) => Promise<void>;
+  /** Resolves the first time a sentence is about to be spoken. */
+  started: Promise<void>;
+  /** Stop immediately and drop anything still queued. */
+  stop: () => void;
+}
+
+/**
+ * Speak a reply sentence-by-sentence, in order, as it streams in. The first
+ * sentence can start playing while later ones are still being generated — this
+ * is what makes call mode feel responsive instead of waiting for the whole
+ * reply to be generated and synthesised. For the iFlytek engine the next
+ * sentence's audio is prefetched while the current one plays, to keep the gap
+ * between sentences small.
+ */
+export function createSpeechQueue(scenarioId?: string): SpeechQueue {
+  current?.stop();
+  current = null;
+  const useBrowser = useVoice.getState().engine === "browser" && hasSpeech();
+
+  const pending: string[] = [];
+  let spokenUpto = 0;
+  let noMore = false;
+  let stopped = false;
+  let wake: (() => void) | null = null;
+  let markStarted: (() => void) | undefined;
+  const started = new Promise<void>((r) => {
+    markStarted = () => r();
+  });
+  let playing: Speaking | null = null;
+
+  const wakeUp = () => {
+    const w = wake;
+    wake = null;
+    w?.();
+  };
+
+  // Resolve with the next chunk to speak, or null when the queue is done.
+  const take = (): Promise<string | null> =>
+    new Promise((resolve) => {
+      const check = () => {
+        if (stopped) return resolve(null);
+        if (pending.length) return resolve(pending.shift() as string);
+        if (noMore) return resolve(null);
+        wake = check;
+      };
+      check();
+    });
+
+  const consumer = (async () => {
+    let prefetchText: string | null = null;
+    let prefetchUrl: Promise<string> | null = null;
+    let firstStarted = false;
+    while (!stopped) {
+      const text = await take();
+      if (text == null) break;
+      if (!firstStarted) {
+        firstStarted = true;
+        markStarted?.();
+      }
+
+      if (useBrowser) {
+        playing = speakBrowser(text);
+        await playing.done;
+        continue;
+      }
+
+      let url: string;
+      try {
+        url =
+          prefetchText === text && prefetchUrl
+            ? await prefetchUrl
+            : await fetchTtsUrl(text, scenarioId);
+      } catch {
+        prefetchText = null;
+        prefetchUrl = null;
+        continue; // skip a sentence we couldn't synthesise; keep going
+      }
+      // Prefetch the next queued sentence while this one plays.
+      prefetchText = pending[0] ?? null;
+      prefetchUrl = prefetchText
+        ? fetchTtsUrl(prefetchText, scenarioId).catch(() => "")
+        : null;
+      if (stopped || !url) {
+        if (url) URL.revokeObjectURL(url);
+        if (stopped) break;
+        continue;
+      }
+      playing = playUrl(url);
+      await playing.done;
+    }
+  })();
+
+  return {
+    feed: (full: string) => {
+      if (stopped || noMore) return;
+      const { sentences, consumed } = nextSentences(full, spokenUpto, false);
+      spokenUpto = consumed;
+      if (sentences.length) {
+        pending.push(...sentences);
+        wakeUp();
+      }
+    },
+    end: async (full: string) => {
+      if (!stopped) {
+        const { sentences, consumed } = nextSentences(full, spokenUpto, true);
+        spokenUpto = consumed;
+        pending.push(...sentences);
+      }
+      noMore = true;
+      wakeUp();
+      await consumer;
+    },
+    started,
+    stop: () => {
+      stopped = true;
+      playing?.stop();
+      wakeUp();
+    },
+  };
 }
