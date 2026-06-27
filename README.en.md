@@ -62,7 +62,7 @@ asynchronous assessment path:
  end of chat ─────────────────────┴─► pronunciation + grammar + debrief ─► 📊
 ```
 
-> Current state: chat replies are **streamed**; in call mode **read-aloud is streamed sentence-by-sentence** (the first sentence starts playing while the rest is still being generated and synthesised, cutting perceived latency) and **ASR is streamed live** (captions appear as you speak, and the reply starts the instant you stop — falling back to buffered transcription if the relay is unavailable); read-aloud defaults to the browser-native voice with iFlytek optional. Full design in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+> Current state: chat replies are **streamed**; in call mode **read-aloud is streamed sentence-by-sentence** (the first sentence starts playing while the rest is still being generated and synthesised, cutting perceived latency) and **ASR is streamed live** (captions appear and self-correct as you speak, and the reply starts the instant you stop — falling back to buffered transcription if the relay is unavailable); read-aloud defaults to the browser-native voice with iFlytek optional. Full design in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ### Stack
 

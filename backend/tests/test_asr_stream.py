@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.api.asr import get_asr_stream_factory
 from app.core.config import get_settings
 from app.main import app
+from app.services.xf_asr import XfAsrStream
 
 client = TestClient(app)
 
@@ -103,3 +104,40 @@ def test_end_without_audio_returns_empty_final():
         assert ws.receive_json()["type"] == "ready"
         ws.send_text(json.dumps({"type": "end"}))
         assert ws.receive_json() == {"type": "final", "text": ""}
+
+
+# --- wpgs dynamic-correction assembly (pure logic, no network) ---
+
+
+async def _noop_partial(_text: str) -> None:
+    pass
+
+
+def _result(sn: int, text: str, pgs: str = "apd", rg=None) -> dict:
+    r: dict = {"sn": sn, "pgs": pgs, "ws": [{"cw": [{"w": text}]}]}
+    if rg is not None:
+        r["rg"] = rg
+    return r
+
+
+def test_wpgs_append_then_replace():
+    st = XfAsrStream(None, _noop_partial)
+    st._apply(_result(1, "I "))
+    assert st._current_text() == "I"
+    st._apply(_result(2, "scream"))
+    assert st._current_text() == "I scream"
+    # iFlytek revises segment 2 in place.
+    st._apply(_result(2, "like coffee", pgs="rpl", rg=[2, 2]))
+    assert st._current_text() == "I like coffee"
+    # Append, then collapse the whole 1..3 range into one corrected segment.
+    st._apply(_result(3, " now"))
+    assert st._current_text() == "I like coffee now"
+    st._apply(_result(3, "Tea please", pgs="rpl", rg=[1, 3]))
+    assert st._current_text() == "Tea please"
+
+
+def test_wpgs_missing_sn_falls_back_to_order():
+    st = XfAsrStream(None, _noop_partial)
+    st._apply({"pgs": "apd", "ws": [{"cw": [{"w": "one "}]}]})
+    st._apply({"pgs": "apd", "ws": [{"cw": [{"w": "two"}]}]})
+    assert st._current_text() == "one two"
