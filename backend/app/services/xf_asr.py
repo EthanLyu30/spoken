@@ -130,7 +130,13 @@ class XfAsrStream:
         self._language = language
         self._ws = None
         self._first = True
-        self._words: list[str] = []
+        # Transcript assembled from "wpgs" dynamic-correction results: each
+        # iFlytek result carries a segment number (sn) and may *replace* an
+        # earlier range (pgs="rpl") rather than only append (pgs="apd"), so we
+        # key segments by sn and re-join in order instead of appending blindly.
+        self._segments: dict[int, str] = {}
+        self._auto_sn = 0  # fallback ordering when a result omits sn
+        self._last_text = ""
         self._recv_task: asyncio.Task | None = None
         self._done = asyncio.Event()
         self._error: XfAsrError | None = None
@@ -168,6 +174,7 @@ class XfAsrStream:
                     "domain": "iat",
                     "accent": "mandarin",
                     "vad_eos": 10000,  # we end the turn ourselves via finish()
+                    "dwa": "wpgs",  # streaming dynamic correction (revisable partials)
                 }
                 self._first = False
             await self._ws.send(json.dumps(frame))
@@ -187,11 +194,32 @@ class XfAsrStream:
         await self._close()
         if self._error:
             raise self._error
-        return "".join(self._words).strip()
+        return self._current_text()
 
     async def abort(self) -> None:
         """Tear down without waiting for a final result (call cancelled)."""
         await self._close()
+
+    def _current_text(self) -> str:
+        return "".join(self._segments[k] for k in sorted(self._segments)).strip()
+
+    def _apply(self, result: dict) -> None:
+        """Merge one IAT result, honouring wpgs append/replace semantics."""
+        words = "".join(
+            cand.get("w", "")
+            for seg in result.get("ws", [])
+            for cand in seg.get("cw", [])
+        )
+        sn = result.get("sn")
+        if sn is None:
+            self._auto_sn += 1
+            sn = self._auto_sn
+        if result.get("pgs") == "rpl":
+            # This result supersedes segments sn in rg[0]..rg[1].
+            rg = result.get("rg") or [sn, sn]
+            for k in [k for k in self._segments if rg[0] <= k <= rg[1]]:
+                del self._segments[k]
+        self._segments[sn] = words
 
     async def _stream_recv(self) -> None:
         try:
@@ -203,19 +231,14 @@ class XfAsrStream:
                     )
                     break
                 data = resp.get("data") or {}
-                result = data.get("result") or {}
-                grew = False
-                for seg in result.get("ws", []):
-                    for cand in seg.get("cw", []):
-                        self._words.append(cand.get("w", ""))
-                        grew = True
-                if grew:
-                    text = "".join(self._words).strip()
-                    if text:
-                        try:
-                            await self._on_partial(text)
-                        except Exception:
-                            pass  # a dropped caption must not kill the stream
+                self._apply(data.get("result") or {})
+                text = self._current_text()
+                if text and text != self._last_text:
+                    self._last_text = text
+                    try:
+                        await self._on_partial(text)
+                    except Exception:
+                        pass  # a dropped caption must not kill the stream
                 if data.get("status") == 2:
                     break
         except asyncio.CancelledError:
