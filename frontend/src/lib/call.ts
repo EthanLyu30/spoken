@@ -8,12 +8,20 @@
  * track drops, and each turn's transcribe/respond is retried once on a blip.
  */
 import { flatten, floatToPcm16, resampleTo16k } from "./recorder";
+import { openAsrStream, type AsrStream } from "./asrStream";
 
 export type CallPhase = "listening" | "thinking" | "speaking";
 
 export interface CallCallbacks {
   onPhase: (p: CallPhase) => void;
+  /** Buffered fallback transcription, used when streaming ASR is unavailable. */
   transcribe: (pcm: ArrayBuffer) => Promise<string>;
+  /**
+   * Live, growing transcript while the user is still speaking. Best-effort:
+   * only fires when streaming ASR is available, so the UI must treat it as a
+   * preview that's superseded by the final transcribe/reply.
+   */
+  onPartial?: (text: string) => void;
   /**
    * Generate Pip's reply to `userText` AND speak it (sentence-by-sentence).
    * Resolves once the whole reply has finished playing. `onSpeaking` fires when
@@ -57,6 +65,28 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   let reconnecting = false;
   let rate = 16000;
 
+  // Streaming ASR (live captions + zero re-upload). Best-effort: if the relay
+  // is unavailable we fall back to buffering the clip and POSTing it.
+  let asr: AsrStream | null = null;
+  let asrUnavailable = false;
+
+  async function ensureStream() {
+    if (asr || asrUnavailable || ended) return;
+    try {
+      asr = await openAsrStream({
+        onPartial: (t) => {
+          if (!ended && !busy) cb.onPartial?.(t);
+        },
+        onClose: () => {
+          asr = null; // dropped mid-call -> next turns use the buffered path
+        },
+      });
+    } catch {
+      asr = null;
+      asrUnavailable = true; // not available this call; buffered ASR only
+    }
+  }
+
   let stream: MediaStream | null = null;
   let ctx: AudioContext | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
@@ -82,7 +112,19 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     busy = true;
     try {
       cb.onPhase("thinking");
-      const text = (await retryOnce(() => cb.transcribe(pcm))).trim();
+      // Prefer the streaming final (already mid-flight); fall back to a buffered
+      // POST if streaming is unavailable or yielded nothing.
+      let text = "";
+      if (asr) {
+        try {
+          text = (await asr.finishUtterance()).trim();
+        } catch {
+          text = "";
+        }
+      }
+      if (!text) {
+        text = (await retryOnce(() => cb.transcribe(pcm))).trim();
+      }
       if (text && !ended) {
         // reply() generates and speaks the answer; it flips us to "speaking"
         // (via the callback) as soon as the first sentence starts.
@@ -120,6 +162,13 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     if (!started && utterMs > LEADING_SILENCE_DROP_MS) {
       reset();
       return;
+    }
+
+    // Once the user is actually speaking, forward each frame live so iFlytek
+    // transcribes in real time (captions) and the final is ready the instant
+    // they stop — no separate upload round-trip.
+    if (started && asr) {
+      asr.send(floatToPcm16(resampleTo16k(new Float32Array(buf), rate)));
     }
 
     const done =
@@ -212,6 +261,10 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   await buildGraph();
   cb.onPhase("listening");
 
+  // Open the streaming-ASR connection in the background; the first utterance
+  // uses buffered ASR if the handshake hasn't completed yet.
+  void ensureStream();
+
   // Keep the context alive: browsers suspend it when backgrounded / on device
   // changes, which would silently freeze the call.
   const keepAlive = setInterval(() => {
@@ -223,6 +276,8 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     end: () => {
       ended = true;
       clearInterval(keepAlive);
+      asr?.close();
+      asr = null;
       teardownGraph();
     },
   };

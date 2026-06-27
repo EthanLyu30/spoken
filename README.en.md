@@ -30,8 +30,9 @@ growth curve.
   conversation stays snappy while assessment runs asynchronously.
 - **Full iFlytek voice stack** — speech recognition (ASR), pronunciation scoring
   (ISE) and TTS; read-aloud offers a **browser-native voice (default) or iFlytek**,
-  with adjustable speed / pitch / voice. Talk hands-free in **call mode** or
-  **push-to-talk** (which auto-sends what it hears — no extra tap).
+  with adjustable speed / pitch / voice. Talk hands-free in **call mode** with
+  **live captions** (streaming ASR) or use **push-to-talk** (which auto-sends what
+  it hears — no extra tap).
 - **TOEFL-style timed Q&A** — a real TOEFL independent-speaking question bank plus
   AI scenario questions; 45s per answer, scored on the ETS rubric with a model
   high-scoring sample answer.
@@ -54,14 +55,14 @@ asynchronous assessment path:
 
 ```
             ┌──────── fast path (low latency) ────────┐
- 🎤 mic ─VAD─► ASR ──► chat LLM (streamed) ──► TTS (browser/iFlytek) ─► 🔊
+ 🎤 mic ─VAD─► ASR (live) ──► chat LLM (streamed) ──► TTS (browser/iFlytek) ─► 🔊
                  │
                  └─► transcript ─┐
                                  ├─► slow path (async, non-blocking)
  end of chat ─────────────────────┴─► pronunciation + grammar + debrief ─► 📊
 ```
 
-> Current state: chat replies are **streamed**; in call mode **read-aloud is streamed sentence-by-sentence** (the first sentence starts playing while the rest is still being generated and synthesised, cutting perceived latency); read-aloud defaults to the browser-native voice with iFlytek optional; ASR is still buffered (sentence-level streaming ASR is a planned optimization). Full design in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+> Current state: chat replies are **streamed**; in call mode **read-aloud is streamed sentence-by-sentence** (the first sentence starts playing while the rest is still being generated and synthesised, cutting perceived latency) and **ASR is streamed live** (captions appear as you speak, and the reply starts the instant you stop — falling back to buffered transcription if the relay is unavailable); read-aloud defaults to the browser-native voice with iFlytek optional. Full design in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ### Stack
 
