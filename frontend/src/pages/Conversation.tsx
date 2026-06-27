@@ -60,6 +60,7 @@ export default function Conversation() {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [callPhase, setCallPhase] = useState<CallPhase | null>(null);
+  const [liveCaption, setLiveCaption] = useState(""); // streaming ASR preview while speaking
   const [hints, setHints] = useState<string[] | null>(null);
   const [hintLoading, setHintLoading] = useState(false);
 
@@ -269,8 +270,12 @@ export default function Conversation() {
     setError(null);
     try {
       callRef.current = await startVoiceCall({
-        onPhase: (p) => setCallPhase(p),
+        onPhase: (p) => {
+          setCallPhase(p);
+          if (p !== "listening") setLiveCaption(""); // user finished this turn
+        },
         transcribe: (pcm) => postAsr(pcm),
+        onPartial: (t) => setLiveCaption(t),
         reply: async (userText, onSpeaking) => {
           const next: ChatMessage[] = [
             ...messagesRef.current,
@@ -323,6 +328,7 @@ export default function Conversation() {
     callRef.current?.end();
     callRef.current = null;
     setCallPhase(null);
+    setLiveCaption("");
     callQueueRef.current?.stop();
     callQueueRef.current = null;
     speakingRef.current?.stop();
@@ -435,6 +441,11 @@ export default function Conversation() {
           )}
         </div>
         <p className="mt-1 font-display text-base font-semibold text-ink">{stageStatus}</p>
+        {inCall && liveCaption && (
+          <p className="mt-2 max-w-xl rounded-2xl bg-surface px-4 py-2 text-sm italic text-ink/70 shadow-soft">
+            {liveCaption}
+          </p>
+        )}
       </div>
 
       <main
