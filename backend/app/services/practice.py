@@ -16,6 +16,8 @@ TODAY_GOAL = 3
 XP_PER_LEVEL = 250
 # Keep storage bounded: only retain the most recent N practice records.
 PRACTICE_KEEP = 1000
+# How many recent sessions feed the cross-session ability analysis.
+INSIGHTS_RECENT = 8
 
 
 def create_record(db: Session, client_id: str, payload: PracticeCreate) -> PracticeRecord:
@@ -107,4 +109,74 @@ def compute_stats(db: Session, client_id: str) -> dict:
         "total_sessions": total_sessions,
         "total_practice": total_practice,
         "words_count": words_count,
+    }
+
+
+def compute_insights(db: Session, client_id: str, recent: int = INSIGHTS_RECENT) -> dict:
+    """Aggregate the learner's recent sessions into per-skill averages and a
+    short-term trend, so the UI can point at the weakest dimension to focus on
+    and show whether things are improving.
+
+    The trend (``delta``) compares the later half of each skill's recent score
+    series against its earlier half: positive means the learner is climbing.
+    """
+    sessions = list(
+        db.scalars(
+            select(PracticeSession)
+            .where(PracticeSession.client_id == client_id)
+            .order_by(desc(PracticeSession.created_at))
+            .limit(recent)
+        )
+    )
+    sessions.reverse()  # oldest -> newest, so the trend reads left to right
+
+    series: dict[str, dict] = {}
+    for s in sessions:
+        for sc in s.scores:
+            entry = series.setdefault(
+                sc.key,
+                {"label_zh": sc.label_zh, "label_en": sc.label_en, "scores": []},
+            )
+            entry["scores"].append(sc.score)
+
+    if not series:
+        return {
+            "available": False,
+            "sessions": len(sessions),
+            "overall_delta": 0,
+            "weakest": None,
+            "strongest": None,
+            "skills": [],
+        }
+
+    skills: list[dict] = []
+    for key, entry in series.items():
+        scores = entry["scores"]
+        avg = round(sum(scores) / len(scores))
+        if len(scores) >= 2:
+            half = len(scores) // 2
+            earlier, later = scores[:half], scores[half:]
+            delta = round(sum(later) / len(later) - sum(earlier) / len(earlier))
+        else:
+            delta = 0
+        skills.append(
+            {
+                "key": key,
+                "label_zh": entry["label_zh"],
+                "label_en": entry["label_en"],
+                "avg": avg,
+                "delta": delta,
+                "samples": len(scores),
+            }
+        )
+
+    skills.sort(key=lambda x: x["avg"])  # weakest first
+    overall_delta = round(sum(x["delta"] for x in skills) / len(skills))
+    return {
+        "available": True,
+        "sessions": len(sessions),
+        "overall_delta": overall_delta,
+        "weakest": skills[0],
+        "strongest": skills[-1],
+        "skills": skills,
     }
