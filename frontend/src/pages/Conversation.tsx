@@ -316,6 +316,12 @@ export default function Conversation() {
             if (callQueueRef.current === queue) callQueueRef.current = null;
           }
         },
+        interrupt: () => {
+          // User talked over Pip — cut the read-aloud so they can take the turn.
+          callQueueRef.current?.stop();
+          callQueueRef.current = null;
+          speakingRef.current?.stop();
+        },
         onError: (msg) => setError(msg),
       });
       setCallPhase("listening");

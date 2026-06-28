@@ -30,6 +30,12 @@ export interface CallCallbacks {
    * first sentence play while the rest is still being generated.
    */
   reply: (userText: string, onSpeaking: () => void) => Promise<void>;
+  /**
+   * Barge-in: the user started talking over Pip. Called while in the "speaking"
+   * phase; the caller should stop the in-flight read-aloud so the user can take
+   * the turn back. Optional — barge-in is only armed when this is provided.
+   */
+  interrupt?: () => void;
   onError: (message: string) => void;
 }
 
@@ -44,6 +50,13 @@ const MAX_UTTER_MS = 15000; // safety cap
 const LEADING_SILENCE_DROP_MS = 4000; // drop long leading silence
 const KEEPALIVE_MS = 3000; // poll to resume a suspended context
 const MAX_RECONNECT = 3;
+// Barge-in: let the user cut in while Pip is speaking. We require a clearly
+// LOUDER and SUSTAINED signal than the normal VAD, because the mic still picks
+// up some of Pip's own voice from the speakers (even with echo cancellation on);
+// a low bar would make Pip interrupt itself. Tune these if real-world testing
+// shows misfires (raise) or sluggish cut-ins (lower).
+const BARGE_IN_RMS = 0.05; // must be well above residual TTS echo
+const BARGE_IN_MS = 600; // sustained speak-over before we hand the turn back
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -62,6 +75,8 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
 
   let ended = false;
   let busy = false; // ignore mic while thinking / speaking
+  let speaking = false; // Pip is currently reading a reply aloud (barge-in armed)
+  let bargeMs = 0; // accumulated loud-speech time during Pip's turn
   let reconnecting = false;
   let rate = 16000;
 
@@ -127,26 +142,60 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
       }
       if (text && !ended) {
         // reply() generates and speaks the answer; it flips us to "speaking"
-        // (via the callback) as soon as the first sentence starts.
+        // (via the callback) as soon as the first sentence starts. That's also
+        // when we arm barge-in so the user can talk over Pip.
         await cb.reply(text, () => {
-          if (!ended) cb.onPhase("speaking");
+          if (ended) return;
+          speaking = true;
+          bargeMs = 0;
+          cb.onPhase("speaking");
         });
       }
     } catch {
       if (!ended) cb.onError("这一句没接上，继续说就好～");
     } finally {
       busy = false;
+      speaking = false;
+      bargeMs = 0;
       if (!ended) cb.onPhase("listening");
     }
   };
 
+  /** Hand the turn back to the user: stop Pip's audio and resume listening. */
+  const triggerBargeIn = () => {
+    if (ended || !speaking) return;
+    speaking = false;
+    bargeMs = 0;
+    busy = false; // reopen the mic immediately for the user's new utterance
+    reset();
+    cb.interrupt?.(); // stop the in-flight read-aloud
+    if (!ended) cb.onPhase("listening");
+  };
+
+  /** While Pip speaks, watch for a clear, sustained signal the user is cutting in. */
+  const detectBargeIn = (rms: number, frameMs: number) => {
+    if (rms > BARGE_IN_RMS) {
+      bargeMs += frameMs;
+      if (bargeMs >= BARGE_IN_MS) triggerBargeIn();
+    } else {
+      bargeMs = Math.max(0, bargeMs - frameMs); // let isolated echo spikes decay
+    }
+  };
+
   const onAudio = (e: AudioProcessingEvent) => {
-    if (ended || busy || reconnecting) return;
+    if (ended || reconnecting) return;
     const buf = e.inputBuffer.getChannelData(0);
     const frameMs = (buf.length / rate) * 1000;
     let sum = 0;
     for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
     const rms = Math.sqrt(sum / buf.length);
+
+    if (busy) {
+      // Mic is otherwise ignored while Pip thinks/speaks — but during "speaking"
+      // we listen for the user cutting in (barge-in), if the caller supports it.
+      if (speaking && cb.interrupt) detectBargeIn(rms, frameMs);
+      return;
+    }
 
     collected.push(new Float32Array(buf));
     utterMs += frameMs;

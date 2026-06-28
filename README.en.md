@@ -31,8 +31,9 @@ growth curve.
 - **Full iFlytek voice stack** — speech recognition (ASR), pronunciation scoring
   (ISE) and TTS; read-aloud offers a **browser-native voice (default) or iFlytek**,
   with adjustable speed / pitch / voice. Talk hands-free in **call mode** with
-  **live captions** (streaming ASR) or use **push-to-talk** (which auto-sends what
-  it hears — no extra tap).
+  **live captions** (streaming ASR) and **barge-in** (just start talking to cut
+  Pip off and take the turn), or use **push-to-talk** (which auto-sends what it
+  hears — no extra tap).
 - **TOEFL-style timed Q&A** — a real TOEFL independent-speaking question bank plus
   AI scenario questions; 45s per answer, scored on the ETS rubric with a model
   high-scoring sample answer.
