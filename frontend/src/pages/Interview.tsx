@@ -178,7 +178,7 @@ export default function Interview() {
         {phase === "error" && (
           <section className="card grid place-items-center gap-4 p-10 text-center">
             <Buddy mood="idle" size={110} />
-            <p className="font-semibold text-ink">{error}</p>
+            <p role="alert" className="font-semibold text-ink">{error}</p>
             <div className="flex gap-3">
               <Button variant="soft" onClick={() => setPhase("intro")}>
                 重新开始
@@ -234,7 +234,11 @@ export default function Interview() {
                   <Button size="lg" onClick={startAnswer}>
                     <Mic className="h-5 w-5" /> 开始回答（45 秒）
                   </Button>
-                  {error && <p className="text-xs font-semibold text-[#e6503d]">{error}</p>}
+                  {error && (
+                    <p role="alert" className="text-xs font-semibold text-[#e6503d]">
+                      {error}
+                    </p>
+                  )}
                 </>
               )}
             </div>

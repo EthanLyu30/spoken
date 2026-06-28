@@ -103,7 +103,7 @@ export default function Report() {
         {error && !loading && (
           <section className="card grid place-items-center gap-4 p-10 text-center">
             <Buddy mood="idle" size={110} />
-            <p className="font-semibold text-ink">{error}</p>
+            <p role="alert" className="font-semibold text-ink">{error}</p>
             <div className="flex gap-3">
               <Link to={`/practice/${scenarioId}`}>
                 <Button variant="soft">回到对话</Button>

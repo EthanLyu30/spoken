@@ -133,7 +133,9 @@ export default function Progress() {
         {status === "error" && (
           <section className="card grid place-items-center gap-3 p-10 text-center">
             <Buddy mood="idle" size={110} />
-            <p className="font-semibold text-ink">读取记录失败，请确认后端在运行后重试。</p>
+            <p role="alert" className="font-semibold text-ink">
+              读取记录失败，请确认后端在运行后重试。
+            </p>
             <Link to="/">
               <Button variant="soft">回首页</Button>
             </Link>

@@ -440,9 +440,19 @@ export default function Conversation() {
             </span>
           )}
         </div>
-        <p className="mt-1 font-display text-base font-semibold text-ink">{stageStatus}</p>
+        <p
+          role="status"
+          aria-live="polite"
+          className="mt-1 font-display text-base font-semibold text-ink"
+        >
+          {stageStatus}
+        </p>
         {inCall && liveCaption && (
-          <p className="mt-2 max-w-xl rounded-2xl bg-surface px-4 py-2 text-sm italic text-ink/70 shadow-soft">
+          <p
+            aria-live="polite"
+            aria-atomic="true"
+            className="mt-2 max-w-xl rounded-2xl bg-surface px-4 py-2 text-sm italic text-ink/70 shadow-soft"
+          >
             {liveCaption}
           </p>
         )}
@@ -463,7 +473,10 @@ export default function Conversation() {
         ))}
         {((loading && !streaming) || callPhase === "thinking") && <TypingBubble theme={t} />}
         {error && (
-          <p className="mx-auto w-fit rounded-full bg-[#ffe8e3] px-4 py-2 text-center text-xs font-semibold text-[#e6503d]">
+          <p
+            role="alert"
+            className="mx-auto w-fit rounded-full bg-[#ffe8e3] px-4 py-2 text-center text-xs font-semibold text-[#e6503d]"
+          >
             {error}
           </p>
         )}
