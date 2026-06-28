@@ -1,18 +1,22 @@
 import {
   Briefcase,
+  ClipboardCheck,
   Coffee,
   Handshake,
   Headphones,
   Hotel,
   MapPin,
+  Megaphone,
   MessageCircle,
   PartyPopper,
   Plane,
   Presentation,
+  Scale,
   ShoppingBag,
   Stethoscope,
   UtensilsCrossed,
   Users,
+  Video,
   type LucideIcon,
 } from "lucide-react";
 import type { ScenarioIcon } from "../data/scenarios";
@@ -32,4 +36,8 @@ export const scenarioIcons: Record<ScenarioIcon, LucideIcon> = {
   Handshake,
   Headphones,
   MessageCircle,
+  Scale,
+  Video,
+  ClipboardCheck,
+  Megaphone,
 };
