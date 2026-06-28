@@ -1,13 +1,27 @@
 name: Keep backend warm
 
 # Render's free tier sleeps after ~15 min idle, so the first request after a nap
-# pays a ~30-60s cold start. A periodic ping keeps it warm during the day.
-# NOTE: GitHub's cron is best-effort and often runs late; for rock-solid uptime
-# add an external pinger too (e.g. UptimeRobot, free, 5-min interval).
+# pays a ~30-60s cold start. A periodic ping keeps it warm.
+#
+# Two tradeoffs shaped the schedule below:
+#  1. GitHub's cron is best-effort and often runs 10-30 min late, which can slip
+#     past Render's 15-min sleep timer. So we ping every 5 min (not 10) to leave
+#     margin for that drift.
+#  2. Render's free plan only includes 750 instance-hours/month. Keeping the
+#     service awake 24/7 (~744h) would sit right at the cap and risk a
+#     mid-month suspension (a far worse "cold start"). So we only keep it warm
+#     during active hours — 08:00-24:00 China time (UTC+8) = 00:00-16:00 UTC —
+#     which costs ~490h/month and leaves comfortable headroom. The service is
+#     allowed to nap overnight (low traffic), so the first morning visit still
+#     cold-starts once.
+#
+# For rock-solid, drift-free warmth, also add an external pinger (e.g.
+# UptimeRobot, free, 5-min interval) at https://spoken-backend.onrender.com/api/health.
+# To eliminate cold starts entirely, upgrade the Render plan (no free-tier sleep).
 
 on:
   schedule:
-    - cron: "*/10 * * * *" # every ~10 minutes (best-effort)
+    - cron: "*/5 0-15 * * *" # every 5 min, 08:00-24:00 China time (UTC+8)
   workflow_dispatch: {}
 
 permissions: {} # no repo access needed; the job only makes an outbound request
