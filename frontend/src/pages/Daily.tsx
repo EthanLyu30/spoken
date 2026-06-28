@@ -154,7 +154,7 @@ export default function Daily() {
         </div>
 
         {genState === "error" && (
-          <p className="mb-4 rounded-2xl bg-surface-2 px-4 py-3 text-sm text-muted">
+          <p role="alert" className="mb-4 rounded-2xl bg-surface-2 px-4 py-3 text-sm text-muted">
             生成失败，请确认后端在运行后重试。先看看下面的精选金句吧。
           </p>
         )}

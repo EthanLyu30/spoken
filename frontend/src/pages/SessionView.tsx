@@ -76,7 +76,7 @@ export default function SessionView() {
         {status === "error" && (
           <section className="card grid place-items-center gap-3 p-10 text-center">
             <Buddy mood="idle" size={110} />
-            <p className="font-semibold text-ink">没找到这次记录，或后端未连接。</p>
+            <p role="alert" className="font-semibold text-ink">没找到这次记录，或后端未连接。</p>
             <Link to="/progress">
               <Button variant="soft">返回进度</Button>
             </Link>

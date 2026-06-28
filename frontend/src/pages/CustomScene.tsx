@@ -93,7 +93,10 @@ export default function CustomScenePage() {
             </button>
           </div>
           {error && (
-            <p className="mt-3 rounded-2xl bg-[#ffe8e3] px-4 py-2.5 text-sm font-semibold text-[#e6503d]">
+            <p
+              role="alert"
+              className="mt-3 rounded-2xl bg-[#ffe8e3] px-4 py-2.5 text-sm font-semibold text-[#e6503d]"
+            >
               生成失败，请确认后端在运行后重试。
             </p>
           )}
