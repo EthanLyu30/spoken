@@ -41,8 +41,9 @@ growth curve.
   ones removed) and a **"when to use it"** note.
 - **Custom & daily-generated scenarios** — describe any scene in one line, or play
   the daily AI recommendation.
-- **Real progress data** — streak / level / XP / daily goal and pronunciation &
-  Q&A history charts, all driven by real activity.
+- **Real progress data** — streak / level / XP / daily goal, pronunciation & Q&A
+  history charts, and a **cross-session insight** that points at your weakest
+  dimension and whether each skill is climbing — all driven by real activity.
 - **Resilient** — request timeouts, streaming fallback, and voice-call
   auto-reconnect; 60+ backend tests.
 

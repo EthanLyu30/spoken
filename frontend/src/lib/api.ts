@@ -432,6 +432,29 @@ export function getStats(signal?: AbortSignal): Promise<Stats> {
   return request<Stats>("/api/stats", { signal });
 }
 
+export interface SkillInsight {
+  key: string;
+  label_zh: string;
+  label_en: string;
+  avg: number; // mean score over recent sessions, 0-100
+  delta: number; // later-half avg minus earlier-half avg (>0 improving)
+  samples: number;
+}
+
+export interface Insights {
+  available: boolean;
+  sessions: number;
+  overall_delta: number;
+  weakest: SkillInsight | null;
+  strongest: SkillInsight | null;
+  skills: SkillInsight[]; // weakest first
+}
+
+/** Cross-session ability analysis: weakest dimension to focus on + per-skill trend. */
+export function getInsights(signal?: AbortSignal): Promise<Insights> {
+  return request<Insights>("/api/stats/insights", { signal });
+}
+
 export interface Word {
   id: number;
   text: string;
