@@ -19,7 +19,8 @@ English · [中文](README.md)
 ## Overview
 
 Spoken is an **AI English speaking coach** for Chinese learners. Pick a real-life
-scenario (job interview, ordering coffee, a doctor's visit…) and talk — by voice
+scenario (job interview, a business negotiation, ordering coffee, a doctor's
+visit…) and talk — by voice
 or text — with the AI buddy **Pip**. During and after the chat, the app scores
 your **pronunciation, grammar and expression**, and turns every session into a
 growth curve.
