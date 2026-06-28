@@ -32,3 +32,24 @@ class Stats(BaseModel):
     total_sessions: int
     total_practice: int
     words_count: int
+
+
+class SkillInsight(BaseModel):
+    """A single ability dimension averaged over the learner's recent sessions,
+    with a short-term trend (later half vs earlier half of those sessions)."""
+
+    key: str
+    label_zh: str
+    label_en: str
+    avg: int  # mean score over recent sessions, 0-100
+    delta: int  # later-half avg minus earlier-half avg (>0 improving)
+    samples: int
+
+
+class Insights(BaseModel):
+    available: bool  # False when there aren't yet any scored sessions
+    sessions: int  # how many recent sessions fed the analysis
+    overall_delta: int  # mean per-skill delta — overall direction of travel
+    weakest: SkillInsight | None = None  # the dimension to focus on next
+    strongest: SkillInsight | None = None
+    skills: list[SkillInsight] = Field(default_factory=list)  # weakest first

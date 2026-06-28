@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import get_client_id
 from app.db import get_db
-from app.schemas.practice import PracticeCreate, PracticeRecordOut, Stats
+from app.schemas.practice import Insights, PracticeCreate, PracticeRecordOut, Stats
 from app.services import practice as repo
 
 router = APIRouter(tags=["practice"])
@@ -33,3 +33,10 @@ def list_practice(
 @router.get("/stats", response_model=Stats)
 def stats(db: Session = Depends(get_db), client_id: str = Depends(get_client_id)) -> Stats:
     return Stats(**repo.compute_stats(db, client_id))
+
+
+@router.get("/stats/insights", response_model=Insights)
+def insights(
+    db: Session = Depends(get_db), client_id: str = Depends(get_client_id)
+) -> Insights:
+    return Insights(**repo.compute_insights(db, client_id))
