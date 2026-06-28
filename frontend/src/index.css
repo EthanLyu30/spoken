@@ -131,3 +131,27 @@
     transition-duration: 0.001ms !important;
   }
 }
+
+/* Printing / "save as PDF": keep the report's colours (scores, bars, rings) and
+ * lay it out cleanly on white paper. Decorative chrome is hidden via the
+ * `print:hidden` utility on the relevant elements. */
+@media print {
+  body {
+    background: #fff !important;
+  }
+  /* Browsers strip backgrounds when printing by default — force them so the
+   * progress bars, score rings and coloured chips actually show up. */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  /* Soft claymorphism shadows muddy print output; flatten to clean borders. */
+  .card,
+  [class*="shadow-"] {
+    box-shadow: none !important;
+  }
+  /* Don't split a report card across two pages. */
+  section {
+    break-inside: avoid;
+  }
+}

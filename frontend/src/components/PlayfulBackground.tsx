@@ -78,7 +78,7 @@ export function PlayfulBackground({ celebrate = false, accent }: PlayfulBackgrou
   ];
 
   return (
-    <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+    <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden print:hidden">
       {blobs.map((b, i) => (
         <span
           key={i}

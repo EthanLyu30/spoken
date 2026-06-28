@@ -45,6 +45,7 @@ growth curve.
 - **Real progress data** — streak / level / XP / daily goal, pronunciation & Q&A
   history charts, and a **cross-session insight** that points at your weakest
   dimension and whether each skill is climbing — all driven by real activity.
+  Each post-session debrief exports to **PDF in one tap**.
 - **Resilient** — request timeouts, streaming fallback, and voice-call
   auto-reconnect; 60+ backend tests.
 

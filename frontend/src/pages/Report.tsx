@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Lightbulb, RotateCcw, Sparkles } from "lucide-react";
+import { ArrowLeft, Download, Lightbulb, RotateCcw, Sparkles } from "lucide-react";
 import { Buddy } from "../components/Buddy";
 import { Ring } from "../components/ui/Ring";
 import { ProgressBar } from "../components/ui/ProgressBar";
@@ -85,10 +85,15 @@ export default function Report() {
     <div className="min-h-screen">
       <PlayfulBackground celebrate={!!feedback} />
 
-      <header className="mx-auto w-full max-w-3xl px-5 pt-6">
+      <header className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-5 pt-6 print:hidden">
         <Link to="/" className={backLink}>
           <ArrowLeft className="h-4 w-4" /> 回首页
         </Link>
+        {feedback && !loading && (
+          <button type="button" onClick={() => window.print()} className={backLink}>
+            <Download className="h-4 w-4" /> 下载 PDF
+          </button>
+        )}
       </header>
 
       <main data-collect className="mx-auto w-full max-w-3xl px-5 py-6">
@@ -117,6 +122,10 @@ export default function Report() {
 
         {feedback && !loading && (
           <>
+            <p className="mb-4 hidden text-sm font-semibold text-muted print:block">
+              Spoken 课后报告{sceneLabel ? ` · ${sceneLabel}` : ""} ·{" "}
+              {new Date().toLocaleDateString("zh-CN")}
+            </p>
             <section className="relative overflow-hidden rounded-huge border border-border bg-surface p-6 shadow-pop md:p-9">
               <div className="grid items-center gap-6 md:grid-cols-[auto_1fr_auto]">
                 <Buddy mood="cheer" size={128} className="mx-auto" />
@@ -214,7 +223,7 @@ export default function Report() {
                                 kind: "word",
                               });
                             }}
-                            className="text-[0.66rem] font-bold uppercase tracking-wide text-coral-deep"
+                            className="text-[0.66rem] font-bold uppercase tracking-wide text-coral-deep print:hidden"
                           >
                             {collected ? "已收藏 ✓" : "+ 收藏"}
                           </button>
@@ -238,7 +247,7 @@ export default function Report() {
               </section>
             </div>
 
-            <div className="mt-7 flex flex-wrap justify-center gap-3">
+            <div className="mt-7 flex flex-wrap justify-center gap-3 print:hidden">
               <Link to={`/practice/${scenarioId}`}>
                 <Button size="lg">
                   <RotateCcw className="h-5 w-5" /> 再来一局
