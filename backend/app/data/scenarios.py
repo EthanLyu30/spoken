@@ -337,6 +337,103 @@ SCENARIOS: list[ScenarioDef] = [
             "about yourself, react warmly, and make a fun weekend plan together."
         ),
     ),
+    # --- Business Pro chapter: a step up for working professionals ---
+    ScenarioDef(
+        id="negotiation",
+        slug="business-negotiation",
+        title="Business Negotiation",
+        title_zh="商务谈判",
+        category="Business",
+        category_zh="商务",
+        subtitle="就价格、交期与条款来回拉锯，达成共识",
+        goal="Negotiate price, timeline and terms, and reach a deal both sides can accept.",
+        difficulty=5,
+        minutes=8,
+        icon="Scale",
+        partner_role="Morgan, a sharp but fair procurement manager",
+        opening_line=(
+            "Thanks for making the time. I'll be straight with you — your proposal looks "
+            "strong, but the price is above what we budgeted. Can we talk numbers?"
+        ),
+        persona=(
+            "You are Morgan, a procurement manager negotiating with the learner, who is the "
+            "vendor. Push politely on price, delivery time and terms, and make a counteroffer. "
+            "If they justify their value well, concede a little; if not, hold firm. Stay "
+            "professional and fair, and steer toward a workable agreement."
+        ),
+    ),
+    ScenarioDef(
+        id="videocall",
+        slug="joining-a-video-call",
+        title="Joining a Video Call",
+        title_zh="远程视频会议",
+        category="Meeting",
+        category_zh="会议",
+        subtitle="加入视频会议、处理音画小状况、轮流发言并对齐行动项",
+        goal="Join a video meeting, handle a tech hiccup, take your turn, and recap action items.",
+        difficulty=3,
+        minutes=6,
+        icon="Video",
+        partner_role="Priya, an organised colleague hosting the video call",
+        opening_line=(
+            "Hey, glad you could join! Can you hear me okay? We're just about to go over this "
+            "week's plan — want to kick us off with your update?"
+        ),
+        persona=(
+            "You are Priya, hosting a remote video meeting. Greet them, check their audio, and "
+            "invite them to share their update. Gently handle a 'you're on mute' moment if it "
+            "comes up, ask one natural follow-up, and wrap up by confirming who does what next. "
+            "Keep it inclusive and brisk."
+        ),
+    ),
+    ScenarioDef(
+        id="oneonone",
+        slug="performance-review",
+        title="Performance Review",
+        title_zh="绩效面谈",
+        category="Career",
+        category_zh="职业发展",
+        subtitle="和经理聊近期表现、接收反馈、对齐目标与成长",
+        goal="Talk through your recent work with your manager, take feedback well, and set goals.",
+        difficulty=4,
+        minutes=7,
+        icon="ClipboardCheck",
+        partner_role="Dana, your supportive but candid manager",
+        opening_line=(
+            "Good to see you! Let's do your check-in. Overall it's been a strong quarter — "
+            "how do you feel it's gone from your side?"
+        ),
+        persona=(
+            "You are Dana, the learner's manager in a one-on-one performance review. Ask how "
+            "they feel the quarter went, acknowledge a genuine strength, then give one piece of "
+            "constructive feedback kindly, and help them set a goal or two for next quarter. Be "
+            "candid but warm and encouraging."
+        ),
+    ),
+    ScenarioDef(
+        id="pitch",
+        slug="client-pitch",
+        title="Pitching to a Client",
+        title_zh="向客户路演",
+        category="Business",
+        category_zh="商务",
+        subtitle="向潜在客户介绍方案、回应顾虑、推动下一步",
+        goal="Pitch your solution to a prospective client, handle objections, and agree on next steps.",
+        difficulty=5,
+        minutes=8,
+        icon="Megaphone",
+        partner_role="Chris, a busy prospective client who asks pointed questions",
+        opening_line=(
+            "Okay, you've got my attention for ten minutes. We've looked at a few options "
+            "already — what makes yours different?"
+        ),
+        persona=(
+            "You are Chris, a prospective client hearing the learner pitch their product or "
+            "service. Listen, ask one or two pointed questions about value, price or risk, and "
+            "raise a mild objection. If they handle it well, agree to a concrete next step (a "
+            "trial, a follow-up call). Be busy but fair."
+        ),
+    ),
 ]
 
 _BY_ID: dict[str, ScenarioDef] = {s.id: s for s in SCENARIOS}
@@ -401,6 +498,10 @@ _VOICES: dict[str, dict[str, object]] = {
     "networking": {"vcn": "x4_enus_luna_formal", "speed": 57, "pitch": 54},
     "phone": {"vcn": "x4_enus_luna_formal", "speed": 53, "pitch": 50},
     "friend": {"vcn": "x5_enus_flossie_flow", "speed": 60, "pitch": 56},
+    "negotiation": {"vcn": "henry", "speed": 50, "pitch": 49},
+    "videocall": {"vcn": "x4_enus_luna_formal", "speed": 55, "pitch": 52},
+    "oneonone": {"vcn": "x4_enus_laura_education", "speed": 52, "pitch": 51},
+    "pitch": {"vcn": "henry", "speed": 53, "pitch": 51},
 }
 
 

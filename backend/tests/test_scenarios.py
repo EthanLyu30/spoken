@@ -19,6 +19,10 @@ EXPECTED_IDS = {
     "networking",
     "phone",
     "friend",
+    "negotiation",
+    "videocall",
+    "oneonone",
+    "pitch",
 }
 
 

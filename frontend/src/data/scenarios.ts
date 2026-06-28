@@ -16,7 +16,11 @@ export type ScenarioIcon =
   | "Presentation"
   | "Handshake"
   | "Headphones"
-  | "MessageCircle";
+  | "MessageCircle"
+  | "Scale"
+  | "Video"
+  | "ClipboardCheck"
+  | "Megaphone";
 
 export interface Scenario {
   id: string;
@@ -220,6 +224,58 @@ export const scenarios: Scenario[] = [
     minutes: 5,
     icon: "MessageCircle",
   },
+  {
+    id: "negotiation",
+    slug: "business-negotiation",
+    title: "Business Negotiation",
+    titleZh: "商务谈判",
+    category: "Business",
+    categoryZh: "商务",
+    subtitle: "就价格、交期与条款来回拉锯，达成共识",
+    goal: "Negotiate price, timeline and terms, and reach a deal both sides can accept.",
+    difficulty: 5,
+    minutes: 8,
+    icon: "Scale",
+  },
+  {
+    id: "videocall",
+    slug: "joining-a-video-call",
+    title: "Joining a Video Call",
+    titleZh: "远程视频会议",
+    category: "Meeting",
+    categoryZh: "会议",
+    subtitle: "加入视频会议、处理音画小状况、轮流发言并对齐行动项",
+    goal: "Join a video meeting, handle a tech hiccup, take your turn, and recap action items.",
+    difficulty: 3,
+    minutes: 6,
+    icon: "Video",
+  },
+  {
+    id: "oneonone",
+    slug: "performance-review",
+    title: "Performance Review",
+    titleZh: "绩效面谈",
+    category: "Career",
+    categoryZh: "职业发展",
+    subtitle: "和经理聊近期表现、接收反馈、对齐目标与成长",
+    goal: "Talk through your recent work with your manager, take feedback well, and set goals.",
+    difficulty: 4,
+    minutes: 7,
+    icon: "ClipboardCheck",
+  },
+  {
+    id: "pitch",
+    slug: "client-pitch",
+    title: "Pitching to a Client",
+    titleZh: "向客户路演",
+    category: "Business",
+    categoryZh: "商务",
+    subtitle: "向潜在客户介绍方案、回应顾虑、推动下一步",
+    goal: "Pitch your solution to a prospective client, handle objections, and agree on next steps.",
+    difficulty: 5,
+    minutes: 8,
+    icon: "Megaphone",
+  },
 ];
 
 export function getScenario(id: string): Scenario | undefined {
@@ -246,5 +302,6 @@ export const chapters: Chapter[] = [
   { title: "Daily Life", titleZh: "日常生活", ids: ["cafe", "restaurant", "shopping", "doctor"] },
   { title: "On the Go", titleZh: "出行在外", ids: ["airport", "hotel", "directions"] },
   { title: "At Work", titleZh: "职场进阶", ids: ["interview", "standup", "presentation", "networking"] },
+  { title: "Business Pro", titleZh: "商务进阶", ids: ["negotiation", "videocall", "oneonone", "pitch"] },
   { title: "Social", titleZh: "社交时刻", ids: ["party", "friend", "phone"] },
 ];
