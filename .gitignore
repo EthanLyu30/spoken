@@ -57,6 +57,9 @@ desktop.ini
 *.swp
 *.swo
 
+# ---------- Local Git worktrees ----------
+.worktrees/
+
 # ---------- Claude Code local config ----------
 .claude/
 
