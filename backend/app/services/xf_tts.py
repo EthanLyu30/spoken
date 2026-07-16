@@ -28,19 +28,17 @@ def smooth_silences(
     *,
     rate: int = SAMPLE_RATE,
     win_ms: int = 10,
-    threshold: int = 320,
-    min_trim_ms: int = 80,
-    inter_cap_ms: int = 45,
+    near_zero_peak: int = 64,
+    min_trim_ms: int = 120,
+    inter_keep_ms: int = 60,
     sentence_min_ms: int = 320,
-    sentence_cap_ms: int = 200,
+    sentence_keep_ms: int = 180,
 ) -> bytes:
-    """Collapse over-long silences inside iFlytek's English synthesis.
+    """Shorten only long, near-digital-zero gaps in iFlytek PCM.
 
-    The standard voices leave 80-160ms of dead air between many words, which
-    sounds choppy / word-by-word. We keep natural micro-gaps (< ``min_trim_ms``)
-    and real sentence pauses (capped to ``sentence_cap_ms``), but shrink the
-    abnormal inter-word gaps to ``inter_cap_ms``. Leading/trailing silence is
-    trimmed. Cuts happen only inside true silence, so there are no clicks.
+    Peak detection deliberately preserves quiet consonants and low-energy speech.
+    Leading/trailing near-zero padding is removed. Long internal gaps keep 60 ms,
+    while sentence-sized gaps keep 180 ms.
     """
     samples = array.array("h")
     samples.frombytes(pcm)
@@ -49,43 +47,42 @@ def smooth_silences(
     if nwin == 0:
         return pcm
 
-    voiced = [False] * nwin
-    for w in range(nwin):
-        seg = samples[w * win : (w + 1) * win]
-        if not seg:
-            break
-        rms = (sum(x * x for x in seg) / len(seg)) ** 0.5
-        voiced[w] = rms >= threshold
+    non_silent = [False] * nwin
+    for index in range(nwin):
+        segment = samples[index * win : (index + 1) * win]
+        non_silent[index] = bool(segment) and max(
+            abs(value) for value in segment
+        ) > near_zero_peak
 
     out = array.array("h")
-    w = 0
+    index = 0
     seen_voice = False
-    while w < nwin:
-        if voiced[w]:
-            out.extend(samples[w * win : (w + 1) * win])
+    while index < nwin:
+        if non_silent[index]:
+            out.extend(samples[index * win : (index + 1) * win])
             seen_voice = True
-            w += 1
+            index += 1
             continue
-        # silence run [w, e)
-        e = w
-        while e < nwin and not voiced[e]:
-            e += 1
-        run_ms = (e - w) * win_ms
-        trailing = e >= nwin
-        if not seen_voice or trailing:
-            keep_ms = 0  # drop leading / trailing silence
-        elif run_ms < min_trim_ms:
-            keep_ms = run_ms  # natural micro-gap, leave it
-        elif run_ms >= sentence_min_ms:
-            keep_ms = sentence_cap_ms
-        else:
-            keep_ms = inter_cap_ms
-        keep_win = min(e - w, keep_ms // win_ms)
-        if keep_win:
-            out.extend(samples[w * win : (w + keep_win) * win])
-        w = e
 
-    return out.tobytes() if len(out) else pcm
+        end = index
+        while end < nwin and not non_silent[end]:
+            end += 1
+        run_ms = (end - index) * win_ms
+        trailing = end >= nwin
+        if not seen_voice or trailing:
+            keep_ms = 0
+        elif run_ms < min_trim_ms:
+            keep_ms = run_ms
+        elif run_ms >= sentence_min_ms:
+            keep_ms = sentence_keep_ms
+        else:
+            keep_ms = inter_keep_ms
+        keep_windows = min(end - index, keep_ms // win_ms)
+        if keep_windows:
+            out.extend(samples[index * win : (index + keep_windows) * win])
+        index = end
+
+    return out.tobytes() if out else pcm
 
 
 def pcm16_to_wav(pcm: bytes, *, rate: int = SAMPLE_RATE, channels: int = 1) -> bytes:

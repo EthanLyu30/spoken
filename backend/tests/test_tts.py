@@ -84,22 +84,35 @@ def test_tts_rejects_empty_text():
     assert client.post("/api/tts", json={"text": ""}).status_code == 422
 
 
-def test_smooth_silences_shortens_internal_gap_and_trims_edges():
+def test_smooth_silences_collapses_only_near_zero_internal_gap():
     rate = SAMPLE_RATE
-    tone = array.array("h", [8000 if (i // 80) % 2 == 0 else -8000 for i in range(rate // 5)])  # 200ms
-    long_sil = array.array("h", [0] * (rate // 2))  # 500ms internal silence
-    edge_sil = array.array("h", [0] * (rate // 4))  # 250ms leading + trailing
-    pcm = (edge_sil + tone + long_sil + tone + edge_sil).tobytes()
+    tone = array.array("h", [8000, -8000] * (rate // 10))  # 200 ms
+    zero_gap = array.array("h", [0] * (rate // 5))  # 200 ms
+    pcm = (tone + zero_gap + tone).tobytes()
     out = smooth_silences(pcm)
-    # Internal gap collapsed and leading/trailing silence removed.
     assert len(out) < len(pcm)
-    # Both spoken segments survive.
-    assert len(out) > len(tone.tobytes())
+    assert len(out) >= len((tone + tone).tobytes()) + int(rate * 0.06) * 2
 
 
-def test_smooth_silences_keeps_continuous_speech():
+def test_smooth_silences_preserves_low_energy_speech():
     rate = SAMPLE_RATE
-    tone = array.array("h", [6000 if (i // 80) % 2 == 0 else -6000 for i in range(rate)])  # 1s buzz
-    pcm = tone.tobytes()
-    # No long internal silence -> essentially unchanged.
+    low_energy = array.array("h", [120, -120] * (rate // 2))  # 1 second
+    pcm = low_energy.tobytes()
     assert smooth_silences(pcm) == pcm
+
+
+def test_smooth_silences_preserves_low_energy_speech_between_loud_segments():
+    rate = SAMPLE_RATE
+    tone = array.array("h", [5000, -5000] * (rate // 10))  # 200 ms
+    low_energy = array.array("h", [120, -120] * (rate // 10))  # 200 ms
+    pcm = (tone + low_energy + tone).tobytes()
+    assert smooth_silences(pcm) == pcm
+
+
+def test_smooth_silences_keeps_longer_sentence_pause():
+    rate = SAMPLE_RATE
+    tone = array.array("h", [5000, -5000] * (rate // 10))
+    sentence_gap = array.array("h", [0] * (rate // 2))  # 500 ms
+    out = smooth_silences((tone + sentence_gap + tone).tobytes())
+    kept_samples = len(out) // 2 - len(tone) * 2
+    assert kept_samples >= int(rate * 0.18)
