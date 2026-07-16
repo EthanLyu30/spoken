@@ -1,6 +1,7 @@
 import { Volume2 } from "lucide-react";
 import type { ScenarioTheme } from "../lib/theme";
 import { cn } from "../lib/utils";
+import { InteractiveEnglishText } from "./dictionary/InteractiveEnglishText";
 import { PronounceButton } from "./PronounceButton";
 import {
   TurnCorrectionCard,
@@ -40,7 +41,9 @@ export function ChatBubble({
         <p className="text-[0.66rem] font-bold uppercase tracking-wide opacity-70">
           {isPip ? "Pip" : "You"}
         </p>
-        <p className="mt-0.5 leading-snug">{text}</p>
+        <p className="mt-0.5 leading-snug">
+          <InteractiveEnglishText text={text} />
+        </p>
         {isPip && (
           <div className="mt-1.5 flex flex-col gap-1">
             {onSpeak && (

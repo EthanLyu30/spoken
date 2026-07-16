@@ -509,10 +509,7 @@ export default function Conversation() {
         )}
       </div>
 
-      <main
-        data-collect
-        className="mx-auto w-full min-h-0 max-w-2xl flex-1 space-y-3 overflow-y-auto px-5 py-4"
-      >
+      <main className="mx-auto w-full min-h-0 max-w-2xl flex-1 space-y-3 overflow-y-auto px-5 py-4">
         {messages.map((m, i) => (
           <ChatBubble
             key={i}

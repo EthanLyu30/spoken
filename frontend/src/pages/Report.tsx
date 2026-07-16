@@ -5,6 +5,7 @@ import { Buddy } from "../components/Buddy";
 import { Ring } from "../components/ui/Ring";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { Button } from "../components/ui/Button";
+import { InteractiveEnglishText } from "../components/dictionary/InteractiveEnglishText";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { useSession } from "../store/session";
 import { useCustomScene } from "../store/custom";
@@ -96,7 +97,7 @@ export default function Report() {
         )}
       </header>
 
-      <main data-collect className="mx-auto w-full max-w-3xl px-5 py-6">
+      <main className="mx-auto w-full max-w-3xl px-5 py-6">
         {loading && (
           <section className="card grid place-items-center p-10 text-center">
             <Buddy mood="talking" size={120} />
@@ -180,9 +181,11 @@ export default function Report() {
                   <div className="mt-4 space-y-3">
                     {feedback.corrections.map((c, i) => (
                       <div key={i} className="rounded-2xl bg-surface-2 p-4">
-                        <p className="text-sm text-muted line-through">{c.original}</p>
+                        <p className="text-sm text-muted line-through">
+                          <InteractiveEnglishText text={c.original} />
+                        </p>
                         <p className="mt-1 text-sm font-bold" style={{ color: "var(--leaf-deep)" }}>
-                          {c.suggestion}
+                          <InteractiveEnglishText text={c.suggestion} />
                         </p>
                         <p className="mt-1 text-xs text-muted">{c.note}</p>
                       </div>
@@ -204,7 +207,7 @@ export default function Report() {
                       return (
                         <li key={i} className="flex flex-wrap items-center gap-2">
                           <span className="rounded-full bg-surface-2 px-3 py-1 text-sm font-semibold text-ink">
-                            {p.text}
+                            <InteractiveEnglishText text={p.text} />
                           </span>
                           <span className="text-xs text-muted">{p.note}</span>
                           <button
@@ -220,7 +223,7 @@ export default function Report() {
                                 text: p.text,
                                 meaning: p.note,
                                 scenario_id: scenarioId ?? "",
-                                kind: "word",
+                                kind: "phrase",
                               });
                             }}
                             className="text-[0.66rem] font-bold uppercase tracking-wide text-coral-deep print:hidden"

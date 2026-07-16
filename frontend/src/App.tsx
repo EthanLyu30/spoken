@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { WordCollector } from "./components/WordCollector";
+import { DictionaryProvider } from "./components/dictionary/DictionaryProvider";
 import { Onboarding } from "./components/Onboarding";
 
 // Route-level code splitting: each page ships as its own chunk and loads on
@@ -20,7 +20,7 @@ const SessionView = lazy(() => import("./pages/SessionView"));
 
 export default function App() {
   return (
-    <>
+    <DictionaryProvider>
       <Suspense fallback={null}>
         <Routes>
           <Route path="/" element={<Home />} />
@@ -36,8 +36,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
-      <WordCollector />
       <Onboarding />
-    </>
+    </DictionaryProvider>
   );
 }

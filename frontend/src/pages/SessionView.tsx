@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
+import { InteractiveEnglishText } from "../components/dictionary/InteractiveEnglishText";
 import { Button } from "../components/ui/Button";
 import { Ring } from "../components/ui/Ring";
 import { ProgressBar } from "../components/ui/ProgressBar";
@@ -152,7 +153,9 @@ export default function SessionView() {
                           <p className="text-[0.6rem] font-bold uppercase tracking-wide opacity-70">
                             {isPip ? "Pip" : "You"}
                           </p>
-                          <p className="mt-0.5 leading-snug">{m.content}</p>
+                          <p className="mt-0.5 leading-snug">
+                            <InteractiveEnglishText text={m.content} />
+                          </p>
                         </div>
                       </div>
                     );

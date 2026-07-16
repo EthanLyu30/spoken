@@ -10,7 +10,7 @@ class WordCreate(BaseModel):
     scenario_id: str = ""
     meaning: str = ""
     example: str = ""
-    kind: str = "word"  # "word" or "sentence"
+    kind: str = "word"  # word | phrase | sentence
 
 
 class WordUpdate(BaseModel):

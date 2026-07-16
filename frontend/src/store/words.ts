@@ -19,6 +19,7 @@ interface CollectPayload {
   meaning?: string;
   example?: string;
   scenario_id?: string;
+  /** Entry category: "word", "phrase", or "sentence". */
   kind?: string;
 }
 
@@ -31,7 +32,7 @@ interface WordsState {
   ensureLoaded: () => void;
   /** Force a fresh fetch, merging in any in-flight optimistic entries. */
   refresh: (signal?: AbortSignal) => Promise<void>;
-  /** Optimistically save a word/phrase; ignored if its text is already present. */
+  /** Optimistically save a word/phrase/sentence; ignored if already present. */
   collect: (payload: CollectPayload) => void;
   /** Remove by id (optimistic; rolls back on failure). */
   remove: (id: number) => void;

@@ -1,7 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { postPronunciation, postTurnCorrection } from "../lib/api";
+import { DictionaryProvider } from "./dictionary/DictionaryProvider";
 import { TurnCorrectionCard } from "./TurnCorrectionCard";
 
 vi.mock("../lib/api", () => ({
@@ -43,6 +45,10 @@ const pronunciation = {
   ],
 };
 
+function renderWithDictionary(ui: ReactNode) {
+  return render(<DictionaryProvider>{ui}</DictionaryProvider>);
+}
+
 describe("TurnCorrectionCard", () => {
   beforeEach(() => {
     vi.mocked(postTurnCorrection).mockReset();
@@ -53,7 +59,7 @@ describe("TurnCorrectionCard", () => {
 
   it("checks text only for a typed turn and caches the result", async () => {
     const user = userEvent.setup();
-    render(
+    renderWithDictionary(
       <TurnCorrectionCard
         scenarioId="cafe"
         text="I very like it"
@@ -65,7 +71,9 @@ describe("TurnCorrectionCard", () => {
 
     await user.click(screen.getByRole("button", { name: "即时纠错" }));
 
-    expect(await screen.findByText("I really like it.")).toBeInTheDocument();
+    expect(
+      (await screen.findAllByRole("button", { name: "查询 really" })).length,
+    ).toBeGreaterThan(0);
     expect(screen.getByText("本句为文字输入，无法评测发音")).toBeInTheDocument();
     expect(postPronunciation).not.toHaveBeenCalled();
 
@@ -77,7 +85,7 @@ describe("TurnCorrectionCard", () => {
   it("checks text and pronunciation for a voice turn", async () => {
     const user = userEvent.setup();
     const pcm = new ArrayBuffer(8);
-    render(
+    renderWithDictionary(
       <TurnCorrectionCard
         scenarioId="cafe"
         text="I very like it"
@@ -97,7 +105,7 @@ describe("TurnCorrectionCard", () => {
   it("assesses only the spoken fragment for mixed input", async () => {
     const user = userEvent.setup();
     const pcm = new ArrayBuffer(8);
-    render(
+    renderWithDictionary(
       <TurnCorrectionCard
         scenarioId="cafe"
         text="Could I get I very like it"
@@ -123,7 +131,7 @@ describe("TurnCorrectionCard", () => {
   it("keeps text correction visible when pronunciation fails", async () => {
     vi.mocked(postPronunciation).mockRejectedValue(new Error("ISE down"));
     const user = userEvent.setup();
-    render(
+    renderWithDictionary(
       <TurnCorrectionCard
         scenarioId="cafe"
         text="I very like it"
@@ -139,14 +147,16 @@ describe("TurnCorrectionCard", () => {
 
     await user.click(screen.getByRole("button", { name: "即时纠错" }));
 
-    expect(await screen.findByText("I really like it.")).toBeInTheDocument();
+    expect(
+      (await screen.findAllByRole("button", { name: "查询 really" })).length,
+    ).toBeGreaterThan(0);
     expect(screen.getByText("发音评测失败，可单独重试")).toBeInTheDocument();
   });
 
   it("places the recommended sentence back into the composer", async () => {
     const onUseSuggestion = vi.fn();
     const user = userEvent.setup();
-    render(
+    renderWithDictionary(
       <TurnCorrectionCard
         scenarioId="cafe"
         text="I very like it"
@@ -160,5 +170,24 @@ describe("TurnCorrectionCard", () => {
     await user.click(await screen.findByRole("button", { name: "放入输入框" }));
 
     expect(onUseSuggestion).toHaveBeenCalledWith("I really like it.");
+  });
+
+  it("makes the recommended sentence available for word lookup", async () => {
+    const user = userEvent.setup();
+    renderWithDictionary(
+      <TurnCorrectionCard
+        scenarioId="cafe"
+        text="I very like it"
+        previousPartnerMessage=""
+        meta={{ source: "typed" }}
+        onUseSuggestion={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "即时纠错" }));
+
+    expect(
+      (await screen.findAllByRole("button", { name: "查询 really" })).length,
+    ).toBeGreaterThan(0);
   });
 });

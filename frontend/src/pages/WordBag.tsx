@@ -56,6 +56,7 @@ export default function WordBag() {
   const showLoading = !hasCache && !fetchedOnce && !error;
   const showError = !hasCache && error;
   const showEmpty = !hasCache && fetchedOnce && !error;
+  // Both individual words and short phrases live in the word tab.
   const kindOf = (w: Word) => (w.kind === "sentence" ? "sentence" : "word");
   const wordCount = all.filter((w) => kindOf(w) === "word").length;
   const sentCount = all.filter((w) => kindOf(w) === "sentence").length;

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, RefreshCw, Search, Sparkles, Volume2 } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
+import { InteractiveEnglishText } from "../components/dictionary/InteractiveEnglishText";
 import { PronounceButton } from "../components/PronounceButton";
 import { getDailyLines, type DailyLine } from "../lib/api";
 import { useWords } from "../store/words";
@@ -159,7 +160,7 @@ export default function Daily() {
           </p>
         )}
 
-        <ul data-collect className="space-y-3.5">
+        <ul className="space-y-3.5">
           {lines.map((q, i) => {
             const src = sourceOf(q);
             return (
@@ -168,7 +169,7 @@ export default function Daily() {
                   {i + 1}
                 </span>
                 <p className="font-display text-lg font-semibold leading-snug text-ink md:text-xl">
-                  {q.text}
+                  <InteractiveEnglishText text={q.text} />
                 </p>
                 <p className="mt-1.5 text-sm font-bold text-coral-deep">— {q.author}</p>
                 {src && <p className="mt-0.5 text-xs font-semibold text-muted">出处 · {src}</p>}

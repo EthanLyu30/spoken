@@ -17,6 +17,7 @@ import {
 import { copyText } from "../lib/clipboard";
 import type { UserTurnMeta } from "../lib/conversationTurns";
 import { speakText } from "../lib/speech";
+import { InteractiveEnglishText } from "./dictionary/InteractiveEnglishText";
 import { PronunciationFeedback } from "./PronunciationFeedback";
 
 type LoadState<T> =
@@ -135,12 +136,14 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
           {textState.status === "ready" && (
             <>
               <p className="text-[0.62rem] font-bold uppercase text-muted">原句</p>
-              <p className="text-sm">{textState.data.original}</p>
+              <p className="text-sm">
+                <InteractiveEnglishText text={textState.data.original} />
+              </p>
               <p className="mt-2 text-[0.62rem] font-bold uppercase text-leaf-deep">
                 推荐表达
               </p>
               <p className="text-sm font-bold text-leaf-deep">
-                {textState.data.suggestion}
+                <InteractiveEnglishText text={textState.data.suggestion} />
               </p>
 
               {textState.data.natural ? (
@@ -156,13 +159,15 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
                         {issue.kind === "grammar" ? "语法" : "表达"}
                       </p>
                       <p className="text-xs">
-                        <span className="line-through text-muted">
-                          {issue.original}
-                        </span>
+                        <InteractiveEnglishText
+                          text={issue.original}
+                          className="line-through text-muted"
+                        />
                         {" → "}
-                        <span className="font-bold text-leaf-deep">
-                          {issue.replacement}
-                        </span>
+                        <InteractiveEnglishText
+                          text={issue.replacement}
+                          className="font-bold text-leaf-deep"
+                        />
                       </p>
                       <p className="text-xs text-muted">{issue.note}</p>
                     </li>

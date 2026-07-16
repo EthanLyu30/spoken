@@ -23,7 +23,7 @@ class WordEntry(Base):
     meaning: Mapped[str] = mapped_column(Text, default="")
     example: Mapped[str] = mapped_column(Text, default="")
     scenario_id: Mapped[str] = mapped_column(String(64), default="")
-    kind: Mapped[str] = mapped_column(String(16), default="word", index=True)  # word | sentence
+    kind: Mapped[str] = mapped_column(String(16), default="word", index=True)  # word | phrase | sentence
     mastered: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
     # --- spaced repetition (Leitner) ---
