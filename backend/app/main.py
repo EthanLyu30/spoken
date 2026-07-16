@@ -14,6 +14,7 @@ from app.api import (
     chat,
     custom,
     daily,
+    dictionary,
     feedback,
     health,
     hint,
@@ -62,6 +63,7 @@ app.include_router(scenarios.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(feedback.router, prefix="/api")
 app.include_router(turn_correction.router, prefix="/api")
+app.include_router(dictionary.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(tts.router, prefix="/api")
 app.include_router(asr.router, prefix="/api")
