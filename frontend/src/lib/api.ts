@@ -307,17 +307,26 @@ export function getSession(id: number, signal?: AbortSignal): Promise<SessionDet
  * Fetch MP3 audio for a line of Pip's speech as an object URL.
  * The caller is responsible for revoking the URL when done.
  */
+export interface TtsOverrides {
+  vcn?: string;
+  speed?: number;
+  pitch?: number;
+}
+
 export async function fetchTtsUrl(
   text: string,
   scenarioId?: string,
   signal?: AbortSignal,
+  overrides?: TtsOverrides,
 ): Promise<string> {
-  // Apply the user's voice overrides (null = follow the scenario voice).
-  const v = useVoice.getState();
+  const voice = useVoice.getState();
   const body: Record<string, unknown> = { text, scenario_id: scenarioId };
-  if (v.vcn) body.vcn = v.vcn;
-  if (v.speed != null) body.speed = v.speed;
-  if (v.pitch != null) body.pitch = v.pitch;
+  const vcn = overrides?.vcn ?? voice.vcn;
+  const speed = overrides?.speed ?? voice.speed;
+  const pitch = overrides?.pitch ?? voice.pitch;
+  if (vcn != null) body.vcn = vcn;
+  if (speed != null) body.speed = speed;
+  if (pitch != null) body.pitch = pitch;
   const res = await fetch(`${BASE_URL}/api/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

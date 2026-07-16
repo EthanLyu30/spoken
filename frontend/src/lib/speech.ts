@@ -3,9 +3,13 @@
  * connected) or the iFlytek cloud cascade, per the user's voice settings.
  * Only one utterance plays at a time across the app.
  */
-import { fetchTtsUrl } from "./api";
+import { fetchTtsUrl, type TtsOverrides } from "./api";
 import { nextSentences } from "./sentences";
 import { useVoice } from "../store/voice";
+import {
+  autoCloudOverrides,
+  resolveVoiceMode,
+} from "./voiceResolver";
 
 export interface Speaking {
   /** Resolves when playback finishes (or is stopped / errors). */
@@ -35,6 +39,22 @@ export function primeBrowserVoices(onReady?: () => void): void {
     window.speechSynthesis.removeEventListener("voiceschanged", handler);
   };
   window.speechSynthesis.addEventListener("voiceschanged", handler);
+}
+
+function voiceSource() {
+  return {
+    listEnglishVoices: listBrowserVoices,
+    subscribe: (callback: () => void) => {
+      if (!hasSpeech()) return () => undefined;
+      window.speechSynthesis.addEventListener("voiceschanged", callback);
+      return () =>
+        window.speechSynthesis.removeEventListener(
+          "voiceschanged",
+          callback,
+        );
+    },
+    timeoutMs: 500,
+  };
 }
 
 function pickBrowserVoice(preferredURI: string | null): SpeechSynthesisVoice | null {
@@ -77,7 +97,11 @@ function speakBrowser(text: string): Speaking {
   return { done, stop: () => synth.cancel() };
 }
 
-function speakIflytek(text: string, scenarioId?: string): Speaking {
+function speakIflytek(
+  text: string,
+  scenarioId?: string,
+  overrides?: TtsOverrides,
+): Speaking {
   let audio: HTMLAudioElement | null = null;
   let url: string | null = null;
   let stopped = false;
@@ -88,15 +112,15 @@ function speakIflytek(text: string, scenarioId?: string): Speaking {
     url = null;
     settle();
   };
-  fetchTtsUrl(text, scenarioId)
-    .then((u) => {
+  fetchTtsUrl(text, scenarioId, undefined, overrides)
+    .then((nextUrl) => {
       if (stopped) {
-        URL.revokeObjectURL(u);
+        URL.revokeObjectURL(nextUrl);
         settle();
         return;
       }
-      url = u;
-      audio = new Audio(u);
+      url = nextUrl;
+      audio = new Audio(nextUrl);
       audio.onended = cleanup;
       audio.onerror = cleanup;
       void audio.play().catch(cleanup);
@@ -112,13 +136,40 @@ function speakIflytek(text: string, scenarioId?: string): Speaking {
   };
 }
 
+function speakResolved(text: string, scenarioId?: string): Speaking {
+  let active: Speaking | null = null;
+  let stopped = false;
+  const done = (async () => {
+    const voice = useVoice.getState();
+    const mode = await resolveVoiceMode(voice.engine, voiceSource());
+    if (stopped) return;
+    active =
+      mode.kind === "browser"
+        ? speakBrowser(text)
+        : speakIflytek(
+            text,
+            scenarioId,
+            mode.automaticFallback
+              ? autoCloudOverrides(voice)
+              : undefined,
+          );
+    await active.done;
+  })();
+  return {
+    done,
+    stop: () => {
+      stopped = true;
+      active?.stop();
+    },
+  };
+}
+
 let current: Speaking | null = null;
 
 /** Speak a line; stops whatever was playing. */
 export function speakText(text: string, scenarioId?: string): Speaking {
   current?.stop();
-  const engine = useVoice.getState().engine;
-  const s = engine === "browser" && hasSpeech() ? speakBrowser(text) : speakIflytek(text, scenarioId);
+  const s = speakResolved(text, scenarioId);
   current = s;
   return s;
 }
@@ -174,7 +225,11 @@ export interface SpeechQueue {
 export function createSpeechQueue(scenarioId?: string): SpeechQueue {
   current?.stop();
   current = null;
-  const useBrowser = useVoice.getState().engine === "browser" && hasSpeech();
+  const voiceAtStart = useVoice.getState();
+  const modePromise = resolveVoiceMode(
+    voiceAtStart.engine,
+    voiceSource(),
+  );
 
   const pending: string[] = [];
   let spokenUpto = 0;
@@ -206,6 +261,11 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
     });
 
   const consumer = (async () => {
+    const mode = await modePromise;
+    const overrides =
+      mode.kind === "iflytek" && mode.automaticFallback
+        ? autoCloudOverrides(voiceAtStart)
+        : undefined;
     let prefetchText: string | null = null;
     let prefetchUrl: Promise<string> | null = null;
     let firstStarted = false;
@@ -217,7 +277,7 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
         markStarted?.();
       }
 
-      if (useBrowser) {
+      if (mode.kind === "browser") {
         playing = speakBrowser(text);
         await playing.done;
         continue;
@@ -228,7 +288,12 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
         url =
           prefetchText === text && prefetchUrl
             ? await prefetchUrl
-            : await fetchTtsUrl(text, scenarioId);
+            : await fetchTtsUrl(
+                text,
+                scenarioId,
+                undefined,
+                overrides,
+              );
       } catch {
         prefetchText = null;
         prefetchUrl = null;
@@ -237,7 +302,12 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
       // Prefetch the next queued sentence while this one plays.
       prefetchText = pending[0] ?? null;
       prefetchUrl = prefetchText
-        ? fetchTtsUrl(prefetchText, scenarioId).catch(() => "")
+        ? fetchTtsUrl(
+            prefetchText,
+            scenarioId,
+            undefined,
+            overrides,
+          ).catch(() => "")
         : null;
       if (stopped || !url) {
         if (url) URL.revokeObjectURL(url);

@@ -291,7 +291,7 @@ function VoiceSettings() {
       )}
       {engine === "browser" && browserVoices.length === 0 && (
         <p className="-mt-3 mb-4 text-xs text-muted">
-          此浏览器暂未提供英文语音，可改用「讯飞云端」。
+          此设备暂未提供英文浏览器音色；朗读时会自动使用自然的讯飞云端音色。
         </p>
       )}
 
