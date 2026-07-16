@@ -41,8 +41,9 @@
 ```
 
 - **快路**只做一件事：尽快让 AI 开口说话，保证对话流畅自然。
-- **慢路**接收快路产出的最终转写与原始音频，做发音/语法分析与打分，结果异步推送到前端，不影响当前对话节奏。
+- **慢路**按用户操作触发：文字纠错走独立请求，发音评测只在语音回合展开「即时纠错」后上传该回合 PCM；两者都不阻塞 Pip 回复。
 - 这种解耦让"自然度/延迟"与"纠错精准度"两个相互冲突的目标各自优化，互不拖累。
+- 原始 PCM 只保存在当前浏览器内存中，最多保留最近 8 个用户语音回合；不会写入 `localStorage`、数据库或会话消息，且只发送给发音评测请求。
 
 ## 4. 模块划分
 
@@ -51,23 +52,23 @@
 ```
 app/
 ├── main.py                 # FastAPI 入口、CORS、路由注册
-├── core/
-│   ├── config.py           # 环境变量 / 设置（pydantic-settings）
-│   └── ws_manager.py       # WebSocket 连接与会话管理
+├── core/                   # 配置、依赖、鉴权与选择性压缩中间件
 ├── api/
-│   ├── scenarios.py        # GET 场景列表 / 详情
-│   ├── conversation.py     # WS：实时语音对话（快路编排）
-│   ├── assessment.py       # 发音 / 语法评测（慢路）
-│   └── reports.py          # 课后总结 / 历史趋势
+│   ├── chat.py             # HTTP 流式 / 非流式场景对话
+│   ├── asr.py              # 缓冲与 WebSocket 流式语音识别
+│   ├── pronunciation.py    # POST /api/pronunciation：发音评测
+│   ├── tts.py              # POST /api/tts：连续 WAV 朗读
+│   ├── turn_correction.py  # POST /api/turn-correction：单回合语法 / 表达纠错
+│   ├── dictionary.py       # POST /api/dictionary/lookup：单词 / 短语释义
+│   └── sessions.py         # 会话记录、报告与成长洞察
 ├── services/
-│   ├── asr_xf.py           # 讯飞流式语音识别
-│   ├── tts_xf.py           # 讯飞语音合成
-│   ├── pron_xf.py          # 讯飞发音评测
-│   ├── llm_deepseek.py     # DeepSeek 对话 / 纠错 / 总结
-│   └── vad.py              # silero-vad 断句
-├── models/                 # SQLAlchemy ORM（User / Session / Turn / Score）
-├── schemas/                # Pydantic 请求/响应模型
-└── prompts/                # 各场景与纠错/总结的提示模板
+│   ├── deepseek.py         # DeepSeek HTTP 客户端
+│   ├── dialogue.py         # 对话提示与流式编排
+│   ├── turn_correction.py  # 单回合结构化纠错
+│   ├── dictionary.py       # 词典查询与有界 TTL LRU
+│   └── xf_*.py             # 讯飞 ASR / ISE / TTS 与鉴权
+├── models/                 # SQLAlchemy ORM（User / Session / Practice / Word）
+└── schemas/                # Pydantic 请求/响应模型
 ```
 
 ### 4.2 前端（`frontend/`，React + TS）
@@ -75,15 +76,15 @@ app/
 ```
 src/
 ├── pages/
-│   ├── ScenarioSelect.tsx  # 场景选择
+│   ├── Home.tsx            # 场景地图与成长概览
 │   ├── Conversation.tsx    # 实时对话（录音、播放、字幕）
-│   └── Report.tsx          # 课后报告 / 趋势
+│   ├── Report.tsx          # 课后报告 / 趋势
+│   └── WordBag.tsx         # 生词本与 SRS
 ├── components/             # 通用组件（录音按钮、字幕、评分卡、雷达图）
-├── hooks/
-│   ├── useAudioRecorder.ts # 麦克风采集（MediaRecorder / Web Audio）
-│   └── useConversationWS.ts# 与后端的 WebSocket 双工
-├── store/                  # Zustand 状态
-└── lib/                    # API 客户端、音频工具
+│   ├── TurnCorrectionCard.tsx
+│   └── dictionary/         # 可交互英文文本、桌面卡片 / 移动端底部抽屉
+├── store/                  # Zustand：认证、会话、声音、生词
+└── lib/                    # API、录音、流式 ASR、通话、词典与朗读解析
 ```
 
 ## 5. 实时对话数据流（一次用户回合）
@@ -93,8 +94,17 @@ src/
 3. 流式 ASR 产出 partial（实时字幕）与 final（最终转写）。
 4. final 转写 + 对话历史 → DeepSeek 流式生成 AI 回复。
 5. AI 回复**按句**送入讯飞 TTS，边合成边回传音频，前端边收边播（首句尽快出声）。
-6. **并行（慢路）**：用 final 转写 + 该回合原始音频做发音评测、语法纠错，结果异步推送，前端在评分卡渐进显示。
-7. 该回合的分数写入 SQLite。
+6. Pip 的回复完成后，用户可展开该回合的「即时纠错」；文字纠错请求与发音评测请求相互独立，失败可分别重试。
+7. 文字回合只请求语法 / 表达；语音或混合输入回合仅评测实际说出的片段。PCM 只在浏览器内存短暂保留，最多 8 回合。
+8. 会话结束时再生成综合课后报告并保存练习记录。
+
+### 5.1 即时纠错、词典与朗读解析
+
+- `POST /api/turn-correction` 接收当前用户句子、场景和可选上文，返回自然改写、中文说明以及最多 6 条结构化问题。它和聊天请求完全隔离，因此不会延迟 Pip 接话。
+- `POST /api/dictionary/lookup` 接收 1–6 个英文词。前端对查询做规范化、会话级缓存和并发请求合并；后端使用最多 512 条、24 小时 TTL 的 LRU 内存缓存，避免重复调用 LLM。
+- 页面英文内容由统一的交互文本组件处理：单击单词查询；存在有效短语选择时，选择优先于单击。桌面端显示锚点卡片，移动端显示带安全区适配的底部抽屉。
+- 朗读选择器先读取浏览器英文音色，并等待最多 500 ms 的 `voiceschanged`；仍没有英文音色时，当前整次朗读稳定切换到讯飞云端，避免队列中途混用引擎。
+- 讯飞返回原始 PCM，后端只压缩接近数字零的异常空隙，再封装为单个 WAV；低能量发音和较长句间停顿会保留。
 
 ## 6. 数据模型（量化反馈的基础）
 
@@ -114,28 +124,25 @@ Score  (id, turn_id, pron_accuracy, pron_fluency, pron_completeness,
 |---|---|---|
 | 对话范式 | 级联管线 | 需要中间转写与音素分支撑评测 |
 | 延迟优化 | 全链路流式 + 快慢双路 | 兼顾自然度与纠错精度 |
+| 单回合纠错 | 按需独立请求 | Pip 先回复；用户需要时再看语法、表达与发音反馈 |
+| 音频隐私 | 浏览器内存最多保留 8 回合 PCM | 不持久化录音，只在发音评测时上传 |
+| 词典缓存 | 前端会话缓存 + 后端有界 TTL LRU | 减少重复等待和 LLM 调用，同时限制内存增长 |
+| 朗读引擎 | 浏览器英文音色优先，缺失自动回退讯飞 | 兼顾自然、低延迟与手机兼容性 |
 | 语音 + 发音评测 | 科大讯飞 | 国内访问稳定，发音评测成熟，单家覆盖 ASR/TTS/评测 |
 | 对话 / 纠错 / 总结 | DeepSeek | 国内可达，结构化输出能力强，性价比高 |
 | 后端 | FastAPI | 原生异步 + WebSocket，AI/音频生态完善 |
 | 存储 | SQLite | 零配置，评委可一键复现 |
 
-## 8. 当前实现进度（与本设计的对应）
+## 8. 当前实现状态
 
-本设计是目标蓝图；当前已落地的是「文本对话闭环」，语音与评测按里程碑推进。
-
-**✅ 已实现**
-
-| 设计中的模块 | 实际落地 |
+| 能力 | 实际落地 |
 |---|---|
-| 场景目录（角色设定） | `backend/app/data/scenarios.py` + `app/api/scenarios.py`（`GET /api/scenarios`） |
-| 对话 LLM（快路） | `backend/app/services/deepseek.py` + `services/dialogue.py` + `app/api/chat.py`（`POST /api/chat`，文本版） |
-| 前端对话 | `frontend/src/pages/Conversation.tsx` → `/api/chat`；首页 `Home.tsx` 闯关地图；`Report.tsx` 报告占位 |
-| 设计系统 | 自研「Pip」陪伴式 UI（`components/Buddy.tsx` 等） |
+| 场景对话 | `POST /api/chat` 与 `POST /api/chat/stream`；前端逐字展示，失败自动回退 |
+| 实时语音 | `POST /api/asr` + WebSocket 流式 ASR；按住说话、通话模式、VAD 自动断句与插话打断 |
+| 发音评测 | `POST /api/pronunciation`，按需接收当前回合 PCM 并返回词级 / 音素级结果 |
+| 即时纠错 | `POST /api/turn-correction` + `TurnCorrectionCard`，每个用户回合独立加载和重试 |
+| 实时词典 | `POST /api/dictionary/lookup` + 全局 `DictionaryProvider`，覆盖对话、纠错、每日内容、报告和会话回看 |
+| 连贯朗读 | 浏览器英文语音优先；无可用音色时自动回退讯飞单 WAV 播放，并保留自然停顿 |
+| 课后与成长 | 会话保存、综合报告、趋势、成长洞察、PDF / 打印、生词本与 SRS |
 
-**🚧 规划中（保留上文设计）**
-
-- 实时语音：WebSocket 编排（`ws_manager`、`api/conversation.py`）、麦克风采集与 VAD 断句。
-- 讯飞接入：`services/asr_xf.py`（ASR）、`tts_xf.py`（TTS）、`pron_xf.py`（发音评测）。
-- 慢路评测与持久化：`api/assessment.py`、`models/`（Session / Turn / Score）、`api/reports.py`（课后总结与趋势）。
-
-> 说明：文本 MVP 阶段对话用 `api/chat.py`（HTTP）实现；上语音时再引入上文的 WebSocket 编排（`api/conversation.py`）。
+以上新增能力沿用现有 `DEEPSEEK_API_KEY` 与 `XF_*` 配置，不引入新的必需环境变量。

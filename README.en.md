@@ -31,10 +31,18 @@ growth curve.
   conversation stays snappy while assessment runs asynchronously.
 - **Full iFlytek voice stack** — speech recognition (ASR), pronunciation scoring
   (ISE) and TTS; read-aloud offers a **browser-native voice (default) or iFlytek**,
-  with adjustable speed / pitch / voice. Talk hands-free in **call mode** with
+  with adjustable speed / pitch / voice. Devices without an English browser
+  voice automatically fall back to connected cloud speech. Talk hands-free in
+  **call mode** with
   **live captions** (streaming ASR) and **barge-in** (just start talking to cut
   Pip off and take the turn), or use **push-to-talk** (which auto-sends what it
   hears — no extra tap).
+- **Instant feedback on every learner turn** — Pip replies first, then the learner
+  can open grammar / expression correction, a natural rewrite and explanation;
+  voice turns can also request pronunciation feedback without persisting audio.
+- **Dictionary in context** — click an English word or select a two-to-six-word
+  phrase for a Chinese definition, example and translation, then collect it
+  directly. Desktop uses an anchored card; mobile uses a bottom sheet.
 - **TOEFL-style timed Q&A** — a real TOEFL independent-speaking question bank plus
   AI scenario questions; 45s per answer, scored on the ETS rubric with a model
   high-scoring sample answer.
@@ -66,7 +74,7 @@ asynchronous assessment path:
  end of chat ─────────────────────┴─► pronunciation + grammar + debrief ─► 📊
 ```
 
-> Current state: chat replies are **streamed**; in call mode **read-aloud is streamed sentence-by-sentence** (the first sentence starts playing while the rest is still being generated and synthesised, cutting perceived latency) and **ASR is streamed live** (captions appear and self-correct as you speak, and the reply starts the instant you stop — falling back to buffered transcription if the relay is unavailable); read-aloud defaults to the browser-native voice with iFlytek optional. Full design in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+> Current state: chat replies are **streamed**; in call mode **read-aloud is streamed sentence-by-sentence** (the first sentence starts playing while the rest is still being generated and synthesised, cutting perceived latency) and **ASR is streamed live** (captions appear and self-correct as you speak, and the reply starts the instant you stop — falling back to buffered transcription if the relay is unavailable); read-aloud prefers an English browser voice and automatically falls back to iFlytek when none is available. Full design in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ### Stack
 
