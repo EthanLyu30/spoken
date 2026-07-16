@@ -145,6 +145,26 @@ export function postTurnCorrection(
   });
 }
 
+export interface DictionaryEntry {
+  query: string;
+  phonetic: string;
+  part_of_speech: string;
+  meaning: string;
+  example: string;
+  example_zh: string;
+}
+
+export function postDictionaryLookup(
+  query: string,
+  signal?: AbortSignal,
+): Promise<DictionaryEntry> {
+  return request<DictionaryEntry>("/api/dictionary/lookup", {
+    method: "POST",
+    body: JSON.stringify({ query }),
+    signal,
+  });
+}
+
 /**
  * One role-play turn. Pass the conversation so far; an empty list asks the
  * backend for the scripted scene opener (no model call). Pass `custom` to
