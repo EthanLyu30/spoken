@@ -269,53 +269,64 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
     let prefetchText: string | null = null;
     let prefetchUrl: Promise<string> | null = null;
     let firstStarted = false;
-    while (!stopped) {
-      const text = await take();
-      if (text == null) break;
-      if (!firstStarted) {
-        firstStarted = true;
-        markStarted?.();
-      }
+    try {
+      while (!stopped) {
+        const text = await take();
+        if (text == null) break;
+        if (!firstStarted) {
+          firstStarted = true;
+          markStarted?.();
+        }
 
-      if (mode.kind === "browser") {
-        playing = speakBrowser(text);
+        if (mode.kind === "browser") {
+          playing = speakBrowser(text);
+          await playing.done;
+          continue;
+        }
+
+        let url: string;
+        try {
+          url =
+            prefetchText === text && prefetchUrl
+              ? await prefetchUrl
+              : await fetchTtsUrl(
+                  text,
+                  scenarioId,
+                  undefined,
+                  overrides,
+                );
+        } catch {
+          prefetchText = null;
+          prefetchUrl = null;
+          continue; // skip a sentence we couldn't synthesise; keep going
+        }
+        // Prefetch the next queued sentence while this one plays.
+        prefetchText = pending[0] ?? null;
+        prefetchUrl = prefetchText
+          ? fetchTtsUrl(
+              prefetchText,
+              scenarioId,
+              undefined,
+              overrides,
+            ).catch(() => "")
+          : null;
+        if (stopped || !url) {
+          if (url) URL.revokeObjectURL(url);
+          if (stopped) break;
+          continue;
+        }
+        playing = playUrl(url);
         await playing.done;
-        continue;
       }
-
-      let url: string;
-      try {
-        url =
-          prefetchText === text && prefetchUrl
-            ? await prefetchUrl
-            : await fetchTtsUrl(
-                text,
-                scenarioId,
-                undefined,
-                overrides,
-              );
-      } catch {
-        prefetchText = null;
-        prefetchUrl = null;
-        continue; // skip a sentence we couldn't synthesise; keep going
+    } finally {
+      const abandonedPrefetch = prefetchUrl;
+      prefetchText = null;
+      prefetchUrl = null;
+      if (abandonedPrefetch) {
+        void abandonedPrefetch.then((url) => {
+          if (url) URL.revokeObjectURL(url);
+        });
       }
-      // Prefetch the next queued sentence while this one plays.
-      prefetchText = pending[0] ?? null;
-      prefetchUrl = prefetchText
-        ? fetchTtsUrl(
-            prefetchText,
-            scenarioId,
-            undefined,
-            overrides,
-          ).catch(() => "")
-        : null;
-      if (stopped || !url) {
-        if (url) URL.revokeObjectURL(url);
-        if (stopped) break;
-        continue;
-      }
-      playing = playUrl(url);
-      await playing.done;
     }
   })();
 
