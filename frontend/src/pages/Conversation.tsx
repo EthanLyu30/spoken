@@ -18,6 +18,12 @@ import { getScenario } from "../data/scenarios";
 import { scenarioIcons } from "../lib/icons";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
 import { postChat, postAsr, postHint, postFeedback, streamChat, type ChatMessage } from "../lib/api";
+import {
+  appendUserTurn,
+  previousPartnerMessage,
+  type UserTurnMeta,
+  type UserTurnMetaMap,
+} from "../lib/conversationTurns";
 import { persistSessionOnce } from "../lib/sessionSave";
 import { speakText, createSpeechQueue, type Speaking, type SpeechQueue } from "../lib/speech";
 import { useSession } from "../store/session";
@@ -25,8 +31,8 @@ import { useCustomScene } from "../store/custom";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { startVoiceCall, type CallPhase, type VoiceCall } from "../lib/call";
 import { Buddy, type BuddyMood } from "../components/Buddy";
+import { ChatBubble } from "../components/ChatBubble";
 import { PlayfulBackground } from "../components/PlayfulBackground";
-import { PronounceButton } from "../components/PronounceButton";
 import { cn } from "../lib/utils";
 
 const localOpeners: Record<string, string> = {
@@ -51,6 +57,7 @@ export default function Conversation() {
     "Hi! Whenever you're ready, just say hello.";
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [turnMeta, setTurnMeta] = useState<UserTurnMetaMap>({});
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false); // awaiting Pip's reply (text)
   const [streaming, setStreaming] = useState(false); // reply is streaming in
@@ -71,6 +78,7 @@ export default function Conversation() {
   const recorderRef = useRef<ActiveRecorder | null>(null);
   const callRef = useRef<VoiceCall | null>(null);
   const messagesRef = useRef<ChatMessage[]>(messages);
+  const turnMetaRef = useRef<UserTurnMetaMap>(turnMeta);
   const goingToReportRef = useRef(false); // true when leaving via 看小结 (report saves)
 
   const navigate = useNavigate();
@@ -81,6 +89,10 @@ export default function Conversation() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    turnMetaRef.current = turnMeta;
+  }, [turnMeta]);
 
   function finish() {
     if (!id) return;
@@ -94,6 +106,8 @@ export default function Conversation() {
   useEffect(() => {
     setBooting(true);
     setError(null);
+    setTurnMeta({});
+    turnMetaRef.current = {};
     // Custom scenes carry their opener with them — no catalogue / model call.
     if (isCustom) {
       if (!customScene) {
@@ -152,6 +166,7 @@ export default function Conversation() {
       callQueueRef.current?.stop();
       recorderRef.current?.stop().catch(() => undefined);
       callRef.current?.end();
+      turnMetaRef.current = {};
       if (!goingToReportRef.current && id) {
         const msgs = messagesRef.current;
         if (msgs.some((m) => m.role === "user")) {
@@ -186,10 +201,22 @@ export default function Conversation() {
     });
   }
 
-  async function send(textArg?: string) {
+  async function send(
+    textArg?: string,
+    meta: UserTurnMeta = { source: "typed" },
+  ) {
     const text = (textArg ?? input).trim();
     if (!text || loading || booting || !id) return;
-    const next: ChatMessage[] = [...messages, { role: "user", content: text }];
+    const appended = appendUserTurn(
+      messagesRef.current,
+      turnMetaRef.current,
+      text,
+      meta,
+    );
+    const next = appended.messages;
+    messagesRef.current = next;
+    turnMetaRef.current = appended.meta;
+    setTurnMeta(appended.meta);
     setMessages(next);
     setInput("");
     setError(null);
@@ -238,13 +265,21 @@ export default function Conversation() {
       setTranscribing(true);
       setError(null);
       try {
-        const text = (await postAsr(await rec.stop())).trim();
-        if (text) {
+        const pcm = await rec.stop();
+        const spokenText = (await postAsr(pcm)).trim();
+        if (spokenText) {
           // Speaking app: send the recognized speech right away (combining any
           // already-typed text) instead of making the learner tap send. The box
           // stays for typing / fixing a misheard word. send() clears it.
-          const combined = input.trim() ? `${input.trim()} ${text}` : text;
-          void send(combined);
+          const typedPrefix = input.trim();
+          const combined = typedPrefix
+            ? `${typedPrefix} ${spokenText}`
+            : spokenText;
+          void send(combined, {
+            source: typedPrefix ? "mixed" : "voice",
+            spokenText,
+            pcm,
+          });
         } else {
           setError("没听清，再说一次试试？");
         }
@@ -276,11 +311,21 @@ export default function Conversation() {
         },
         transcribe: (pcm) => postAsr(pcm),
         onPartial: (t) => setLiveCaption(t),
-        reply: async (userText, onSpeaking) => {
-          const next: ChatMessage[] = [
-            ...messagesRef.current,
-            { role: "user", content: userText },
-          ];
+        reply: async (userText, pcm, onSpeaking) => {
+          const appended = appendUserTurn(
+            messagesRef.current,
+            turnMetaRef.current,
+            userText,
+            {
+              source: "voice",
+              spokenText: userText,
+              pcm,
+            },
+          );
+          const next = appended.messages;
+          messagesRef.current = next;
+          turnMetaRef.current = appended.meta;
+          setTurnMeta(appended.meta);
           setMessages(next);
           const custom = isCustom ? customScene ?? undefined : undefined;
 
@@ -469,12 +514,25 @@ export default function Conversation() {
         className="mx-auto w-full min-h-0 max-w-2xl flex-1 space-y-3 overflow-y-auto px-5 py-4"
       >
         {messages.map((m, i) => (
-          <Bubble
+          <ChatBubble
             key={i}
             role={m.role}
             text={m.content}
             theme={t}
             onSpeak={m.role === "assistant" ? () => void playTts(m.content) : undefined}
+            correction={
+              m.role === "user"
+                ? {
+                    scenarioId: id,
+                    text: m.content,
+                    previousPartnerMessage:
+                      previousPartnerMessage(messages, i) ?? "",
+                    custom: isCustom ? customScene ?? undefined : undefined,
+                    meta: turnMeta[i] ?? { source: "typed" },
+                    onUseSuggestion: (suggestion) => setInput(suggestion),
+                  }
+                : undefined
+            }
           />
         ))}
         {((loading && !streaming) || callPhase === "thinking") && <TypingBubble theme={t} />}
@@ -613,55 +671,6 @@ export default function Conversation() {
           </>
         )}
       </footer>
-    </div>
-  );
-}
-
-function Bubble({
-  role,
-  text,
-  theme,
-  onSpeak,
-}: {
-  role: "user" | "assistant";
-  text: string;
-  theme: ScenarioTheme;
-  onSpeak?: () => void;
-}) {
-  const isPip = role === "assistant";
-  return (
-    <div className={cn("flex", isPip ? "justify-start" : "justify-end")}>
-      <div
-        className={cn(
-          "max-w-[80%] rounded-3xl px-4 py-3 shadow-soft",
-          isPip ? "rounded-tl-md" : "rounded-tr-md",
-        )}
-        style={
-          isPip
-            ? { background: theme.soft, color: "#43302b" }
-            : { background: "var(--coral)", color: "var(--coral-fg)" }
-        }
-      >
-        <p className="text-[0.66rem] font-bold uppercase tracking-wide opacity-70">
-          {isPip ? "Pip" : "You"}
-        </p>
-        <p className="mt-0.5 leading-snug">{text}</p>
-        {isPip && (
-          <div className="mt-1.5 flex flex-col gap-1">
-            {onSpeak && (
-              <button
-                type="button"
-                onClick={onSpeak}
-                aria-label="朗读"
-                className="inline-flex w-fit items-center gap-1 text-[0.66rem] font-bold uppercase tracking-wide opacity-60 transition-opacity hover:opacity-100"
-              >
-                <Volume2 className="h-3.5 w-3.5" /> 朗读
-              </button>
-            )}
-            <PronounceButton text={text} />
-          </div>
-        )}
-      </div>
     </div>
   );
 }

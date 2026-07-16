@@ -109,6 +109,42 @@ export function getScenarioSuggestion(fresh = false, signal?: AbortSignal): Prom
   return request<CustomScene>(`/api/scenario-suggestion${fresh ? "?fresh=1" : ""}`, { signal });
 }
 
+export type CorrectionIssueKind = "grammar" | "expression";
+
+export interface TurnCorrectionIssue {
+  kind: CorrectionIssueKind;
+  original: string;
+  replacement: string;
+  note: string;
+}
+
+export interface TurnCorrectionResponse {
+  original: string;
+  natural: boolean;
+  suggestion: string;
+  issues: TurnCorrectionIssue[];
+  explanation: string;
+}
+
+export interface TurnCorrectionPayload {
+  scenario_id: string;
+  text: string;
+  previous_partner_message: string;
+  custom?: CustomScene;
+}
+
+/** Analyse one learner turn without waiting for the end-of-session report. */
+export function postTurnCorrection(
+  payload: TurnCorrectionPayload,
+  signal?: AbortSignal,
+): Promise<TurnCorrectionResponse> {
+  return request<TurnCorrectionResponse>("/api/turn-correction", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
 /**
  * One role-play turn. Pass the conversation so far; an empty list asks the
  * backend for the scripted scene opener (no model call). Pass `custom` to

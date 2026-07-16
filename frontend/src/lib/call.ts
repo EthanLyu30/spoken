@@ -29,7 +29,11 @@ export interface CallCallbacks {
    * "thinking" to "speaking". Folding generation + speech into one step lets the
    * first sentence play while the rest is still being generated.
    */
-  reply: (userText: string, onSpeaking: () => void) => Promise<void>;
+  reply: (
+    userText: string,
+    pcm: ArrayBuffer,
+    onSpeaking: () => void,
+  ) => Promise<void>;
   /**
    * Barge-in: the user started talking over Pip. Called while in the "speaking"
    * phase; the caller should stop the in-flight read-aloud so the user can take
@@ -144,7 +148,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
         // reply() generates and speaks the answer; it flips us to "speaking"
         // (via the callback) as soon as the first sentence starts. That's also
         // when we arm barge-in so the user can talk over Pip.
-        await cb.reply(text, () => {
+        await cb.reply(text, pcm, () => {
           if (ended) return;
           speaking = true;
           bargeMs = 0;
