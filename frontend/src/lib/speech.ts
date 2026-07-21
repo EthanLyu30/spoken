@@ -10,6 +10,8 @@ import {
   autoCloudOverrides,
   resolveVoiceMode,
 } from "./voiceResolver";
+import { float32ToWavBlob } from "./localSpeech/audio";
+import { isLocalSpeechModelReady } from "./localSpeech/runtime";
 
 export interface Speaking {
   /** Resolves when playback finishes (or is stopped / errors). */
@@ -136,6 +138,19 @@ function speakIflytek(
   };
 }
 
+function kokoroSpeed(speed: number | null): number {
+  return 0.8 + ((speed ?? 50) / 100) * 0.4;
+}
+
+async function fetchKokoroUrl(text: string): Promise<string> {
+  const { speed } = useVoice.getState();
+  const { synthesizeWithKokoro } = await import("./localSpeech/kokoro");
+  const output = await synthesizeWithKokoro(text, kokoroSpeed(speed));
+  return URL.createObjectURL(
+    float32ToWavBlob(output.audio, output.sampleRate),
+  );
+}
+
 function speakResolved(text: string, scenarioId?: string): Speaking {
   let active: Speaking | null = null;
   let stopped = false;
@@ -143,16 +158,33 @@ function speakResolved(text: string, scenarioId?: string): Speaking {
     const voice = useVoice.getState();
     const mode = await resolveVoiceMode(voice.engine, voiceSource());
     if (stopped) return;
-    active =
-      mode.kind === "browser"
-        ? speakBrowser(text)
-        : speakIflytek(
-            text,
-            scenarioId,
-            mode.automaticFallback
-              ? autoCloudOverrides(voice)
-              : undefined,
-          );
+    if (mode.kind === "browser") {
+      active = speakBrowser(text);
+    } else if (
+      mode.automaticFallback &&
+      isLocalSpeechModelReady("kokoro")
+    ) {
+      try {
+        const url = await fetchKokoroUrl(text);
+        if (stopped) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        active = playUrl(url);
+      } catch {
+        active = speakIflytek(
+          text,
+          scenarioId,
+          autoCloudOverrides(voice),
+        );
+      }
+    } else {
+      active = speakIflytek(
+        text,
+        scenarioId,
+        mode.automaticFallback ? autoCloudOverrides(voice) : undefined,
+      );
+    }
     await active.done;
   })();
   return {
@@ -269,6 +301,16 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
     let prefetchText: string | null = null;
     let prefetchUrl: Promise<string> | null = null;
     let firstStarted = false;
+    const abandonPrefetch = () => {
+      const abandoned = prefetchUrl;
+      prefetchText = null;
+      prefetchUrl = null;
+      if (abandoned) {
+        void abandoned.then((url) => {
+          if (url) URL.revokeObjectURL(url);
+        });
+      }
+    };
     try {
       while (!stopped) {
         const text = await take();
@@ -280,6 +322,38 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
 
         if (mode.kind === "browser") {
           playing = speakBrowser(text);
+          await playing.done;
+          continue;
+        }
+
+        // Automatic fallback is re-evaluated at every sentence boundary. If
+        // Kokoro became ready while the previous sentence played, discard any
+        // speculative cloud audio and switch without interrupting playback.
+        if (
+          mode.automaticFallback &&
+          isLocalSpeechModelReady("kokoro")
+        ) {
+          abandonPrefetch();
+          let localUrl: string;
+          try {
+            localUrl = await fetchKokoroUrl(text);
+          } catch {
+            try {
+              localUrl = await fetchTtsUrl(
+                text,
+                scenarioId,
+                undefined,
+                overrides,
+              );
+            } catch {
+              continue;
+            }
+          }
+          if (stopped) {
+            URL.revokeObjectURL(localUrl);
+            break;
+          }
+          playing = playUrl(localUrl);
           await playing.done;
           continue;
         }
@@ -319,14 +393,7 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
         await playing.done;
       }
     } finally {
-      const abandonedPrefetch = prefetchUrl;
-      prefetchText = null;
-      prefetchUrl = null;
-      if (abandonedPrefetch) {
-        void abandonedPrefetch.then((url) => {
-          if (url) URL.revokeObjectURL(url);
-        });
-      }
+      abandonPrefetch();
     }
   })();
 

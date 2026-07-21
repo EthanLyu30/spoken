@@ -8,6 +8,7 @@ import "@fontsource-variable/nunito";
 
 import App from "./App";
 import "./index.css";
+import { bootstrapLocalSpeechModels } from "./lib/localSpeech/bootstrap";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -16,3 +17,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </BrowserRouter>
   </React.StrictMode>,
 );
+
+// Download and warm local speech models only after the first paint/idle slot.
+// This is deliberately fire-and-forget: cloud speech remains the live fallback.
+bootstrapLocalSpeechModels();

@@ -30,6 +30,10 @@ import { useSession } from "../store/session";
 import { useCustomScene } from "../store/custom";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { startVoiceCall, type CallPhase, type VoiceCall } from "../lib/call";
+import {
+  isMoonshineTranscriptionReady,
+  transcribeSpeech,
+} from "../lib/transcribe";
 import { Buddy, type BuddyMood } from "../components/Buddy";
 import { ChatBubble } from "../components/ChatBubble";
 import { PlayfulBackground } from "../components/PlayfulBackground";
@@ -266,7 +270,7 @@ export default function Conversation() {
       setError(null);
       try {
         const pcm = await rec.stop();
-        const spokenText = (await postAsr(pcm)).trim();
+        const spokenText = (await transcribeSpeech(pcm)).trim();
         if (spokenText) {
           // Speaking app: send the recognized speech right away (combining any
           // already-typed text) instead of making the learner tap send. The box
@@ -309,7 +313,9 @@ export default function Conversation() {
           setCallPhase(p);
           if (p !== "listening") setLiveCaption(""); // user finished this turn
         },
-        transcribe: (pcm) => postAsr(pcm),
+        preferLocalAsr: isMoonshineTranscriptionReady,
+        transcribe: (pcm, engine) =>
+          engine === "local" ? transcribeSpeech(pcm) : postAsr(pcm),
         onPartial: (t) => setLiveCaption(t),
         reply: async (userText, pcm, onSpeaking) => {
           const appended = appendUserTurn(

@@ -8,11 +8,11 @@ import { Button } from "../components/ui/Button";
 import { Ring } from "../components/ui/Ring";
 import {
   getInterviewQuestions,
-  postAsr,
   savePractice,
   scoreInterview,
   type InterviewScore,
 } from "../lib/api";
+import { transcribeSpeech } from "../lib/transcribe";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { speakText } from "../lib/speech";
 
@@ -98,7 +98,7 @@ export default function Interview() {
     recRef.current = null;
     let text = "";
     try {
-      if (rec) text = (await postAsr(await rec.stop())).trim();
+      if (rec) text = (await transcribeSpeech(await rec.stop())).trim();
     } catch {
       text = "";
     }

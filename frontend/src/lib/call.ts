@@ -14,8 +14,10 @@ export type CallPhase = "listening" | "thinking" | "speaking";
 
 export interface CallCallbacks {
   onPhase: (p: CallPhase) => void;
-  /** Buffered fallback transcription, used when streaming ASR is unavailable. */
-  transcribe: (pcm: ArrayBuffer) => Promise<string>;
+  /** Buffered transcription using the engine selected at utterance start. */
+  transcribe: (pcm: ArrayBuffer, engine: "local" | "cloud") => Promise<string>;
+  /** Read once when speech starts; the selected engine is fixed for that turn. */
+  preferLocalAsr?: () => boolean;
   /**
    * Live, growing transcript while the user is still speaking. Best-effort:
    * only fires when streaming ASR is available, so the UI must treat it as a
@@ -118,6 +120,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   let silenceMs = 0;
   let utterMs = 0;
   let started = false;
+  let utteranceUsesLocalAsr = false;
 
   const reset = () => {
     collected = [];
@@ -125,16 +128,17 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     silenceMs = 0;
     utterMs = 0;
     started = false;
+    utteranceUsesLocalAsr = false;
   };
 
-  const handle = async (pcm: ArrayBuffer) => {
+  const handle = async (pcm: ArrayBuffer, useLocalAsr: boolean) => {
     busy = true;
     try {
       cb.onPhase("thinking");
       // Prefer the streaming final (already mid-flight); fall back to a buffered
       // POST if streaming is unavailable or yielded nothing.
       let text = "";
-      if (asr) {
+      if (!useLocalAsr && asr) {
         try {
           text = (await asr.finishUtterance()).trim();
         } catch {
@@ -142,7 +146,11 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
         }
       }
       if (!text) {
-        text = (await retryOnce(() => cb.transcribe(pcm))).trim();
+        text = (
+          await retryOnce(() =>
+            cb.transcribe(pcm, useLocalAsr ? "local" : "cloud"),
+          )
+        ).trim();
       }
       if (text && !ended) {
         // reply() generates and speaks the answer; it flips us to "speaking"
@@ -205,6 +213,17 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     utterMs += frameMs;
 
     if (rms > SILENCE_THRESHOLD) {
+      if (!started) {
+        utteranceUsesLocalAsr = cb.preferLocalAsr?.() ?? false;
+        if (utteranceUsesLocalAsr) {
+          // The previous cloud connection may have been opened while the local
+          // model was loading. Close it only at this new utterance boundary.
+          asr?.close();
+          asr = null;
+        } else {
+          void ensureStream();
+        }
+      }
       speechMs += frameMs;
       silenceMs = 0;
       started = true;
@@ -220,7 +239,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     // Once the user is actually speaking, forward each frame live so iFlytek
     // transcribes in real time (captions) and the final is ready the instant
     // they stop — no separate upload round-trip.
-    if (started && asr) {
+    if (started && asr && !utteranceUsesLocalAsr) {
       asr.send(floatToPcm16(resampleTo16k(new Float32Array(buf), rate)));
     }
 
@@ -229,8 +248,9 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
       ((speechMs > MIN_SPEECH_MS && silenceMs > END_SILENCE_MS) || utterMs > MAX_UTTER_MS);
     if (done) {
       const pcm = floatToPcm16(resampleTo16k(flatten(collected), rate));
+      const useLocalAsr = utteranceUsesLocalAsr;
       reset();
-      void handle(pcm);
+      void handle(pcm, useLocalAsr);
     }
   };
 
@@ -316,7 +336,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
 
   // Open the streaming-ASR connection in the background; the first utterance
   // uses buffered ASR if the handshake hasn't completed yet.
-  void ensureStream();
+  if (!(cb.preferLocalAsr?.() ?? false)) void ensureStream();
 
   // Keep the context alive: browsers suspend it when backgrounded / on device
   // changes, which would silently freeze the call.

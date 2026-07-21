@@ -33,6 +33,7 @@ docker compose up -d --build
 ### 前端 → Vercel（或 Netlify，静态）
 - Root Directory = `frontend`，Framework = **Vite**，Build = `npm run build`，Output = `dist`。
 - 环境变量 `VITE_API_BASE_URL = <后端地址>`（如 `https://spoken-backend.onrender.com`）。
+- Moonshine / Kokoro 权重由浏览器空闲时从 Hugging Face 下载并写入 Cache Storage；不增加 Vercel 服务端资源。首次访问会有较大的后台下载，国内网络无法访问 Hugging Face 时会自动继续使用讯飞。若后续要求本地模型高覆盖率，应把权重镜像到可控的对象存储/CDN。
 
 ### 收尾
 - 后端 `CORS_ORIGINS` 必须**包含前端域名**（逗号分隔可多个）。
@@ -50,7 +51,7 @@ docker compose up -d --build
 | `DATABASE_URL` | 数据库连接串；默认临时 SQLite，设为 Postgres 则持久化 | 想持久化时需要 |
 | `JWT_SECRET` | 账号登录令牌（JWT）签名密钥，建议 32+ 位随机串；不设则用仅限本地的弱默认值 | 用账号功能时需要 |
 
-> 仅配 `DEEPSEEK_API_KEY` 即可跑通文字对话 / 限时问答 / 金句 / 自定义场景，朗读默认走浏览器语音；配上 `XF_*` 解锁语音识别、发音评测、讯飞音色。
+> 仅配 `DEEPSEEK_API_KEY` 即可跑通文字对话 / 限时问答 / 金句 / 自定义场景；可用设备会尝试本地 Moonshine / Kokoro。生产环境仍建议配置 `XF_*`，用于发音评测、实时字幕以及本地模型加载失败、设备过慢或网络受限时的语音兜底。
 > 生成一个强 `JWT_SECRET`：`python -c "import secrets; print(secrets.token_urlsafe(48))"`。
 
 ---
