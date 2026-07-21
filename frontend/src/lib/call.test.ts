@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   openAsrStream: vi.fn(),
@@ -62,6 +62,10 @@ function pushFrame(value: number): void {
 }
 
 describe("voice call ASR engine boundaries", () => {
+  beforeEach(() => {
+    mocks.openAsrStream.mockReset();
+  });
+
   afterEach(() => {
     latestProcessor = null;
     vi.unstubAllGlobals();
@@ -109,6 +113,61 @@ describe("voice call ASR engine boundaries", () => {
         "hello locally",
         expect.any(ArrayBuffer),
         expect.any(Function),
+      ),
+    );
+    call.end();
+  });
+
+  it("closes a cloud stream that finishes opening after a local turn starts", async () => {
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+    const track = { onended: null, stop: vi.fn() };
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(async () => ({
+          getAudioTracks: () => [track],
+          getTracks: () => [track],
+        })),
+      },
+    });
+    const opened = {
+      send: vi.fn(),
+      finishUtterance: vi.fn(async () => "cloud"),
+      close: vi.fn(),
+    };
+    let resolveOpen: (stream: typeof opened) => void = () => undefined;
+    mocks.openAsrStream.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveOpen = resolve;
+        }),
+    );
+    let localReady = false;
+    const transcribe = vi.fn(async () => "local text");
+    const call = await startVoiceCall({
+      onPhase: vi.fn(),
+      preferLocalAsr: () => localReady,
+      transcribe,
+      reply: vi.fn(async () => undefined),
+      onError: vi.fn(),
+    });
+    expect(mocks.openAsrStream).toHaveBeenCalledOnce();
+
+    localReady = true;
+    pushFrame(0.1);
+    pushFrame(0.1);
+    pushFrame(0);
+    pushFrame(0);
+    pushFrame(0);
+    pushFrame(0);
+    resolveOpen(opened);
+
+    await vi.waitFor(() => expect(opened.close).toHaveBeenCalledOnce());
+    expect(opened.send).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(transcribe).toHaveBeenCalledWith(
+        expect.any(ArrayBuffer),
+        "local",
       ),
     );
     call.end();

@@ -128,6 +128,28 @@ describe("cloud speech queue cleanup", () => {
     await speaking.done;
   });
 
+  it("does not start a cloud request after stopped Kokoro synthesis fails", async () => {
+    mocks.localReady = true;
+    let rejectLocal: (reason: Error) => void = () => undefined;
+    mocks.synthesizeWithKokoro.mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          rejectLocal = reject;
+        }),
+    );
+    mocks.fetchTtsUrl.mockResolvedValue("blob:should-not-start");
+
+    const speaking = speakText("Cancelled sentence");
+    await vi.waitFor(() =>
+      expect(mocks.synthesizeWithKokoro).toHaveBeenCalledOnce(),
+    );
+    speaking.stop();
+    rejectLocal(new Error("worker stopped"));
+    await speaking.done;
+
+    expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
+  });
+
   it("switches a streaming reply to Kokoro at the next sentence boundary", async () => {
     mocks.fetchTtsUrl
       .mockResolvedValueOnce("blob:first-cloud")

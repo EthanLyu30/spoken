@@ -51,4 +51,18 @@ describe("speech transcription routing", () => {
 
     expect(cloud).toHaveBeenCalledOnce();
   });
+
+  it("falls back to cloud when local ASR returns no text for a VAD utterance", async () => {
+    const cloud = vi.fn(async () => "heard by cloud");
+
+    await expect(
+      transcribeSpeechWith(pcm, {
+        isMoonshineReady: () => true,
+        moonshine: vi.fn(async () => "   "),
+        cloud,
+      }),
+    ).resolves.toBe("heard by cloud");
+
+    expect(cloud).toHaveBeenCalledOnce();
+  });
 });

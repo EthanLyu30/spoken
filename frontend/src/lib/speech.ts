@@ -172,6 +172,7 @@ function speakResolved(text: string, scenarioId?: string): Speaking {
         }
         active = playUrl(url);
       } catch {
+        if (stopped) return;
         active = speakIflytek(
           text,
           scenarioId,
@@ -338,6 +339,7 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
           try {
             localUrl = await fetchKokoroUrl(text);
           } catch {
+            if (stopped) break;
             try {
               localUrl = await fetchTtsUrl(
                 text,

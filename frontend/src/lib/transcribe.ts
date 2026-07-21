@@ -13,7 +13,8 @@ export async function transcribeSpeechWith(
 ): Promise<string> {
   if (backends.isMoonshineReady()) {
     try {
-      return (await backends.moonshine(pcm)).trim();
+      const localText = (await backends.moonshine(pcm)).trim();
+      if (localText) return localText;
     } catch {
       // A worker can be evicted/crash independently. Recover this utterance via
       // the existing API instead of surfacing a broken recording to the user.

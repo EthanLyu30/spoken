@@ -90,22 +90,48 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   // is unavailable we fall back to buffering the clip and POSTing it.
   let asr: AsrStream | null = null;
   let asrUnavailable = false;
+  let asrOpening: Promise<void> | null = null;
+  let asrGeneration = 0;
 
-  async function ensureStream() {
-    if (asr || asrUnavailable || ended) return;
-    try {
-      asr = await openAsrStream({
-        onPartial: (t) => {
-          if (!ended && !busy) cb.onPartial?.(t);
-        },
-        onClose: () => {
-          asr = null; // dropped mid-call -> next turns use the buffered path
-        },
-      });
-    } catch {
-      asr = null;
-      asrUnavailable = true; // not available this call; buffered ASR only
-    }
+  function invalidateCloudStream(): void {
+    asrGeneration += 1;
+    asr?.close();
+    asr = null;
+  }
+
+  function ensureStream(): Promise<void> {
+    if (asr || asrUnavailable || ended) return Promise.resolve();
+    if (asrOpening) return asrOpening;
+
+    const generation = asrGeneration;
+    let opened: AsrStream | null = null;
+    const opening = (async () => {
+      try {
+        opened = await openAsrStream({
+          onPartial: (t) => {
+            if (!ended && !busy) cb.onPartial?.(t);
+          },
+          onClose: () => {
+            if (asr === opened) asr = null;
+          },
+        });
+        if (ended || generation !== asrGeneration) {
+          opened.close();
+          return;
+        }
+        asr = opened;
+      } catch {
+        if (generation === asrGeneration) {
+          asr = null;
+          asrUnavailable = true;
+        }
+      }
+    })();
+    asrOpening = opening;
+    void opening.then(() => {
+      if (asrOpening === opening) asrOpening = null;
+    });
+    return opening;
   }
 
   let stream: MediaStream | null = null;
@@ -218,8 +244,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
         if (utteranceUsesLocalAsr) {
           // The previous cloud connection may have been opened while the local
           // model was loading. Close it only at this new utterance boundary.
-          asr?.close();
-          asr = null;
+          invalidateCloudStream();
         } else {
           void ensureStream();
         }
@@ -349,8 +374,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     end: () => {
       ended = true;
       clearInterval(keepAlive);
-      asr?.close();
-      asr = null;
+      invalidateCloudStream();
       teardownGraph();
     },
   };
