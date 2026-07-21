@@ -17,6 +17,8 @@ services:
     envVars:
       - key: DEEPSEEK_API_KEY
         sync: false
+      - key: DEEPSEEK_MODEL
+        value: deepseek-v4-flash
       - key: XF_APP_ID
         sync: false
       - key: XF_API_KEY

@@ -108,7 +108,7 @@ Spoken 是面向中文母语者的 **AI 英语口语陪练**。挑一个真实�
 | 后端 | Python 3.11 · FastAPI · WebSocket · SQLAlchemy · SQLite / Postgres |
 | 语音识别 / 发音评测 | 科大讯飞（语音听写 IAT + 语音评测 ISE） |
 | 语音合成 | 浏览器 Web Speech API（默认）/ 科大讯飞在线合成（可选） |
-| 对话 / 纠错 / 总结 / 出题 | DeepSeek（`deepseek-chat`，对话走流式） |
+| 对话 / 纠错 / 总结 / 出题 | DeepSeek（`deepseek-v4-flash`，关闭 thinking，对话走流式） |
 | 语音活动检测 | 浏览器端能量 VAD（通话模式自动断句 + 断流重连） |
 | 部署 | Docker Compose · Render（后端）· Vercel（前端）· Neon/Supabase（Postgres 持久化） |
 

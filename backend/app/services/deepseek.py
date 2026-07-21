@@ -47,6 +47,7 @@ class DeepSeekClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": False,
+            "thinking": {"type": "disabled"},
         }
         if response_format is not None:
             payload["response_format"] = response_format
@@ -98,6 +99,7 @@ class DeepSeekClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": True,
+            "thinking": {"type": "disabled"},
         }
         headers = {
             "Authorization": f"Bearer {settings.deepseek_api_key}",

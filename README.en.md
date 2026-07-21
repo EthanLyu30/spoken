@@ -81,7 +81,7 @@ asynchronous assessment path:
 - **Frontend:** React 18 · TypeScript · Vite · Tailwind CSS · Zustand · ECharts.
 - **Backend:** Python 3.11 · FastAPI · WebSocket · SQLAlchemy · SQLite.
 - **ASR / pronunciation:** iFlytek (IAT + ISE). **TTS:** browser Web Speech API
-  (default) or iFlytek. **LLM:** DeepSeek (`deepseek-chat`, streamed).
+  (default) or iFlytek. **LLM:** DeepSeek (`deepseek-v4-flash`, thinking disabled, streamed).
 
 ## Quick start
 
