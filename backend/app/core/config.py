@@ -6,8 +6,9 @@ validate that their required keys are present when they are actually used.
 """
 
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import Field
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,7 +41,22 @@ class Settings(BaseSettings):
     # DeepSeek
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-v4-flash"
+    # DeepSeek routes this unversioned alias to its current Flash release.
+    deepseek_model: Literal["deepseek-flash"] = "deepseek-flash"
+
+    @field_validator("deepseek_model", mode="before")
+    @classmethod
+    def use_latest_flash(cls, value: object) -> str:
+        """Migrate existing deployments to the rolling Flash alias, never Pro."""
+        if value in (
+            "deepseek-flash",
+            "deepseek-v4-flash",
+            "deepseek-v4-flash-vision-exp",
+        ):
+            return "deepseek-flash"
+        raise ValueError(
+            "Spoken only uses deepseek-flash; Pro and other models are not allowed"
+        )
 
     @property
     def cors_origin_list(self) -> list[str]:

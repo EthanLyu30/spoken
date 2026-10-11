@@ -46,6 +46,7 @@ docker compose up -d --build
 | 变量 | 用途 | 必需 |
 |---|---|---|
 | `DEEPSEEK_API_KEY` | 对话 / 纠错 / 出题 / 金句 | 核心必需 |
+| `DEEPSEEK_MODEL` | 默认 `deepseek-flash`，随官方 Flash 更新；拒绝 Pro | 可省略 |
 | `XF_APP_ID` / `XF_API_KEY` / `XF_API_SECRET` | 讯飞：ASR、发音评测、讯飞音色 | 语音功能需要 |
 | `CORS_ORIGINS` | 允许的前端来源（分离部署时设为前端域名） | 分离部署需要 |
 | `DATABASE_URL` | 数据库连接串；默认临时 SQLite，设为 Postgres 则持久化 | 想持久化时需要 |
@@ -53,6 +54,8 @@ docker compose up -d --build
 
 > 仅配 `DEEPSEEK_API_KEY` 即可跑通文字对话 / 限时问答 / 金句 / 自定义场景；可用设备会尝试本地 Moonshine / Kokoro。生产环境仍建议配置 `XF_*`，用于发音评测、实时字幕以及本地模型加载失败、设备过慢或网络受限时的语音兜底。
 > 生成一个强 `JWT_SECRET`：`python -c "import secrets; print(secrets.token_urlsafe(48))"`。
+
+DeepSeek 统一使用官方滚动名称 `deepseek-flash`（当前对应 V4.1 Flash），普通与流式请求都显式设置 `thinking: {"type": "disabled"}`。官方更新该 Flash 入口时，后续请求自动使用新版本，不需要定时查询模型列表或重新部署。已有环境变量 `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` 会在加载时转换成 `deepseek-flash`，避免旧的 Render 配置覆盖新默认值；Pro 及其他模型配置会报错，且不会回退到 Pro。模型名称与当前对应版本见 [DeepSeek 官方模型说明](https://api-docs.deepseek.com/quick_start/pricing/)。
 
 ---
 

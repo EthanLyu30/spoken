@@ -1,5 +1,8 @@
 import asyncio
 
+import pytest
+from pydantic import ValidationError
+
 from app.core.config import Settings
 from app.services import deepseek
 
@@ -48,24 +51,40 @@ class _FakeAsyncClient:
         return _FakeStreamResponse()
 
 
-def _settings() -> Settings:
+def _settings(model: str = "deepseek-flash") -> Settings:
     return Settings(
         _env_file=None,
         deepseek_api_key="test-key",
-        deepseek_model="deepseek-v4-flash",
+        deepseek_model=model,
     )
 
 
-def test_default_model_uses_v4_flash():
-    assert Settings(_env_file=None).deepseek_model == "deepseek-v4-flash"
+def test_default_model_tracks_latest_flash(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
+    assert Settings(_env_file=None).deepseek_model == "deepseek-flash"
 
 
-def test_chat_disables_thinking(monkeypatch):
+def test_legacy_model_environment_tracks_latest_flash(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    assert Settings(_env_file=None).deepseek_model == "deepseek-flash"
+
+
+@pytest.mark.parametrize("model", ["deepseek-pro", "deepseek-v4-pro", "deepseek-chat"])
+def test_non_flash_model_environment_is_rejected(monkeypatch, model):
+    monkeypatch.setenv("DEEPSEEK_MODEL", model)
+    with pytest.raises(ValidationError, match="only uses deepseek-flash"):
+        Settings(_env_file=None)
+
+
+@pytest.mark.parametrize(
+    "model", ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"]
+)
+def test_chat_tracks_latest_flash_and_disables_thinking(monkeypatch, model):
     _FakeAsyncClient.payloads.clear()
     monkeypatch.setattr(deepseek.httpx, "AsyncClient", _FakeAsyncClient)
 
     result = asyncio.run(
-        deepseek.DeepSeekClient(_settings()).chat(
+        deepseek.DeepSeekClient(_settings(model)).chat(
             [{"role": "user", "content": "Hello"}]
         )
     )
@@ -73,7 +92,7 @@ def test_chat_disables_thinking(monkeypatch):
     assert result == "Hello!"
     assert _FakeAsyncClient.payloads == [
         {
-            "model": "deepseek-v4-flash",
+            "model": "deepseek-flash",
             "messages": [{"role": "user", "content": "Hello"}],
             "temperature": 0.7,
             "max_tokens": 300,
@@ -83,14 +102,17 @@ def test_chat_disables_thinking(monkeypatch):
     ]
 
 
-def test_chat_stream_disables_thinking(monkeypatch):
+@pytest.mark.parametrize(
+    "model", ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"]
+)
+def test_chat_stream_tracks_latest_flash_and_disables_thinking(monkeypatch, model):
     _FakeAsyncClient.payloads.clear()
     monkeypatch.setattr(deepseek.httpx, "AsyncClient", _FakeAsyncClient)
 
     async def collect_chunks() -> list[str]:
         return [
             chunk
-            async for chunk in deepseek.DeepSeekClient(_settings()).chat_stream(
+            async for chunk in deepseek.DeepSeekClient(_settings(model)).chat_stream(
                 [{"role": "user", "content": "Hello"}]
             )
         ]
@@ -100,7 +122,7 @@ def test_chat_stream_disables_thinking(monkeypatch):
     assert chunks == ["Hello"]
     assert _FakeAsyncClient.payloads == [
         {
-            "model": "deepseek-v4-flash",
+            "model": "deepseek-flash",
             "messages": [{"role": "user", "content": "Hello"}],
             "temperature": 0.85,
             "max_tokens": 300,
