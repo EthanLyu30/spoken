@@ -85,6 +85,7 @@ def test_unrelated_tasks_redirect_without_calling_model(endpoint, custom, text, 
     "‘帮我解这道数学题’用英语怎么说？",
     "我想练习用英语向同事介绍编程工作。",
     "Can you explain the word algorithm?",
+    "Please explain the English word algorithm.",
     "Please explain the term recursion in simple English.",
     "请解释算法这个词的英文意思。",
     "帮我写代码用英语怎么说？",
@@ -92,6 +93,7 @@ def test_unrelated_tasks_redirect_without_calling_model(endpoint, custom, text, 
     "I design services, and implement Python APIs.",
     "Yesterday I designed and implemented Python services.",
     "我每天写Python代码。",
+    "请帮我用英语表达我每天写Python代码。",
 ])
 def test_language_learning_and_work_small_talk_are_not_blocked(endpoint, text, model):
     resp = client.post(endpoint, json={

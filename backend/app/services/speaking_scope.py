@@ -44,7 +44,8 @@ _CONJUNCTIONS = re.compile(r"[,，]|\b(?:and|then|also)\b|然后|并且|顺便|�
 _DECLARATIVE_SUBJECT = re.compile(r"\b(?:i|we|he|she|they)\b", re.IGNORECASE)
 _LANGUAGE_ONLY = re.compile(
     r"^(?:(?:please|can you|could you|would you)\s+)*(?:translate|pronounce)\b"
-    r"|^(?:(?:please|can you|could you|would you)\s+)*(?:explain|define)\s+(?:the\s+)?(?:word|term|phrase|expression)\b"
+    r"|^(?:(?:please|can you|could you|would you)\s+)*(?:explain|define)\s+(?:the\s+)?(?:english\s+)?(?:word|term|phrase|expression)\b"
+    r"|^(?:请(?:你)?(?:帮我)?|帮我)?用(?:英语|英文)(?:描述|表达|说)"
     r"|(?:用(?:英语|英文)怎么说|(?:英语|英文)怎么(?:说|表达)|(?:词|术语)的?(?:英文|英语)(?:意思|含义|表达)|翻译成(?:英文|英语))\s*$",
     re.IGNORECASE,
 )
