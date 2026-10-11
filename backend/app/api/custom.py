@@ -15,10 +15,15 @@ from pydantic import ValidationError
 from app.api.chat import get_client
 from app.schemas.custom import CustomScene, CustomSceneRequest
 from app.services.deepseek import DeepSeekClient, DeepSeekError
+from app.services.speaking_scope import SPEAKING_SCOPE_POLICY, is_unrelated_task
 
 router = APIRouter(tags=["custom"])
 
-_SYSTEM = """You design short English speaking-practice role-plays for Chinese learners.
+_SYSTEM = SPEAKING_SCOPE_POLICY + """
+You design short English speaking-practice role-plays for Chinese learners.
+Generate conversational practice only, never a scene whose partner fulfils
+an unrelated task. For ambiguous requests, choose a related English-speaking
+scene instead of doing the underlying task.
 
 Given the learner's brief description of a scene (which may be written in Chinese), invent one vivid, realistic role-play. You play the learner's conversation partner — never the learner.
 
@@ -67,6 +72,11 @@ async def custom_scenario(
     req: CustomSceneRequest,
     client: DeepSeekClient = Depends(get_client),
 ) -> CustomScene:
+    if is_unrelated_task(req.description):
+        raise HTTPException(
+            status_code=422,
+            detail="Please describe an English speaking-practice scene, not a task to solve.",
+        )
     messages = [
         {"role": "system", "content": _SYSTEM},
         {"role": "user", "content": f"Scene the learner wants to practise: {req.description}"},

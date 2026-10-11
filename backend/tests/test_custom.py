@@ -140,9 +140,10 @@ def test_chat_with_custom_scene_uses_persona():
         )
         assert resp.status_code == 200
         assert resp.json()["reply"] == reply
-        # The custom persona made it into the system prompt.
-        system = stub.calls[0][0]["content"]
-        assert "Dana" in system
+        # User-provided scene details stay below the fixed system rules.
+        messages = stub.calls[0]
+        assert "Dana" not in messages[0]["content"]
+        assert any("Dana" in m["content"] for m in messages if m["role"] == "user")
     finally:
         app.dependency_overrides.clear()
 

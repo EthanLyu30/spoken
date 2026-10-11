@@ -15,6 +15,7 @@ from app.data import scenarios as catalog
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.deepseek import DeepSeekClient, DeepSeekError
 from app.services.dialogue import build_messages
+from app.services.speaking_scope import dialogue_redirect
 
 router = APIRouter(tags=["chat"])
 
@@ -45,6 +46,10 @@ async def chat(
             scenario_id=scenario.id, reply=scenario.opening_line, opening=True
         )
 
+    redirect = dialogue_redirect(req.messages)
+    if redirect is not None:
+        return ChatResponse(scenario_id=scenario.id, reply=redirect)
+
     messages = build_messages(scenario, req.messages)
     try:
         reply = await client.chat(messages, temperature=0.85)
@@ -64,9 +69,13 @@ async def chat_stream(
     error mid-response.
     """
     scenario = _resolve_scenario(req)
+    redirect = dialogue_redirect(req.messages)
     messages = build_messages(scenario, req.messages)
 
     async def gen() -> AsyncIterator[bytes]:
+        if redirect is not None:
+            yield redirect.encode("utf-8")
+            return
         try:
             async for delta in client.chat_stream(messages, temperature=0.85):
                 yield delta.encode("utf-8")

@@ -49,8 +49,13 @@ growth curve.
 - **Quotes you can actually use** — movies / speeches·TED / literature / people /
   proverbs, each with a **verified source** (checked against Wikiquote, apocryphal
   ones removed) and a **"when to use it"** note.
-- **Custom & daily-generated scenarios** — describe any scene in one line, or play
+- **Custom & daily-generated scenarios** — describe an English-practice scene in one line, or play
   the daily AI recommendation.
+- **Speaking-only boundaries** — unrelated coding, debugging, homework and
+  long-form writing tasks are declined, with a short invitation back to English
+  practice. Technical vocabulary and normal workplace conversation remain
+  available. Explicit tasks are rejected locally; other inputs use the shared
+  dialogue policy, without an extra AI classification call.
 - **Real progress data** — streak / level / XP / daily goal, pronunciation & Q&A
   history charts, and a **cross-session insight** that points at your weakest
   dimension and whether each skill is climbing — all driven by real activity.
