@@ -68,6 +68,8 @@ DeepSeek 统一使用官方滚动名称 `deepseek-flash`（当前对应 V4.1 Fla
   2. 在 Render 后端的环境变量里设 `DATABASE_URL=<该连接串>`，保存后会重部署。
   3. 表会自动创建（无需手动建表）。之后生词本 / 记录就**跨重启保留**了。
 
+后端同时安装 Psycopg 3 与 Psycopg 2 的二进制驱动，支持 `postgresql://`、`postgresql+psycopg://` 和 `postgresql+psycopg2://` 连接串，无需修改已有数据库地址。CI 会用这些 URL 加载真实驱动（不连接数据库），避免仅测试 SQLite 时漏掉生产依赖。
+
 > 已加入存储上限（每个设备最多保留最近 200 次会话 / 1000 条练习记录），防止数据库无限增长。
 
 ---

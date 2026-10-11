@@ -10,8 +10,10 @@ python-dotenv>=1.0
 # Realtime
 websockets>=12.0
 
-# Persistence (SQLite by default; psycopg enables Postgres via DATABASE_URL)
+# Persistence (SQLite by default; support both Psycopg 3 and legacy Psycopg 2 URLs).
+# The binary extras bundle libpq, so the slim Docker image needs no system packages.
 SQLAlchemy>=2.0
+psycopg[binary]>=3.1,<4
 psycopg2-binary>=2.9
 
 # HTTP client (DeepSeek chat-completions API)
