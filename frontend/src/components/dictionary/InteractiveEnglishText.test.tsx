@@ -135,4 +135,15 @@ describe("InteractiveEnglishText", () => {
       kind: "word",
     });
   });
+
+  it("uses one Tab stop per passage and arrow keys to select a lookup word", async () => {
+    const user = userEvent.setup();
+    render(<DictionaryProvider><InteractiveEnglishText text="Hello world again" /><button>Next action</button></DictionaryProvider>);
+    await user.tab();
+    expect(screen.getByRole("button", { name: "查询 Hello" })).toHaveFocus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("button", { name: "查询 world" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Next action" })).toHaveFocus();
+  });
 });

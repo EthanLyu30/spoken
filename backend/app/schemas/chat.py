@@ -17,7 +17,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     scenario_id: str = Field(min_length=1)
     # Conversation so far, oldest first. May be empty to request the opener.
-    messages: list[ChatMessage] = Field(default_factory=list, max_length=40)
+    messages: list[ChatMessage] = Field(default_factory=list, max_length=1000)
     # When present, role-play this user-defined scene instead of a catalogue one.
     custom: CustomScene | None = None
 

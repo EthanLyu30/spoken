@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Flame, Sparkles, Target } from "lucide-react";
+import { Flame, Mic, Sparkles, Target } from "lucide-react";
 import { Buddy } from "./Buddy";
 import { Ring } from "./ui/Ring";
 import { ProgressBar } from "./ui/ProgressBar";
@@ -36,21 +36,27 @@ export function BuddyHero({ greeting }: BuddyHeroProps) {
   const goalPct = Math.min(100, (todayCount / todayGoal) * 100);
 
   return (
-    <section className="relative overflow-hidden rounded-huge border border-border bg-surface p-6 shadow-pop md:p-9">
+    <section className="relative overflow-hidden rounded-huge border border-border bg-surface p-5 shadow-pop md:p-7">
       <span
         aria-hidden
         className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full"
         style={{ background: "radial-gradient(circle,#fff0d6,transparent 70%)" }}
       />
-      <div className="relative grid gap-8 md:grid-cols-[auto_1fr] md:items-center">
+      <div className="relative grid gap-6 md:grid-cols-[1fr_1fr] md:items-center">
         {/* Buddy + speech bubble */}
+        <div>
         <div className="flex items-center gap-3">
-          <Buddy mood="happy" size={148} className="shrink-0" />
-          <div className="bubble relative max-w-[15rem] rounded-3xl bg-surface-2 px-5 py-4 shadow-soft">
+          <Buddy mood="happy" size={96} className="shrink-0" />
+          <div className="bubble relative rounded-3xl bg-surface-2 px-4 py-3 shadow-soft">
             <p className="text-[0.66rem] font-bold uppercase tracking-wide text-coral-deep">Pip says</p>
             <p className="mt-1 font-display text-lg font-semibold leading-snug text-ink">{greeting}</p>
             <span className="absolute -left-1.5 top-12 h-4 w-4 rotate-45 bg-surface-2" />
           </div>
+        </div>
+        <Link to="/practice/cafe" className="mt-5 flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-coral px-5 py-3 font-display text-base font-bold text-ink shadow-pop transition-transform active:scale-[0.98]">
+          <Mic className="h-5 w-5" /> 开始语音练习
+        </Link>
+        <p className="mt-2 text-center text-xs text-muted">从咖啡馆点单热身，开口聊几句就好</p>
         </div>
 
         {/* Stats */}

@@ -21,6 +21,7 @@ export async function resolveVoiceMode(
   if (engine === "iflytek") {
     return { kind: "iflytek", automaticFallback: false };
   }
+  if (engine === "local") return { kind: "iflytek", automaticFallback: true };
   if (source.listEnglishVoices().length > 0) {
     return { kind: "browser" };
   }

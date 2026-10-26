@@ -130,6 +130,7 @@ class XfAsrStream:
         self._language = language
         self._ws = None
         self._first = True
+        self._pending_pcm = bytearray()
         # Transcript assembled from "wpgs" dynamic-correction results: each
         # iFlytek result carries a segment number (sn) and may *replace* an
         # earlier range (pgs="rpl") rather than only append (pgs="apd"), so we
@@ -157,8 +158,10 @@ class XfAsrStream:
         """Forward a chunk of 16 kHz/16-bit mono PCM, split into 40 ms frames."""
         if self._ws is None:
             raise XfAsrError("stream not open")
-        for i in range(0, len(pcm), _FRAME):
-            chunk = pcm[i : i + _FRAME]
+        self._pending_pcm.extend(pcm)
+        while len(self._pending_pcm) >= _FRAME:
+            chunk = bytes(self._pending_pcm[:_FRAME])
+            del self._pending_pcm[:_FRAME]
             frame: dict = {
                 "data": {
                     "status": 0 if self._first else 1,
@@ -184,6 +187,8 @@ class XfAsrStream:
         if self._ws is None:
             return ""
         try:
+            if self._pending_pcm:
+                await self.send(bytes(_FRAME - len(self._pending_pcm)))
             await self._ws.send(json.dumps({"data": {"status": 2, "audio": ""}}))
         except Exception:
             pass  # connection may already be closing; still drain what we have

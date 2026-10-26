@@ -3,7 +3,8 @@
  * connected) or the iFlytek cloud cascade, per the user's voice settings.
  * Only one utterance plays at a time across the app.
  */
-import { fetchTtsUrl, type TtsOverrides } from "./api";
+import { fetchTtsStream, fetchTtsUrl, type TtsOverrides } from "./api";
+import { createPcmPlayback, type PcmPlayback } from "./pcmPlayback";
 import { nextSentences } from "./sentences";
 import { useVoice } from "../store/voice";
 import {
@@ -77,7 +78,7 @@ function pickBrowserVoice(preferredURI: string | null): SpeechSynthesisVoice | n
   return [...voices].sort((a, b) => score(b) - score(a))[0];
 }
 
-function speakBrowser(text: string): Speaking {
+function speakBrowser(text: string, onStarted?: () => void): Speaking {
   const synth = window.speechSynthesis;
   synth.cancel();
   const { speed, pitch, browserVoiceURI } = useVoice.getState();
@@ -95,15 +96,18 @@ function speakBrowser(text: string): Speaking {
   const done = new Promise<void>((r) => (settle = r));
   u.onend = () => settle();
   u.onerror = () => settle();
+  u.onstart = () => onStarted?.();
   synth.speak(u);
-  return { done, stop: () => synth.cancel() };
+  return { done, stop: () => { synth.cancel(); settle(); } };
 }
 
-function speakIflytek(
+function speakBuffered(
   text: string,
   scenarioId?: string,
   overrides?: TtsOverrides,
+  onStarted?: () => void,
 ): Speaking {
+  const controller = new AbortController();
   let audio: HTMLAudioElement | null = null;
   let url: string | null = null;
   let stopped = false;
@@ -114,7 +118,7 @@ function speakIflytek(
     url = null;
     settle();
   };
-  fetchTtsUrl(text, scenarioId, undefined, overrides)
+  fetchTtsUrl(text, scenarioId, controller.signal, overrides)
     .then((nextUrl) => {
       if (stopped) {
         URL.revokeObjectURL(nextUrl);
@@ -125,6 +129,7 @@ function speakIflytek(
       audio = new Audio(nextUrl);
       audio.onended = cleanup;
       audio.onerror = cleanup;
+      audio.onplaying = () => onStarted?.();
       void audio.play().catch(cleanup);
     })
     .catch(() => settle());
@@ -132,8 +137,62 @@ function speakIflytek(
     done,
     stop: () => {
       stopped = true;
+      controller.abort();
       audio?.pause();
       cleanup();
+    },
+  };
+}
+
+function canStreamAudio(): boolean {
+  return typeof window.AudioContext === "function";
+}
+
+function speakIflytek(text: string, scenarioId?: string, overrides?: TtsOverrides, onStarted?: () => void, prepared?: Response): Speaking {
+  if (!canStreamAudio()) return speakBuffered(text, scenarioId, overrides, onStarted);
+  const controller = new AbortController();
+  let stopped = false;
+  let playback: PcmPlayback | null = null;
+  let fallback: Speaking | null = null;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let cancel: () => void = () => {};
+  const cancelled = new Promise<void>((resolve) => { cancel = resolve; });
+  const run = (async () => {
+    const response = prepared ?? await fetchTtsStream(text, scenarioId, controller.signal, overrides);
+    if (stopped) { await response.body?.cancel().catch(() => undefined); return; }
+    if (response.status === 404 || response.status === 405) {
+      await response.body?.cancel().catch(() => undefined);
+      fallback = speakBuffered(text, scenarioId, overrides, onStarted);
+      await fallback.done;
+      return;
+    }
+    if (!response.ok || !response.body) throw new Error("语音暂不可用，请重试。");
+    const context = new AudioContext({ sampleRate: 16000 });
+    playback = createPcmPlayback(context, onStarted);
+    reader = response.body.getReader();
+    try {
+      await context.resume();
+      while (!stopped) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        playback.push(value);
+      }
+      if (!stopped) await playback.finish();
+    } finally {
+      await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+      playback.stop();
+    }
+  })();
+  return {
+    done: Promise.race([run, cancelled]),
+    stop: () => {
+      stopped = true;
+      controller.abort();
+      void reader?.cancel().catch(() => undefined);
+      playback?.stop();
+      fallback?.stop();
+      cancel();
     },
   };
 }
@@ -154,7 +213,9 @@ async function fetchKokoroUrl(text: string): Promise<string> {
 function speakResolved(text: string, scenarioId?: string): Speaking {
   let active: Speaking | null = null;
   let stopped = false;
-  const done = (async () => {
+  let cancel: () => void = () => {};
+  const cancelled = new Promise<void>((resolve) => { cancel = resolve; });
+  const run = (async () => {
     const voice = useVoice.getState();
     const mode = await resolveVoiceMode(voice.engine, voiceSource());
     if (stopped) return;
@@ -189,10 +250,11 @@ function speakResolved(text: string, scenarioId?: string): Speaking {
     await active.done;
   })();
   return {
-    done,
+    done: Promise.race([run, cancelled]).catch(() => undefined),
     stop: () => {
       stopped = true;
       active?.stop();
+      cancel();
     },
   };
 }
@@ -213,7 +275,7 @@ export function stopSpeaking(): void {
 }
 
 /** Play an already-fetched object URL; resolves when it ends, errors, or stops. */
-function playUrl(url: string): Speaking {
+function playUrl(url: string, onStarted?: () => void): Speaking {
   const audio = new Audio(url);
   let settle: () => void = () => {};
   const done = new Promise<void>((r) => (settle = r));
@@ -226,6 +288,7 @@ function playUrl(url: string): Speaking {
   };
   audio.onended = cleanup;
   audio.onerror = cleanup;
+  audio.onplaying = () => onStarted?.();
   void audio.play().catch(cleanup);
   return {
     done,
@@ -274,6 +337,12 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
     markStarted = () => r();
   });
   let playing: Speaking | null = null;
+  const controller = new AbortController();
+  let cancel: () => void = () => {};
+  const cancelled = new Promise<void>((resolve) => { cancel = resolve; });
+  let onPending: (() => void) | null = null;
+  let abortPrefetch = () => {};
+  const didStart = () => { markStarted?.(); markStarted = undefined; };
 
   const wakeUp = () => {
     const w = wake;
@@ -301,7 +370,18 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
         : undefined;
     let prefetchText: string | null = null;
     let prefetchUrl: Promise<string> | null = null;
-    let firstStarted = false;
+    let prefetchLocal = false;
+    let streamText: string | null = null;
+    let streamResponse: Promise<Response | null> | null = null;
+    let streamController: AbortController | null = null;
+    const abandonStream = () => {
+      const abandoned = streamResponse;
+      streamController?.abort();
+      streamText = null;
+      streamResponse = null;
+      streamController = null;
+      if (abandoned) void abandoned.then((response) => response?.body?.cancel().catch(() => undefined));
+    };
     const abandonPrefetch = () => {
       const abandoned = prefetchUrl;
       prefetchText = null;
@@ -312,17 +392,13 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
         });
       }
     };
+    abortPrefetch = () => { abandonPrefetch(); abandonStream(); };
     try {
       while (!stopped) {
         const text = await take();
         if (text == null) break;
-        if (!firstStarted) {
-          firstStarted = true;
-          markStarted?.();
-        }
-
         if (mode.kind === "browser") {
-          playing = speakBrowser(text);
+          playing = speakBrowser(text, didStart);
           await playing.done;
           continue;
         }
@@ -334,17 +410,21 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
           mode.automaticFallback &&
           isLocalSpeechModelReady("kokoro")
         ) {
-          abandonPrefetch();
+          abandonStream();
+          if (!prefetchLocal) abandonPrefetch();
           let localUrl: string;
           try {
-            localUrl = await fetchKokoroUrl(text);
+            localUrl = prefetchText === text && prefetchUrl ? await prefetchUrl : await fetchKokoroUrl(text);
+            prefetchText = null;
+            prefetchUrl = null;
+            if (!localUrl) throw new Error("Local synthesis failed");
           } catch {
             if (stopped) break;
             try {
               localUrl = await fetchTtsUrl(
                 text,
                 scenarioId,
-                undefined,
+                controller.signal,
                 overrides,
               );
             } catch {
@@ -355,8 +435,34 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
             URL.revokeObjectURL(localUrl);
             break;
           }
-          playing = playUrl(localUrl);
+          onPending = () => {
+            if (stopped || prefetchUrl || !pending.length) return;
+            prefetchLocal = true;
+            prefetchText = pending[0];
+            prefetchUrl = fetchKokoroUrl(prefetchText).catch(() => "");
+          };
+          playing = playUrl(localUrl, didStart);
+          onPending();
           await playing.done;
+          onPending = null;
+          continue;
+        }
+
+        if (canStreamAudio()) {
+          abandonPrefetch();
+          const prepared = streamText === text ? await (streamResponse as Promise<Response | null> | null) : null;
+          streamResponse = null;
+          streamText = null;
+          if (stopped) { await prepared?.body?.cancel().catch(() => undefined); break; }
+          onPending = () => {
+            if (stopped || streamResponse || !pending.length) return;
+            streamText = pending[0];
+            streamController = new AbortController();
+            streamResponse = fetchTtsStream(streamText, scenarioId, streamController.signal, overrides).catch(() => null);
+          };
+          playing = speakIflytek(text, scenarioId, overrides, () => { didStart(); onPending?.(); }, prepared ?? undefined);
+          await playing.done;
+          onPending = null;
           continue;
         }
 
@@ -368,7 +474,7 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
               : await fetchTtsUrl(
                   text,
                   scenarioId,
-                  undefined,
+                  controller.signal,
                   overrides,
                 );
         } catch {
@@ -376,36 +482,39 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
           prefetchUrl = null;
           continue; // skip a sentence we couldn't synthesise; keep going
         }
-        // Prefetch the next queued sentence while this one plays.
-        prefetchText = pending[0] ?? null;
-        prefetchUrl = prefetchText
-          ? fetchTtsUrl(
-              prefetchText,
-              scenarioId,
-              undefined,
-              overrides,
-            ).catch(() => "")
-          : null;
+        prefetchText = null;
+        prefetchUrl = null;
+        onPending = () => {
+          if (stopped || prefetchUrl || !pending.length) return;
+          prefetchLocal = false;
+          prefetchText = pending[0];
+          prefetchUrl = fetchTtsUrl(prefetchText, scenarioId, controller.signal, overrides).catch(() => "");
+        };
         if (stopped || !url) {
           if (url) URL.revokeObjectURL(url);
           if (stopped) break;
           continue;
         }
-        playing = playUrl(url);
+        playing = playUrl(url, didStart);
+        onPending();
         await playing.done;
+        onPending = null;
       }
     } finally {
       abandonPrefetch();
+      abandonStream();
     }
   })();
+  void consumer.catch(() => undefined); // end() observes failures after generation
 
-  return {
+  const queue: SpeechQueue = {
     feed: (full: string) => {
       if (stopped || noMore) return;
       const { sentences, consumed } = nextSentences(full, spokenUpto, false);
       spokenUpto = consumed;
       if (sentences.length) {
         pending.push(...sentences);
+        onPending?.();
         wakeUp();
       }
     },
@@ -417,13 +526,18 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
       }
       noMore = true;
       wakeUp();
-      await consumer;
+      await Promise.race([consumer, cancelled]);
     },
     started,
     stop: () => {
       stopped = true;
+      controller.abort();
+      abortPrefetch();
       playing?.stop();
+      cancel();
       wakeUp();
     },
   };
+  current = { done: consumer.catch(() => undefined), stop: queue.stop };
+  return queue;
 }

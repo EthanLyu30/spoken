@@ -120,7 +120,7 @@ export default function Home() {
               </span>
             </p>
             <p className="mt-0.5 text-sm text-muted">
-              4 题、每题 45 秒即兴作答，按托福标准打分并给出高分范例。
+              Take an Interview 专项：4 题、每题 45 秒，练习经历描述与观点表达。
             </p>
           </div>
           <span className="shrink-0 rounded-full bg-surface-2 px-3 py-1.5 text-xs font-bold text-coral-deep transition-colors group-hover:bg-coral group-hover:text-primary-fg">

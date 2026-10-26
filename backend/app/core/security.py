@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -18,7 +19,10 @@ from app.core.config import get_settings
 
 _ALGO = "HS256"
 _PBKDF2_ROUNDS = 200_000
-_DEV_SECRET = "dev-insecure-secret-change-me-in-production"  # local fallback only (>=32 bytes)
+# Development remains zero-config without giving every installation the same
+# signing key. Configure JWT_SECRET for sessions that survive process restarts
+# and for deployments with more than one worker.
+_DEV_SECRET = secrets.token_urlsafe(48)
 
 
 def hash_password(password: str) -> str:

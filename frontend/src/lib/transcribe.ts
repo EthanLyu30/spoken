@@ -1,5 +1,6 @@
 import { postAsr } from "./api";
 import { isLocalSpeechModelReady } from "./localSpeech/runtime";
+import { useVoice } from "../store/voice";
 
 interface TranscriptionBackends {
   isMoonshineReady: () => boolean;
@@ -23,20 +24,23 @@ export async function transcribeSpeechWith(
   return (await backends.cloud(pcm)).trim();
 }
 
-export async function transcribeSpeech(pcm: ArrayBuffer): Promise<string> {
-  return transcribeSpeechWith(pcm, {
-    isMoonshineReady: () => isLocalSpeechModelReady("moonshine"),
+export async function transcribeSpeech(pcm: ArrayBuffer, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
+  const text = await transcribeSpeechWith(pcm, {
+    isMoonshineReady: isMoonshineTranscriptionReady,
     moonshine: async (audio) => {
       const { transcribeWithMoonshine } = await import(
         "./localSpeech/moonshine"
       );
       return transcribeWithMoonshine(audio);
     },
-    cloud: (audio) => postAsr(audio),
+    cloud: (audio) => postAsr(audio, signal),
   });
+  signal?.throwIfAborted();
+  return text;
 }
 
 /** Snapshot this at utterance start so an in-flight cloud turn is not mixed. */
 export function isMoonshineTranscriptionReady(): boolean {
-  return isLocalSpeechModelReady("moonshine");
+  return useVoice.getState().engine === "local" && isLocalSpeechModelReady("moonshine");
 }

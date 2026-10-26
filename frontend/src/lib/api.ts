@@ -7,6 +7,7 @@
 import { useVoice } from "../store/voice";
 import { getToken } from "./authToken";
 import { getClientId } from "./clientId";
+import { readChatStream } from "./chatStream";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const DEFAULT_TIMEOUT = 60_000; // generous: DeepSeek replies can be slow
@@ -178,7 +179,7 @@ export function postChat(
 ): Promise<ChatResponse> {
   return request<ChatResponse>("/api/chat", {
     method: "POST",
-    body: JSON.stringify({ scenario_id: scenarioId, messages, custom }),
+    body: JSON.stringify({ scenario_id: scenarioId, messages: messages.slice(-40), custom }),
     signal,
   });
 }
@@ -197,24 +198,11 @@ export async function streamChat(
 ): Promise<string> {
   const res = await fetch(`${BASE_URL}/api/chat/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ scenario_id: scenarioId, messages, custom }),
+    headers: { "Content-Type": "application/json", "Accept": "text/event-stream", "X-Client-Id": getClientId(), ...authHeader() },
+    body: JSON.stringify({ scenario_id: scenarioId, messages: messages.slice(-40), custom }),
     signal: withTimeout(signal, 60_000),
   });
-  if (!res.ok || !res.body) throw new Error(`chat stream failed: ${res.status}`);
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let full = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    full += decoder.decode(value, { stream: true });
-    if (full) onText(full);
-  }
-  full += decoder.decode();
-  const text = full.trim();
-  if (!text) throw new Error("empty stream");
-  return text;
+  return readChatStream(res, onText);
 }
 
 export interface SkillScore {
@@ -254,7 +242,7 @@ export function postFeedback(
 ): Promise<FeedbackResponse> {
   return request<FeedbackResponse>("/api/feedback", {
     method: "POST",
-    body: JSON.stringify({ scenario_id: scenarioId, messages, custom }),
+    body: JSON.stringify({ scenario_id: scenarioId, messages: messages.slice(-60), custom }),
     signal,
   });
 }
@@ -274,6 +262,7 @@ export interface SessionDetail extends SessionSummary {
 }
 
 export interface SaveSessionPayload {
+  client_session_id?: string;
   scenario_id: string;
   messages: ChatMessage[];
   overall: number;
@@ -337,6 +326,27 @@ export async function fetchTtsUrl(
   return URL.createObjectURL(await res.blob());
 }
 
+/** Open a raw PCM stream; the reader must be cancelled when playback stops. */
+export async function fetchTtsStream(
+  text: string,
+  scenarioId?: string,
+  signal?: AbortSignal,
+  overrides?: TtsOverrides,
+): Promise<Response> {
+  const voice = useVoice.getState();
+  return fetch(`${BASE_URL}/api/tts/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeader() },
+    body: JSON.stringify({
+      text, scenario_id: scenarioId,
+      vcn: overrides?.vcn ?? voice.vcn ?? undefined,
+      speed: overrides?.speed ?? voice.speed ?? undefined,
+      pitch: overrides?.pitch ?? voice.pitch ?? undefined,
+    }),
+    signal: withTimeout(signal, 30_000),
+  });
+}
+
 /** Transcribe 16 kHz mono PCM via the backend (iFlytek ASR). */
 export async function postAsr(pcm: ArrayBuffer, signal?: AbortSignal): Promise<string> {
   const res = await fetch(`${BASE_URL}/api/asr`, {
@@ -396,7 +406,7 @@ export async function postHint(
   const res = await fetch(`${BASE_URL}/api/hint`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ scenario_id: scenarioId, messages, custom }),
+    body: JSON.stringify({ scenario_id: scenarioId, messages: messages.slice(-40), custom }),
     signal: withTimeout(signal, 30_000),
   });
   if (!res.ok) throw new Error(`hint failed: ${res.status}`);

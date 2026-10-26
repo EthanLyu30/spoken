@@ -1,5 +1,6 @@
 import {
   Fragment,
+  useState,
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
@@ -18,6 +19,9 @@ export function InteractiveEnglishText({
 }) {
   const { openDictionary } = useDictionary();
   const parts = text.split(TOKEN_RE);
+  const wordIndexes = parts.flatMap((part, index) => WORD_TOKEN_RE.test(part) ? [index] : []);
+  const [activeWord, setActiveWord] = useState<number | null>(null);
+  const tabStop = activeWord !== null && wordIndexes.includes(activeWord) ? activeWord : wordIndexes[0];
 
   function selectedPhraseExists(): boolean {
     const selection = window.getSelection();
@@ -49,20 +53,32 @@ export function InteractiveEnglishText({
           <span
             key={`${part}-${index}`}
             role="button"
-            tabIndex={0}
+            tabIndex={index === tabStop ? 0 : -1}
+            data-dictionary-word
             aria-label={`查询 ${part}`}
             className={cn(
-              "cursor-help select-text rounded-sm underline decoration-dotted decoration-current/35 underline-offset-2",
+              "cursor-help select-text rounded-sm decoration-dotted decoration-current/35 underline-offset-2 hover:underline focus-visible:underline",
             )}
             onClick={(event) =>
               openWord(part, event.currentTarget, event)
             }
             onKeyDown={(event) => {
+              if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+                event.preventDefault();
+                const words = event.currentTarget.parentElement?.querySelectorAll<HTMLElement>("[data-dictionary-word]");
+                if (!words?.length) return;
+                const current = Array.from(words).indexOf(event.currentTarget);
+                const target = event.key === "Home" ? 0 : event.key === "End" ? words.length - 1 : Math.max(0, Math.min(words.length - 1, current + (event.key === "ArrowRight" ? 1 : -1)));
+                setActiveWord(wordIndexes[target]);
+                words[target].focus();
+                return;
+              }
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
                 openWord(part, event.currentTarget, event);
               }
             }}
+            onFocus={() => setActiveWord(index)}
           >
             {part}
           </span>

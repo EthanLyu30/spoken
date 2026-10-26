@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type VoiceEngine = "browser" | "iflytek";
+export type VoiceEngine = "browser" | "iflytek" | "local";
 
 /**
  * User overrides for Pip's read-aloud voice.
@@ -29,7 +29,7 @@ interface VoiceState {
 export const useVoice = create<VoiceState>()(
   persist(
     (set) => ({
-      engine: "browser",
+      engine: "iflytek",
       vcn: null,
       browserVoiceURI: null,
       speed: null,

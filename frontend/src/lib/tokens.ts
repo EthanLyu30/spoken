@@ -8,7 +8,7 @@ export const tokens = {
   surface: "#fffdf9",
   surface2: "#fff6ec",
   ink: "#43302b",
-  muted: "#b0897a",
+  muted: "#806458",
   border: "#f1ddc6",
   coral: "#ff6f5e",
   tangerine: "#ff9f45",

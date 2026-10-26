@@ -130,3 +130,21 @@ def test_chat_stream_tracks_latest_flash_and_disables_thinking(monkeypatch, mode
             "thinking": {"type": "disabled"},
         }
     ]
+
+
+@pytest.mark.parametrize("ending", [None, 'data: {"error":{"message":"upstream failed"}}'])
+def test_stream_rejects_upstream_eof_or_error_after_partial_text(monkeypatch, ending):
+    class Response(_FakeStreamResponse):
+        async def aiter_lines(self):
+            yield 'data: {"choices":[{"delta":{"content":"Partial reply"}}]}'
+            if ending:
+                yield ending
+                yield "data: [DONE]"
+    class Client(_FakeAsyncClient):
+        def stream(self, *args, **kwargs):
+            return Response()
+    monkeypatch.setattr(deepseek.httpx, "AsyncClient", Client)
+    async def run():
+        return [part async for part in deepseek.DeepSeekClient(_settings()).chat_stream([{"role": "user", "content": "Hello"}])]
+    with pytest.raises(deepseek.DeepSeekError):
+        asyncio.run(run())

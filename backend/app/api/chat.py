@@ -7,8 +7,9 @@ the model (deterministic and instant).
 """
 
 from collections.abc import AsyncIterator
+import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.data import scenarios as catalog
@@ -61,7 +62,7 @@ async def chat(
 
 @router.post("/chat/stream")
 async def chat_stream(
-    req: ChatRequest, client: DeepSeekClient = Depends(get_client)
+    req: ChatRequest, request: Request, client: DeepSeekClient = Depends(get_client)
 ) -> StreamingResponse:
     """Stream the partner's reply as plain-text deltas (lower perceived latency).
 
@@ -71,20 +72,35 @@ async def chat_stream(
     scenario = _resolve_scenario(req)
     redirect = dialogue_redirect(req.messages)
     messages = build_messages(scenario, req.messages)
+    events = "text/event-stream" in request.headers.get("accept", "")
+
+    def frame(event: str, data: dict) -> bytes:
+        return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n".encode("utf-8")
 
     async def gen() -> AsyncIterator[bytes]:
         if redirect is not None:
-            yield redirect.encode("utf-8")
+            yield frame("delta", {"text": redirect}) if events else redirect.encode("utf-8")
+            if events:
+                yield frame("done", {})
+            return
+        if not any(m.role == "user" for m in req.messages):
+            yield frame("delta", {"text": scenario.opening_line}) if events else scenario.opening_line.encode("utf-8")
+            if events:
+                yield frame("done", {})
             return
         try:
             async for delta in client.chat_stream(messages, temperature=0.85):
-                yield delta.encode("utf-8")
+                yield frame("delta", {"text": delta}) if events else delta.encode("utf-8")
         except DeepSeekError:
-            return  # end the stream; an empty body makes the client fall back
+            if events:
+                yield frame("error", {"message": "回复中断，请重试这一回合。"})
+            return
+        if events:
+            yield frame("done", {})
 
     return StreamingResponse(
         gen(),
-        media_type="text/plain; charset=utf-8",
+        media_type="text/event-stream" if events else "text/plain; charset=utf-8",
         headers={
             # Ask nginx-style proxies (self-hosted) and Render's edge not to
             # buffer the response, so tokens reach the client as they're produced.

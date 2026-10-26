@@ -45,5 +45,7 @@ def build_messages(
             }, ensure_ascii=False),
         },
     ]
-    messages.extend({"role": m.role, "content": m.content} for m in history)
+    # Full practice history is retained for reports; only recent turns belong
+    # on the low-latency dialogue path.
+    messages.extend({"role": m.role, "content": m.content} for m in history[-40:])
     return messages

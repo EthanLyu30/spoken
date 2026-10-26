@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { DictionaryProvider } from "./components/dictionary/DictionaryProvider";
 import { Onboarding } from "./components/Onboarding";
 
@@ -19,6 +19,7 @@ const Interview = lazy(() => import("./pages/Interview"));
 const SessionView = lazy(() => import("./pages/SessionView"));
 
 export default function App() {
+  const location = useLocation();
   return (
     <DictionaryProvider>
       <Suspense fallback={null}>
@@ -26,7 +27,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/custom" element={<CustomScenePage />} />
           <Route path="/interview" element={<Interview />} />
-          <Route path="/practice/:scenarioId" element={<Conversation />} />
+          <Route path="/practice/:scenarioId" element={<Conversation key={location.pathname} />} />
           <Route path="/report/:sessionId" element={<Report />} />
           <Route path="/session/:id" element={<SessionView />} />
           <Route path="/progress" element={<Progress />} />

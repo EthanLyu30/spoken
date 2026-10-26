@@ -21,6 +21,7 @@ const backLink =
 
 export default function Report() {
   const scenarioId = useSession((s) => s.scenarioId);
+  const practiceId = useSession((s) => s.practiceId);
   const messages = useSession((s) => s.messages);
   const isCustom = scenarioId === "custom";
   const customScene = useCustomScene((s) => s.scene);
@@ -31,6 +32,9 @@ export default function Report() {
   const [feedback, setFeedback] = useState<FeedbackResponse | null>(null);
   const [loading, setLoading] = useState(hasSession);
   const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   // phrase index -> saved word id, so the chip can toggle collect / un-collect.
   const words = useWords((s) => s.words);
   const ensureWords = useWords((s) => s.ensureLoaded);
@@ -52,7 +56,8 @@ export default function Report() {
       .then((f) => {
         if (myId !== reqId.current) return;
         setFeedback(f);
-        void persistSessionOnce(scenarioId, messages, f);
+        if (practiceId) void persistSessionOnce(scenarioId, messages, f, practiceId)
+          .catch(() => setSaveError(true));
       })
       .catch(() => {
         if (!ctrl.signal.aborted && myId === reqId.current)
@@ -64,7 +69,15 @@ export default function Report() {
     return () => ctrl.abort();
     // Analyse the captured session once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [attempt]);
+
+  async function retrySave() {
+    if (!scenarioId || !practiceId || !feedback || saving) return;
+    setSaving(true);
+    try { await persistSessionOnce(scenarioId, messages, feedback, practiceId); setSaveError(false); }
+    catch { setSaveError(true); }
+    finally { setSaving(false); }
+  }
 
   if (!hasSession) {
     return (
@@ -98,6 +111,7 @@ export default function Report() {
       </header>
 
       <main className="mx-auto w-full max-w-3xl px-5 py-6">
+        {saveError && <div role="alert" className="mb-4 rounded-2xl border border-border bg-surface p-4 text-sm text-ink">小结已生成，记录暂未保存。<button type="button" onClick={() => void retrySave()} disabled={saving} className="ml-2 font-bold underline">{saving ? "保存中…" : "重试保存"}</button></div>}
         {loading && (
           <section className="card grid place-items-center p-10 text-center">
             <Buddy mood="talking" size={120} />
@@ -111,6 +125,7 @@ export default function Report() {
             <Buddy mood="idle" size={110} />
             <p role="alert" className="font-semibold text-ink">{error}</p>
             <div className="flex gap-3">
+              <Button onClick={() => setAttempt((value) => value + 1)}>重试生成</Button>
               <Link to={`/practice/${scenarioId}`}>
                 <Button variant="soft">回到对话</Button>
               </Link>

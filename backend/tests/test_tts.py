@@ -1,10 +1,15 @@
 import array
+import asyncio
+import base64
+import json
+
+import pytest
 
 from fastapi.testclient import TestClient
 
 from app.api.tts import get_tts_client
 from app.main import app
-from app.services.xf_tts import SAMPLE_RATE, XfTtsError, smooth_silences
+from app.services.xf_tts import SAMPLE_RATE, XfTtsClient, XfTtsError, smooth_silences
 
 client = TestClient(app)
 
@@ -116,3 +121,65 @@ def test_smooth_silences_keeps_longer_sentence_pause():
     out = smooth_silences((tone + sentence_gap + tone).tobytes())
     kept_samples = len(out) // 2 - len(tone) * 2
     assert kept_samples >= int(rate * 0.18)
+
+
+def test_tts_stream_returns_pcm_and_preserves_scenario_options():
+    calls = []
+    class Stub:
+        async def synthesize_stream(self, text, **kwargs):
+            calls.append((text, kwargs))
+            yield b"\x01\x00"
+            yield b"\x02\x00"
+    app.dependency_overrides[get_tts_client] = Stub
+    try:
+        response = client.post("/api/tts/stream", json={"text": "Hello", "scenario_id": "interview", "speed": 44})
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("audio/pcm")
+        assert response.content == b"\x01\x00\x02\x00"
+        assert calls[0][1]["vcn"] == "henry"
+        assert calls[0][1]["speed"] == 44
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_tts_stream_maps_startup_failure_to_503():
+    class Stub:
+        async def synthesize_stream(self, text, **kwargs):
+            raise XfTtsError("not configured")
+            yield b""  # async generator
+    app.dependency_overrides[get_tts_client] = Stub
+    try:
+        assert client.post("/api/tts/stream", json={"text": "Hello"}).status_code == 503
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_tts_service_yields_first_frame_before_upstream_finishes(monkeypatch):
+    from app.core.config import Settings
+    from app.services import xf_tts
+    class Socket:
+        finished = False
+        async def send(self, data):
+            pass
+        def __aiter__(self):
+            return self.frames()
+        async def frames(self):
+            yield json.dumps({"code": 0, "data": {"audio": base64.b64encode(b"\x01\x00").decode(), "status": 1}})
+            self.finished = True
+            yield json.dumps({"code": 0, "data": {"audio": base64.b64encode(b"\x02\x00").decode(), "status": 2}})
+    socket = Socket()
+    class Connection:
+        async def __aenter__(self):
+            return socket
+        async def __aexit__(self, *args):
+            pass
+    monkeypatch.setattr(xf_tts.websockets, "connect", lambda *args, **kwargs: Connection())
+    async def run():
+        service = XfTtsClient(Settings(xf_app_id="test", xf_api_key="test", xf_api_secret="test"))
+        stream = service.synthesize_stream("Hello")
+        assert await anext(stream) == b"\x01\x00"
+        assert not socket.finished
+        assert await anext(stream) == b"\x02\x00"
+        with pytest.raises(StopAsyncIteration):
+            await anext(stream)
+    asyncio.run(run())

@@ -112,18 +112,25 @@ class DeepSeekClient:
             ) as client:
                 async with client.stream("POST", url, json=payload, headers=headers) as resp:
                     resp.raise_for_status()
+                    completed = False
                     async for line in resp.aiter_lines():
                         if not line.startswith("data:"):
                             continue
                         data = line[5:].strip()
                         if data == "[DONE]":
+                            completed = True
                             break
                         try:
-                            delta = json.loads(data)["choices"][0]["delta"].get("content")
+                            packet = json.loads(data)
+                            if isinstance(packet, dict) and packet.get("error"):
+                                raise DeepSeekError("DeepSeek reported a streaming error")
+                            delta = packet["choices"][0]["delta"].get("content")
                         except (json.JSONDecodeError, KeyError, IndexError, TypeError):
                             continue
                         if delta:
                             yield delta
+                    if not completed:
+                        raise DeepSeekError("DeepSeek stream ended before completion")
         except httpx.HTTPStatusError as exc:
             raise DeepSeekError(
                 f"DeepSeek returned HTTP {exc.response.status_code}"

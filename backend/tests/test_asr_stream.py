@@ -1,4 +1,6 @@
 import json
+import asyncio
+import base64
 
 from fastapi.testclient import TestClient
 
@@ -141,3 +143,25 @@ def test_wpgs_missing_sn_falls_back_to_order():
     st._apply({"pgs": "apd", "ws": [{"cw": [{"w": "one "}]}]})
     st._apply({"pgs": "apd", "ws": [{"cw": [{"w": "two"}]}]})
     assert st._current_text() == "one two"
+
+
+def test_small_capture_blocks_form_complete_asr_frames_and_flush_the_tail():
+    frames = []
+    class Socket:
+        async def send(self, frame):
+            frames.append(json.loads(frame))
+        async def close(self):
+            pass
+    async def run():
+        stream = XfAsrStream(_Cfg(), _noop_partial)
+        stream._ws = Socket()
+        await stream.send(b"\x01\x02" * 320)  # one 20 ms capture block
+        assert frames == []
+        await stream.send(b"\x03\x04" * 320)
+        assert base64.b64decode(frames[0]["data"]["audio"]) == b"\x01\x02" * 320 + b"\x03\x04" * 320
+        await stream.send(b"\x05\x06" * 320)
+        stream._done.set()
+        await stream.finish()
+        assert base64.b64decode(frames[1]["data"]["audio"]) == b"\x05\x06" * 320 + b"\x00" * 640
+        assert frames[-1]["data"]["status"] == 2
+    asyncio.run(run())

@@ -1,10 +1,8 @@
-"""Curated bank of current ("new") TOEFL iBT INDEPENDENT speaking prompts.
+"""Supplementary opinion prompts for Take an Interview speaking practice.
 
-The modern TOEFL independent task (Question 1) uses four recurring forms:
-agree/disagree, paired preference, two-option choice, and three-choice. The
-older "describe a person / place / experience" style is intentionally left out.
-Cross-checked against TST Prep, examword, TestGlider and ETS materials. The
-interview endpoint serves a random subset and blends in one AI scenario question.
+These curated prompts exercise reasons, preferences, and opinions. They are
+training material, not a complete official mock exam. The existing constant
+name is retained for compatibility with the catalogue and tests.
 """
 
 INDEPENDENT_QUESTIONS: list[str] = [

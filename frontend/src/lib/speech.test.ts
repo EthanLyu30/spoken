@@ -212,4 +212,46 @@ describe("cloud speech queue cleanup", () => {
     expect(mocks.revokeObjectUrl).toHaveBeenCalledWith("blob:first");
     expect(mocks.revokeObjectUrl).toHaveBeenCalledWith("blob:second");
   });
+
+  it("synthesizes the next local sentence while the current sentence is playing", async () => {
+    mocks.localReady = true;
+    mocks.createObjectUrl.mockReturnValueOnce("blob:local-first").mockReturnValueOnce("blob:local-next");
+    mocks.synthesizeWithKokoro.mockResolvedValue({ audio: new Float32Array([0, 0.1]), sampleRate: 24000 });
+    const queue = createSpeechQueue("cafe");
+    queue.feed("First. Second. ");
+    await vi.waitFor(() => expect(audioInstances).toHaveLength(1));
+    try {
+      await vi.waitFor(() => expect(mocks.synthesizeWithKokoro).toHaveBeenCalledTimes(2));
+      expect(audioInstances).toHaveLength(1);
+    } finally { queue.stop(); await queue.end("First. Second. "); }
+  });
+
+  it("global stop also stops the active streaming speech queue", async () => {
+    mocks.fetchTtsUrl.mockResolvedValue("blob:active-queue");
+    const queue = createSpeechQueue("cafe");
+    queue.feed("First. ");
+    await vi.waitFor(() => expect(audioInstances).toHaveLength(1));
+    stopSpeaking();
+    expect(mocks.revokeObjectUrl).toHaveBeenCalledWith("blob:active-queue");
+    queue.stop();
+    await queue.end("First. ");
+  });
+
+  it("recovers a failed local prefetch with cloud audio instead of skipping the sentence", async () => {
+    mocks.localReady = true;
+    mocks.createObjectUrl.mockReturnValue("blob:local-first");
+    mocks.synthesizeWithKokoro.mockResolvedValueOnce({ audio: new Float32Array([0, 0.1]), sampleRate: 24000 }).mockRejectedValueOnce(new Error("worker failed"));
+    mocks.fetchTtsUrl.mockResolvedValue("blob:cloud-second");
+    const queue = createSpeechQueue("cafe");
+    queue.feed("First. Second. ");
+    const done = queue.end("First. Second. ");
+    try {
+      await vi.waitFor(() => expect(mocks.synthesizeWithKokoro).toHaveBeenCalledTimes(2));
+      audioInstances[0].onended?.();
+      await vi.waitFor(() => expect(mocks.fetchTtsUrl).toHaveBeenCalledOnce());
+      expect(audioInstances[1].src).toBe("blob:cloud-second");
+      audioInstances[1].onended?.();
+      await done;
+    } finally { queue.stop(); }
+  });
 });

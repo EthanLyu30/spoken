@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from sqlalchemy import desc, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.session import PracticeSession, SkillScore, Turn
@@ -13,8 +14,20 @@ SESSION_KEEP = 200
 
 
 def create_session(db: Session, client_id: str, payload: SaveSessionRequest) -> PracticeSession:
+    def existing() -> PracticeSession | None:
+        if not payload.client_session_id:
+            return None
+        return db.scalars(select(PracticeSession).where(
+            PracticeSession.client_id == client_id,
+            PracticeSession.client_session_id == payload.client_session_id,
+        )).first()
+
+    previous = existing()
+    if previous is not None:
+        return previous
     session = PracticeSession(
         client_id=client_id,
+        client_session_id=payload.client_session_id,
         scenario_id=payload.scenario_id,
         overall=payload.overall,
         summary=payload.summary,
@@ -29,7 +42,15 @@ def create_session(db: Session, client_id: str, payload: SaveSessionRequest) -> 
         ],
     )
     db.add(session)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Concurrent report/navigation retries may reach different workers.
+        db.rollback()
+        previous = existing()
+        if previous is None:
+            raise
+        return previous
     db.refresh(session)
     prune_sessions(db, client_id)
     return session

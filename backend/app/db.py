@@ -88,6 +88,19 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_sqlite()
     _migrate_users()
+    _migrate_session_identity()
+
+
+def _migrate_session_identity() -> None:
+    """Keep legacy rows unchanged; idempotency applies to new client IDs only."""
+    with engine.begin() as conn:
+        if _url.startswith("sqlite"):
+            existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sessions)")}
+            if "client_session_id" not in existing:
+                conn.exec_driver_sql("ALTER TABLE sessions ADD COLUMN client_session_id VARCHAR(64)")
+        else:
+            conn.exec_driver_sql("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS client_session_id VARCHAR(64)")
+        conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS uq_sessions_owner_practice ON sessions (client_id, client_session_id)")
 
 
 def get_db() -> Iterator[Session]:

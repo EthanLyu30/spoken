@@ -184,8 +184,9 @@ export default function Profile() {
 }
 
 const ENGINES: { id: VoiceEngine; label: string; hint: string }[] = [
-  { id: "browser", label: "浏览器语音", hint: "更自然、连贯（推荐）" },
-  { id: "iflytek", label: "讯飞云端", hint: "云端音色，可跟随场景" },
+  { id: "iflytek", label: "云端语音", hint: "推荐 · 音质稳定，流式播放" },
+  { id: "browser", label: "设备语音", hint: "无需合成接口，音质因设备而异" },
+  { id: "local", label: "本地模型", hint: "实验功能 · 首次需下载较大模型" },
 ];
 
 function VoiceSettings() {
@@ -236,13 +237,14 @@ function VoiceSettings() {
         )}
       </div>
 
-      <label className="mb-1.5 block text-sm font-bold text-ink">朗读引擎</label>
-      <div className="mb-1.5 grid grid-cols-2 gap-2">
+      <p className="mb-1.5 text-sm font-bold text-ink">播放方式</p>
+      <div className="mb-1.5 grid gap-2" role="group" aria-label="播放方式">
         {ENGINES.map((e) => (
           <button
             key={e.id}
             type="button"
             onClick={() => setEngine(e.id)}
+            aria-pressed={engine === e.id}
             className={cn(
               "rounded-2xl border px-3 py-2.5 text-left transition-transform active:translate-y-0.5",
               engine === e.id
@@ -256,14 +258,15 @@ function VoiceSettings() {
         ))}
       </div>
       <p className="mb-4 text-xs text-muted">
-        {engine === "browser"
-          ? "用你设备/浏览器自带的英文语音，朗读更连贯自然。"
-          : "用讯飞云端发音人，不选音色时跟随每个场景的语气。"}
+        {engine === "browser" ? "使用设备提供的英文声音；效果随系统变化，没有可用声音时切到云端。"
+          : engine === "local" ? "选择后才会后台下载识别与合成模型。加载中、设备较慢或失败时使用云端，建议在 Wi-Fi 下启用。"
+          : "使用讯飞云端语音，收到音频即可播放；不选音色时跟随场景。"}
       </p>
 
-      <label className="mb-1.5 block text-sm font-bold text-ink">音色</label>
+      <label htmlFor="voice-selection" className="mb-1.5 block text-sm font-bold text-ink">音色</label>
       {engine === "browser" ? (
         <select
+          id="voice-selection"
           value={browserVoiceURI ?? ""}
           onChange={(e) => setBrowserVoiceURI(e.target.value || null)}
           className="mb-5 w-full rounded-2xl border border-border bg-surface-2 px-4 py-2.5 text-ink outline-none focus:border-coral"
@@ -277,11 +280,13 @@ function VoiceSettings() {
         </select>
       ) : (
         <select
+          id="voice-selection"
           value={vcn ?? ""}
           onChange={(e) => setVcn(e.target.value || null)}
+          disabled={engine === "local"}
           className="mb-5 w-full rounded-2xl border border-border bg-surface-2 px-4 py-2.5 text-ink outline-none focus:border-coral"
         >
-          <option value="">跟随场景（推荐）</option>
+          <option value="">{engine === "local" ? "本地英文女声 · 云端回退跟随设置" : "跟随场景（推荐）"}</option>
           {VOICE_OPTIONS.map((o) => (
             <option key={o.id} value={o.id}>
               {o.label}
@@ -300,6 +305,7 @@ function VoiceSettings() {
         <span className="font-semibold text-muted">{speedLabel}</span>
       </div>
       <input
+        aria-label="朗读语速"
         type="range"
         min={20}
         max={85}
@@ -314,6 +320,7 @@ function VoiceSettings() {
         <span className="font-semibold text-muted">{pitchLabel}</span>
       </div>
       <input
+        aria-label="朗读音调"
         type="range"
         min={30}
         max={75}

@@ -41,6 +41,7 @@ export default function Interview() {
 
   const recRef = useRef<ActiveRecorder | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const finishingRef = useRef(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -75,6 +76,7 @@ export default function Interview() {
       return;
     }
     setQPhase("recording");
+    finishingRef.current = false;
     setLeft(ANSWER_SECONDS);
     timerRef.current = setInterval(() => {
       setLeft((s) => {
@@ -88,6 +90,8 @@ export default function Interview() {
   }
 
   async function finishAnswer() {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -99,8 +103,12 @@ export default function Interview() {
     let text = "";
     try {
       if (rec) text = (await transcribeSpeech(await rec.stop())).trim();
+      if (!text) throw new Error("empty transcription");
     } catch {
-      text = "";
+      finishingRef.current = false;
+      setError("这次没能识别到回答，请重新录一次；本题尚未提交评分。");
+      setQPhase("ready");
+      return;
     }
     const nextAnswers = [...answers, text];
     setAnswers(nextAnswers);
@@ -152,9 +160,9 @@ export default function Interview() {
           <section className="card p-6 text-center md:p-8">
             <Buddy mood="happy" size={120} className="mx-auto" />
             <p className="eyebrow mt-2">Timed Q&A · 限时问答</p>
-            <h1 className="mt-1 font-display text-2xl font-semibold text-ink">模拟托福口语 · 独立题</h1>
+            <h1 className="mt-1 font-display text-2xl font-semibold text-ink">Take an Interview · 口语访谈</h1>
             <p className="mx-auto mt-2 max-w-md text-sm text-muted">
-              共 4 题（新托福独立口语题型：同意/偏好/三选一，真实题库 + AI 场景题），每题 45 秒即兴作答。系统按托福口语评分标准给分，并给出高分范例答案。全程用英文开口说，越自然越好！
+              围绕经历、理由和观点练习即兴回答，共 4 题、每题 45 秒。完成后查看表达建议和参考答案，练习自然、有条理地回应访谈问题。
             </p>
             <div className="mt-5">
               <Button size="lg" onClick={begin}>
@@ -257,7 +265,7 @@ export default function Interview() {
               <div>
                 <p className="eyebrow">Your score · 总评</p>
                 <h1 className="mt-1 font-display text-2xl font-semibold text-ink">托福口语预估分</h1>
-                <p className="mt-1 text-sm text-muted">满分 {MAX_BAND}，对照托福独立口语评分标准</p>
+                <p className="mt-1 text-sm text-muted">练习参考分 / {MAX_BAND} · 基于转写内容评估语言与内容组织</p>
               </div>
             </section>
 

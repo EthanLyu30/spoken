@@ -7,10 +7,12 @@ audio blob. The HMAC handshake lives in ``xf_auth``.
 from __future__ import annotations
 
 import array
+import asyncio
 import base64
 import io
 import json
 import wave
+from collections.abc import AsyncIterator
 
 import websockets
 
@@ -110,6 +112,11 @@ class XfTtsClient:
         self._s = settings or get_settings()
 
     async def synthesize(
+        self, text: str, **kwargs,
+    ) -> bytes:
+        return b"".join([chunk async for chunk in self.synthesize_stream(text, **kwargs)])
+
+    async def synthesize_stream(
         self,
         text: str,
         *,
@@ -118,7 +125,7 @@ class XfTtsClient:
         speed: int = 54,  # 0-100, 50 = neutral
         pitch: int = 52,  # 0-100, 50 = neutral
         volume: int = 80,  # 0-100
-    ) -> bytes:
+    ) -> AsyncIterator[bytes]:
         s = self._s
         if not (s.xf_app_id and s.xf_api_key and s.xf_api_secret):
             raise XfTtsError("iFlytek credentials are not configured")
@@ -141,9 +148,10 @@ class XfTtsClient:
             },
         }
 
-        audio = bytearray()
+        received = False
+        complete = False
         try:
-            async with websockets.connect(url, max_size=None) as ws:
+            async with asyncio.timeout(30), websockets.connect(url, max_size=2 * 1024 * 1024, open_timeout=10, close_timeout=3) as ws:
                 await ws.send(json.dumps(frame))
                 async for message in ws:
                     resp = json.loads(message)
@@ -153,14 +161,19 @@ class XfTtsClient:
                         )
                     data = resp.get("data") or {}
                     if data.get("audio"):
-                        audio.extend(base64.b64decode(data["audio"]))
+                        audio = base64.b64decode(data["audio"])
+                        if audio:
+                            received = True
+                            yield audio
                     if data.get("status") == 2:
+                        complete = True
                         break
         except XfTtsError:
             raise
         except Exception as exc:  # network / protocol
             raise XfTtsError(f"iFlytek TTS request failed: {exc}") from exc
 
-        if not audio:
+        if not received:
             raise XfTtsError("iFlytek TTS returned no audio")
-        return bytes(audio)
+        if not complete:
+            raise XfTtsError("iFlytek TTS ended before completing the audio")

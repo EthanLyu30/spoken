@@ -21,17 +21,19 @@ def get_client_id(
     """Resolve the data owner for the request.
 
     A valid Bearer token wins, scoping data to the account (``u:<id>``).
-    Otherwise fall back to the per-device X-Client-Id header (no login), or a
-    shared ``anon`` bucket. Every owner-scoped endpoint depends on this, so
-    accounts work everywhere without touching the endpoints themselves.
+    Guest IDs retain their existing values, but cannot name the reserved
+    account namespace. Invalid credentials never downgrade to guest access.
     """
     token = _bearer(authorization)
-    if token:
-        uid = decode_token(token)
-        if uid is not None:
-            return f"u:{uid}"
+    if authorization is not None:
+        uid = decode_token(token) if token else None
+        if uid is None:
+            raise HTTPException(status_code=401, detail="未登录或登录已过期")
+        return f"u:{uid}"
     cid = (x_client_id or "").strip()
-    return cid[:64] if cid else "anon"
+    if len(cid) > 64 or cid.lower().startswith("u:"):
+        raise HTTPException(status_code=400, detail="Invalid device identifier")
+    return cid or "anon"
 
 
 def get_current_user(

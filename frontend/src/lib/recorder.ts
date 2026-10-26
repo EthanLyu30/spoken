@@ -1,8 +1,9 @@
 /**
  * Microphone capture that yields 16 kHz / 16-bit / mono PCM — the format
- * iFlytek ASR expects. Uses a ScriptProcessor (broad support) and resamples
+ * iFlytek ASR expects. Prefers AudioWorklet with a small-buffer fallback and resamples
  * from the device rate if the browser ignores the requested 16 kHz context.
  */
+import { createCaptureProcessor } from "./audioCapture";
 export interface ActiveRecorder {
   stop: () => Promise<ArrayBuffer>;
 }
@@ -15,37 +16,43 @@ export async function startRecording(): Promise<ActiveRecorder> {
   const Ctx: typeof AudioContext =
     window.AudioContext ||
     (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  const ctx = new Ctx({ sampleRate: 16000 });
-  await ctx.resume();
+  let context: AudioContext | undefined;
+  let releaseProcessor: (() => void) | undefined;
+  try {
+    const ctx = new Ctx({ sampleRate: 16000 });
+    context = ctx;
+    await ctx.resume();
+    const source = ctx.createMediaStreamSource(stream);
+    const chunks: Float32Array[] = [];
+    const processor = await createCaptureProcessor(ctx, (samples) => chunks.push(samples));
+    releaseProcessor = processor.disconnect;
+    const sink = ctx.createGain();
+    sink.gain.value = 0; // process without audible playback
 
-  const source = ctx.createMediaStreamSource(stream);
-  const processor = ctx.createScriptProcessor(4096, 1, 1);
-  const sink = ctx.createGain();
-  sink.gain.value = 0; // process without audible playback
+    source.connect(processor.node);
+    processor.node.connect(sink);
+    sink.connect(ctx.destination);
 
-  const chunks: Float32Array[] = [];
-  processor.onaudioprocess = (e) => {
-    chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-  };
-  source.connect(processor);
-  processor.connect(sink);
-  sink.connect(ctx.destination);
-
-  return {
-    stop: async () => {
-      // Grace period so the final ScriptProcessor block (and the tail of the
-      // last word the user just spoke) is captured instead of being dropped.
-      await new Promise((r) => setTimeout(r, 250));
-      processor.onaudioprocess = null;
-      processor.disconnect();
-      source.disconnect();
-      sink.disconnect();
-      stream.getTracks().forEach((t) => t.stop());
-      const rate = ctx.sampleRate;
-      await ctx.close();
-      return floatToPcm16(resampleTo16k(flatten(chunks), rate));
-    },
-  };
+    let stopping: Promise<ArrayBuffer> | null = null;
+    return {
+      stop: () => stopping ??= (async () => {
+        // Capture the final audio frame and the tail of the last spoken word.
+        await new Promise((r) => setTimeout(r, 80));
+        processor.disconnect();
+        source.disconnect();
+        sink.disconnect();
+        stream.getTracks().forEach((t) => t.stop());
+        const rate = ctx.sampleRate;
+        await ctx.close();
+        return floatToPcm16(resampleTo16k(flatten(chunks), rate));
+      })(),
+    };
+  } catch (error) {
+    releaseProcessor?.();
+    stream.getTracks().forEach((track) => track.stop());
+    await context?.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 export function flatten(chunks: Float32Array[]): Float32Array {

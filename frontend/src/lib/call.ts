@@ -9,13 +9,14 @@
  */
 import { flatten, floatToPcm16, resampleTo16k } from "./recorder";
 import { openAsrStream, type AsrStream } from "./asrStream";
+import { createCaptureProcessor, type CaptureProcessor } from "./audioCapture";
 
 export type CallPhase = "listening" | "thinking" | "speaking";
 
 export interface CallCallbacks {
   onPhase: (p: CallPhase) => void;
   /** Buffered transcription using the engine selected at utterance start. */
-  transcribe: (pcm: ArrayBuffer, engine: "local" | "cloud") => Promise<string>;
+  transcribe: (pcm: ArrayBuffer, engine: "local" | "cloud", signal: AbortSignal) => Promise<string>;
   /** Read once when speech starts; the selected engine is fixed for that turn. */
   preferLocalAsr?: () => boolean;
   /**
@@ -35,6 +36,7 @@ export interface CallCallbacks {
     userText: string,
     pcm: ArrayBuffer,
     onSpeaking: () => void,
+    signal: AbortSignal,
   ) => Promise<void>;
   /**
    * Barge-in: the user started talking over Pip. Called while in the "speaking"
@@ -50,8 +52,8 @@ export interface VoiceCall {
 }
 
 const SILENCE_THRESHOLD = 0.012; // RMS below this counts as silence
-const END_SILENCE_MS = 800; // pause that ends an utterance — snappier turn-taking
-const MIN_SPEECH_MS = 350; // ignore blips shorter than this
+const END_SILENCE_MS = 650;
+const MIN_SPEECH_MS = 180; // include brief answers such as "yes" and "no"
 const MAX_UTTER_MS = 15000; // safety cap
 const LEADING_SILENCE_DROP_MS = 4000; // drop long leading silence
 const KEEPALIVE_MS = 3000; // poll to resume a suspended context
@@ -62,14 +64,15 @@ const MAX_RECONNECT = 3;
 // a low bar would make Pip interrupt itself. Tune these if real-world testing
 // shows misfires (raise) or sluggish cut-ins (lower).
 const BARGE_IN_RMS = 0.05; // must be well above residual TTS echo
-const BARGE_IN_MS = 600; // sustained speak-over before we hand the turn back
+const BARGE_IN_MS = 240;
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function retryOnce<T>(fn: () => Promise<T>): Promise<T> {
+async function retryOnce<T>(fn: () => Promise<T>, signal: AbortSignal): Promise<T> {
   try {
     return await fn();
   } catch {
+    signal.throwIfAborted();
     return await fn();
   }
 }
@@ -85,6 +88,10 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   let bargeMs = 0; // accumulated loud-speech time during Pip's turn
   let reconnecting = false;
   let rate = 16000;
+  let graphGeneration = 0;
+  let turnGeneration = 0;
+  let turnController: AbortController | null = null;
+  let bargeFrames: Float32Array[] = [];
 
   // Streaming ASR (live captions + zero re-upload). Best-effort: if the relay
   // is unavailable we fall back to buffering the clip and POSTing it.
@@ -137,7 +144,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   let stream: MediaStream | null = null;
   let ctx: AudioContext | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
-  let processor: ScriptProcessorNode | null = null;
+  let processor: CaptureProcessor | null = null;
   let sink: GainNode | null = null;
 
   // VAD state for the current utterance.
@@ -147,6 +154,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   let utterMs = 0;
   let started = false;
   let utteranceUsesLocalAsr = false;
+  let cloudFramesSent = 0;
 
   const reset = () => {
     collected = [];
@@ -155,10 +163,22 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     utterMs = 0;
     started = false;
     utteranceUsesLocalAsr = false;
+    cloudFramesSent = 0;
+  };
+
+  const selectAsr = () => {
+    utteranceUsesLocalAsr = cb.preferLocalAsr?.() ?? false;
+    if (utteranceUsesLocalAsr) invalidateCloudStream();
+    else void ensureStream();
   };
 
   const handle = async (pcm: ArrayBuffer, useLocalAsr: boolean) => {
+    const generation = ++turnGeneration;
+    const controller = new AbortController();
+    turnController = controller;
+    const { signal } = controller;
     busy = true;
+    bargeFrames = [];
     try {
       cb.onPhase("thinking");
       // Prefer the streaming final (already mid-flight); fall back to a buffered
@@ -174,38 +194,52 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
       if (!text) {
         text = (
           await retryOnce(() =>
-            cb.transcribe(pcm, useLocalAsr ? "local" : "cloud"),
+            cb.transcribe(pcm, useLocalAsr ? "local" : "cloud", signal),
+            signal,
           )
         ).trim();
       }
-      if (text && !ended) {
+      if (text && !ended && !signal.aborted) {
         // reply() generates and speaks the answer; it flips us to "speaking"
         // (via the callback) as soon as the first sentence starts. That's also
         // when we arm barge-in so the user can talk over Pip.
         await cb.reply(text, pcm, () => {
-          if (ended) return;
+          if (ended || signal.aborted || generation !== turnGeneration) return;
           speaking = true;
           bargeMs = 0;
           cb.onPhase("speaking");
-        });
+        }, signal);
       }
     } catch {
-      if (!ended) cb.onError("这一句没接上，继续说就好～");
+      if (!ended && !signal.aborted) cb.onError("这一句没接上，继续说就好～");
     } finally {
-      busy = false;
-      speaking = false;
-      bargeMs = 0;
-      if (!ended) cb.onPhase("listening");
+      if (generation === turnGeneration) {
+        busy = false;
+        speaking = false;
+        bargeMs = 0;
+        bargeFrames = [];
+        if (!ended) cb.onPhase("listening");
+      }
     }
   };
 
   /** Hand the turn back to the user: stop Pip's audio and resume listening. */
   const triggerBargeIn = () => {
     if (ended || !speaking) return;
+    const buffered = bargeFrames;
+    const speechDuration = bargeMs;
+    turnGeneration += 1;
+    turnController?.abort();
     speaking = false;
     bargeMs = 0;
     busy = false; // reopen the mic immediately for the user's new utterance
     reset();
+    collected = buffered;
+    utterMs = buffered.reduce((sum, frame) => sum + frame.length / rate * 1000, 0);
+    speechMs = speechDuration;
+    started = true;
+    bargeFrames = [];
+    selectAsr();
     cb.interrupt?.(); // stop the in-flight read-aloud
     if (!ended) cb.onPhase("listening");
   };
@@ -220,9 +254,8 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     }
   };
 
-  const onAudio = (e: AudioProcessingEvent) => {
+  const onAudio = (buf: Float32Array) => {
     if (ended || reconnecting) return;
-    const buf = e.inputBuffer.getChannelData(0);
     const frameMs = (buf.length / rate) * 1000;
     let sum = 0;
     for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
@@ -231,7 +264,12 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     if (busy) {
       // Mic is otherwise ignored while Pip thinks/speaks — but during "speaking"
       // we listen for the user cutting in (barge-in), if the caller supports it.
-      if (speaking && cb.interrupt) detectBargeIn(rms, frameMs);
+      if (speaking && cb.interrupt) {
+        bargeFrames.push(new Float32Array(buf));
+        // Retain the lead-in, including the frame which triggers the handoff.
+        while (bargeFrames.length > 1 && bargeFrames.reduce((sum, frame) => sum + frame.length / rate * 1000, 0) > 1_000) bargeFrames.shift();
+        detectBargeIn(rms, frameMs);
+      }
       return;
     }
 
@@ -240,14 +278,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
 
     if (rms > SILENCE_THRESHOLD) {
       if (!started) {
-        utteranceUsesLocalAsr = cb.preferLocalAsr?.() ?? false;
-        if (utteranceUsesLocalAsr) {
-          // The previous cloud connection may have been opened while the local
-          // model was loading. Close it only at this new utterance boundary.
-          invalidateCloudStream();
-        } else {
-          void ensureStream();
-        }
+        selectAsr();
       }
       speechMs += frameMs;
       silenceMs = 0;
@@ -265,7 +296,9 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     // transcribes in real time (captions) and the final is ready the instant
     // they stop — no separate upload round-trip.
     if (started && asr && !utteranceUsesLocalAsr) {
-      asr.send(floatToPcm16(resampleTo16k(new Float32Array(buf), rate)));
+      for (; cloudFramesSent < collected.length; cloudFramesSent++) {
+        asr.send(floatToPcm16(resampleTo16k(collected[cloudFramesSent], rate)));
+      }
     }
 
     const done =
@@ -280,34 +313,50 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   };
 
   async function acquireMic() {
-    stream = await navigator.mediaDevices.getUserMedia({
+    const generation = graphGeneration;
+    const acquired = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
     });
+    if (ended || generation !== graphGeneration) {
+      acquired.getTracks().forEach((track) => track.stop());
+      return false;
+    }
+    stream = acquired;
     for (const track of stream.getAudioTracks()) {
       track.onended = () => {
         if (!ended) void reconnect("麦克风已断开");
       };
     }
+    return true;
   }
 
   async function buildGraph() {
     if (!stream) throw new Error("no stream");
-    ctx = new AudioCtx({ sampleRate: 16000 });
-    await ctx.resume();
-    rate = ctx.sampleRate;
-    source = ctx.createMediaStreamSource(stream);
-    processor = ctx.createScriptProcessor(4096, 1, 1);
-    sink = ctx.createGain();
+    const generation = graphGeneration;
+    const audioContext = new AudioCtx({ sampleRate: 16000 });
+    ctx = audioContext;
+    await audioContext.resume();
+    if (ended || generation !== graphGeneration) { await audioContext.close().catch(() => undefined); return false; }
+    const audioProcessor = await createCaptureProcessor(audioContext, onAudio);
+    if (ended || generation !== graphGeneration) {
+      audioProcessor.disconnect();
+      await audioContext.close().catch(() => undefined);
+      return false;
+    }
+    rate = audioContext.sampleRate;
+    source = audioContext.createMediaStreamSource(stream);
+    processor = audioProcessor;
+    sink = audioContext.createGain();
     sink.gain.value = 0;
-    processor.onaudioprocess = onAudio;
-    source.connect(processor);
-    processor.connect(sink);
-    sink.connect(ctx.destination);
+    source.connect(processor.node);
+    processor.node.connect(sink);
+    sink.connect(audioContext.destination);
+    return true;
   }
 
   function teardownGraph() {
+    graphGeneration += 1;
     try {
-      if (processor) processor.onaudioprocess = null;
       processor?.disconnect();
       source?.disconnect();
       sink?.disconnect();
@@ -327,7 +376,8 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     } catch {
       /* ignore */
     }
-    processor = source = sink = null;
+    processor = null;
+    source = sink = null;
     ctx = null;
     stream = null;
   }
@@ -341,13 +391,13 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     reset();
     for (let attempt = 1; attempt <= MAX_RECONNECT && !ended; attempt++) {
       try {
-        await acquireMic();
-        await buildGraph();
+        if (!(await acquireMic()) || !(await buildGraph())) { reconnecting = false; return; }
         reconnecting = false;
         if (!ended) cb.onPhase("listening");
         return;
       } catch {
-        await delay(700 * attempt);
+        teardownGraph();
+        if (!ended) await delay(700 * attempt);
       }
     }
     reconnecting = false;
@@ -355,8 +405,12 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   }
 
   // Initial setup (errors propagate to the caller, which shows a hint).
-  await acquireMic();
-  await buildGraph();
+  try {
+    if (!(await acquireMic()) || !(await buildGraph())) throw new DOMException("Call cancelled", "AbortError");
+  } catch (error) {
+    teardownGraph();
+    throw error;
+  }
   cb.onPhase("listening");
 
   // Open the streaming-ASR connection in the background; the first utterance
@@ -373,6 +427,8 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   return {
     end: () => {
       ended = true;
+      turnGeneration += 1;
+      turnController?.abort();
       clearInterval(keepAlive);
       invalidateCloudStream();
       teardownGraph();

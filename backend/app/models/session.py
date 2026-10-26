@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -16,9 +16,11 @@ def _utcnow() -> datetime:
 
 class PracticeSession(Base):
     __tablename__ = "sessions"
+    __table_args__ = (Index("uq_sessions_owner_practice", "client_id", "client_session_id", unique=True),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     client_id: Mapped[str] = mapped_column(String(64), default="anon", index=True)
+    client_session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     scenario_id: Mapped[str] = mapped_column(String(64), index=True)
     overall: Mapped[int] = mapped_column(Integer, default=0)
     summary: Mapped[str] = mapped_column(Text, default="")

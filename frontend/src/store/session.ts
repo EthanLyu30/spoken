@@ -7,14 +7,16 @@ import { type ChatMessage } from "../lib/api";
  */
 interface SessionState {
   scenarioId: string | null;
+  practiceId: string | null;
   messages: ChatMessage[];
-  setSession: (scenarioId: string, messages: ChatMessage[]) => void;
+  setSession: (scenarioId: string, messages: ChatMessage[], practiceId: string) => void;
   clear: () => void;
 }
 
 export const useSession = create<SessionState>((set) => ({
   scenarioId: null,
+  practiceId: null,
   messages: [],
-  setSession: (scenarioId, messages) => set({ scenarioId, messages }),
-  clear: () => set({ scenarioId: null, messages: [] }),
+  setSession: (scenarioId, messages, practiceId) => set({ scenarioId, messages, practiceId }),
+  clear: () => set({ scenarioId: null, practiceId: null, messages: [] }),
 }));

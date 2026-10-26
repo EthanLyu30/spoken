@@ -29,23 +29,21 @@ growth curve.
 
 - **Fast/slow dual-path architecture** with **streaming chat replies** — the
   conversation stays snappy while assessment runs asynchronously.
-- **Full iFlytek voice stack** — speech recognition (ASR), pronunciation scoring
-  (ISE) and TTS; read-aloud offers a **browser-native voice (default) or iFlytek**,
-  with adjustable speed / pitch / voice. Devices without an English browser
-  voice automatically fall back to connected cloud speech. Talk hands-free in
-  **call mode** with
-  **live captions** (streaming ASR) and **barge-in** (just start talking to cut
-  Pip off and take the turn), or use **push-to-talk** (which auto-sends what it
-  hears — no extra tap).
+- **iFlytek voice pipeline** — streaming ASR, pronunciation scoring and
+  streamed PCM playback by default for new users. Device voices and local
+  Moonshine/Kokoro models are optional; models download only after opting in.
+  Call mode provides live captions and preserves the beginning of barge-in
+  speech. AudioWorklet capture has a compatibility fallback. Alternatively,
+  tap to record, tap again to finish, and send the transcription automatically.
 - **Instant feedback on every learner turn** — Pip replies first, then the learner
   can open grammar / expression correction, a natural rewrite and explanation;
   voice turns can also request pronunciation feedback without persisting audio.
 - **Dictionary in context** — click an English word or select a two-to-six-word
   phrase for a Chinese definition, example and translation, then collect it
   directly. Desktop uses an anchored card; mobile uses a bottom sheet.
-- **TOEFL-style timed Q&A** — a real TOEFL independent-speaking question bank plus
-  AI scenario questions; 45s per answer, scored on the ETS rubric with a model
-  high-scoring sample answer.
+- **Take an Interview practice** — four 45-second answers covering experiences,
+  reasons and opinions, with transcript-based practice scores, suggestions and
+  sample answers. Failed recognition can be recorded again.
 - **Quotes you can actually use** — movies / speeches·TED / literature / people /
   proverbs, each with a **verified source** (checked against Wikiquote, apocryphal
   ones removed) and a **"when to use it"** note.
@@ -79,14 +77,14 @@ asynchronous assessment path:
  end of chat ─────────────────────┴─► pronunciation + grammar + debrief ─► 📊
 ```
 
-> Current state: chat replies are **streamed**; in call mode **read-aloud is streamed sentence-by-sentence** (the first sentence starts playing while the rest is still being generated and synthesised, cutting perceived latency) and **ASR is streamed live** (captions appear and self-correct as you speak, and the reply starts the instant you stop — falling back to buffered transcription if the relay is unavailable); read-aloud prefers an English browser voice and automatically falls back to iFlytek when none is available. Full design in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+> Current state: chat uses explicit streaming delta, completion and error events. Cloud TTS relays PCM frames for playback before the full audio is generated. Unique practice IDs make retries idempotent; long conversations retain their transcript while model context stays bounded. Full design in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ### Stack
 
 - **Frontend:** React 18 · TypeScript · Vite · Tailwind CSS · Zustand · ECharts.
 - **Backend:** Python 3.11 · FastAPI · WebSocket · SQLAlchemy · SQLite.
-- **ASR / pronunciation:** iFlytek (IAT + ISE). **TTS:** browser Web Speech API
-  (default) or iFlytek. **LLM:** DeepSeek (`deepseek-flash`, follows the latest Flash release, thinking disabled, streamed; Pro is disallowed).
+- **ASR / pronunciation:** iFlytek (IAT + ISE). **TTS:** iFlytek streaming PCM
+  by default; device voices and local models are optional. **LLM:** DeepSeek (`deepseek-flash`, follows the latest Flash release, thinking disabled, streamed; Pro is disallowed).
 
 ## Quick start
 
@@ -106,9 +104,10 @@ npm install
 npm run dev
 ```
 
-With **only `DEEPSEEK_API_KEY`** you get text chat, timed Q&A, quote generation and
-custom scenarios, and read-aloud works via the **browser voice** (no iFlytek needed).
-Add `XF_*` to unlock speech recognition, pronunciation scoring and iFlytek voices.
+With **only `DEEPSEEK_API_KEY`** you get text chat, timed Q&A scoring, quotes and
+custom scenarios. Configure `XF_*` for the default cloud voice pipeline and
+pronunciation scoring, or select device speech in voice settings. Set a private,
+stable `JWT_SECRET` for production and multi-worker deployments.
 
 ## License
 

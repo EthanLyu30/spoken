@@ -8,6 +8,7 @@ import {
   Phone,
   PhoneOff,
   Send,
+  Settings2,
   Sparkles,
   Square,
   Volume2,
@@ -24,10 +25,11 @@ import {
   type UserTurnMeta,
   type UserTurnMetaMap,
 } from "../lib/conversationTurns";
-import { persistSessionOnce } from "../lib/sessionSave";
+import { createPracticeId, persistSessionOnce } from "../lib/sessionSave";
 import { speakText, createSpeechQueue, type Speaking, type SpeechQueue } from "../lib/speech";
 import { useSession } from "../store/session";
 import { useCustomScene } from "../store/custom";
+import { useVoice, type VoiceEngine } from "../store/voice";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { startVoiceCall, type CallPhase, type VoiceCall } from "../lib/call";
 import {
@@ -74,16 +76,29 @@ export default function Conversation() {
   const [liveCaption, setLiveCaption] = useState(""); // streaming ASR preview while speaking
   const [hints, setHints] = useState<string[] | null>(null);
   const [hintLoading, setHintLoading] = useState(false);
+  const [canRetry, setCanRetry] = useState(false);
+  const [callStarting, setCallStarting] = useState(false);
+  const [inputMode, setInputMode] = useState<"voice" | "text">("voice");
+  const [showVoiceSettings, setShowVoiceSettings] = useState(false);
+  const voiceEngine = useVoice((state) => state.engine);
+  const setVoiceEngine = useVoice((state) => state.setEngine);
 
   const endRef = useRef<HTMLDivElement>(null);
   const speakingRef = useRef<Speaking | null>(null);
   const callQueueRef = useRef<SpeechQueue | null>(null);
   const lastSpokenRef = useRef(-1);
+  const autoSpeakAllowedRef = useRef(true);
   const recorderRef = useRef<ActiveRecorder | null>(null);
   const callRef = useRef<VoiceCall | null>(null);
   const messagesRef = useRef<ChatMessage[]>(messages);
   const turnMetaRef = useRef<UserTurnMetaMap>(turnMeta);
   const goingToReportRef = useRef(false); // true when leaving via 看小结 (report saves)
+  const practiceIdRef = useRef(createPracticeId());
+  const requestControllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+  const callAttemptRef = useRef(0);
+  const mutedRef = useRef(muted);
+  mutedRef.current = muted;
 
   const navigate = useNavigate();
   const setSession = useSession((s) => s.setSession);
@@ -102,7 +117,10 @@ export default function Conversation() {
     if (!id) return;
     goingToReportRef.current = true; // the report page will save this session
     callRef.current?.end();
-    setSession(id, messages);
+    requestControllerRef.current?.abort();
+    callQueueRef.current?.stop();
+    speakingRef.current?.stop();
+    setSession(id, messages, practiceIdRef.current);
     navigate(`/report/${id}`);
   }
 
@@ -154,7 +172,7 @@ export default function Conversation() {
     if (idx < 0 || messages[idx].role !== "assistant" || idx <= lastSpokenRef.current) {
       return;
     }
-    if (!messages[idx].content || streaming) return;
+    if (!messages[idx].content || streaming || !autoSpeakAllowedRef.current) return;
     lastSpokenRef.current = idx;
     if (callPhase) return;
     if (!muted) void playTts(messages[idx].content);
@@ -165,7 +183,12 @@ export default function Conversation() {
   // exchange but left without opening the debrief, still save the session in
   // the background so the practice counts.
   useEffect(() => {
+    mountedRef.current = true;
+    const practiceId = practiceIdRef.current;
     return () => {
+      mountedRef.current = false;
+      callAttemptRef.current += 1;
+      requestControllerRef.current?.abort();
       speakingRef.current?.stop();
       callQueueRef.current?.stop();
       recorderRef.current?.stop().catch(() => undefined);
@@ -176,7 +199,7 @@ export default function Conversation() {
         if (msgs.some((m) => m.role === "user")) {
           const custom = isCustom ? customScene ?? undefined : undefined;
           postFeedback(id, msgs, undefined, custom)
-            .then((f) => persistSessionOnce(id, msgs, f))
+            .then((f) => persistSessionOnce(id, msgs, f, practiceId))
             .catch(() => undefined);
         }
       }
@@ -208,10 +231,18 @@ export default function Conversation() {
   async function send(
     textArg?: string,
     meta: UserTurnMeta = { source: "typed" },
+    retry = false,
   ) {
-    const text = (textArg ?? input).trim();
-    if (!text || loading || booting || !id) return;
-    const appended = appendUserTurn(
+    let lastUser = messagesRef.current.length - 1;
+    while (lastUser >= 0 && messagesRef.current[lastUser].role !== "user") lastUser--;
+    const text = (retry ? messagesRef.current[lastUser]?.content ?? "" : textArg ?? input).trim();
+    if (!text || loading || requestControllerRef.current || booting || !id || inCall) return;
+    const ctrl = new AbortController();
+    requestControllerRef.current = ctrl;
+    autoSpeakAllowedRef.current = false;
+    speakingRef.current?.stop();
+    setCanRetry(false);
+    const appended = retry ? { messages: messagesRef.current.slice(0, lastUser + 1), meta: turnMetaRef.current } : appendUserTurn(
       messagesRef.current,
       turnMetaRef.current,
       text,
@@ -228,6 +259,7 @@ export default function Conversation() {
     const custom = isCustom ? customScene ?? undefined : undefined;
     let started = false;
     const onText = (t: string) => {
+      if (ctrl.signal.aborted || !mountedRef.current) return;
       if (!started) {
         started = true;
         setStreaming(true);
@@ -238,29 +270,43 @@ export default function Conversation() {
     };
     try {
       // Stream the reply token-by-token for lower perceived latency.
-      const full = await streamChat(id, next, onText, undefined, custom);
+      const full = await streamChat(id, next, onText, ctrl.signal, custom);
+      if (ctrl.signal.aborted || !mountedRef.current) return;
+      autoSpeakAllowedRef.current = true;
       setStreaming(false);
       if (started) setLastAssistant(full);
       else setMessages((m) => [...m, { role: "assistant", content: full }]);
-    } catch {
+    } catch (err) {
+      if (ctrl.signal.aborted || !mountedRef.current) return;
+      if (started) {
+        setStreaming(false);
+        setCanRetry(true);
+        setError(err instanceof Error ? err.message : "回复中断，请重试。");
+        return;
+      }
       // Streaming unavailable -> fall back to the plain endpoint.
       try {
-        const r = await postChat(id, next, undefined, custom);
+        const r = await postChat(id, next, ctrl.signal, custom);
+        if (ctrl.signal.aborted || !mountedRef.current) return;
+        autoSpeakAllowedRef.current = true;
         setStreaming(false);
         if (started) setLastAssistant(r.reply);
         else setMessages((m) => [...m, { role: "assistant", content: r.reply }]);
       } catch {
+        if (ctrl.signal.aborted || !mountedRef.current) return;
         setStreaming(false);
+        setCanRetry(true);
         setError("发送失败，请确认后端在运行后重试。");
       }
     } finally {
-      setLoading(false);
+      if (requestControllerRef.current === ctrl) requestControllerRef.current = null;
+      if (mountedRef.current) setLoading(false);
     }
   }
 
   // Push-to-talk: record one clip, transcribe into the input box.
   async function handleMic() {
-    if (transcribing || booting || inCall) return;
+    if (transcribing || booting || inCall || loading || callStarting) return;
     if (recording) {
       setRecording(false);
       const rec = recorderRef.current;
@@ -295,7 +341,9 @@ export default function Conversation() {
     } else {
       setError(null);
       try {
+        speakingRef.current?.stop();
         recorderRef.current = await startRecording();
+        if (!mountedRef.current) { await recorderRef.current.stop(); recorderRef.current = null; return; }
         setRecording(true);
       } catch {
         setError("无法使用麦克风，请允许权限后重试，或直接打字。");
@@ -305,19 +353,25 @@ export default function Conversation() {
 
   // Hands-free call mode: listen -> ASR -> reply -> speak -> repeat.
   async function startCall() {
-    if (!id || booting || inCall) return;
+    if (!id || booting || inCall || callStarting || loading || recording || transcribing) return;
+    const attempt = ++callAttemptRef.current;
+    autoSpeakAllowedRef.current = false;
+    setCallStarting(true);
+    speakingRef.current?.stop();
     setError(null);
     try {
-      callRef.current = await startVoiceCall({
+      const call = await startVoiceCall({
         onPhase: (p) => {
+          if (!mountedRef.current || attempt !== callAttemptRef.current) return;
           setCallPhase(p);
           if (p !== "listening") setLiveCaption(""); // user finished this turn
         },
         preferLocalAsr: isMoonshineTranscriptionReady,
-        transcribe: (pcm, engine) =>
-          engine === "local" ? transcribeSpeech(pcm) : postAsr(pcm),
+        transcribe: (pcm, engine, signal) =>
+          engine === "local" ? transcribeSpeech(pcm, signal) : postAsr(pcm, signal),
         onPartial: (t) => setLiveCaption(t),
-        reply: async (userText, pcm, onSpeaking) => {
+        reply: async (userText, pcm, onSpeaking, signal) => {
+          signal.throwIfAborted();
           const appended = appendUserTurn(
             messagesRef.current,
             turnMetaRef.current,
@@ -340,30 +394,47 @@ export default function Conversation() {
           // bubble fills in token-by-token at the same time.
           const queue = createSpeechQueue(id);
           callQueueRef.current = queue;
-          void queue.started.then(onSpeaking);
+          void queue.started.then(() => { if (!signal.aborted) onSpeaking(); });
+          const cancelSpeech = () => queue.stop();
+          signal.addEventListener("abort", cancelSpeech, { once: true });
 
           let started = false;
           const onText = (txt: string) => {
+            if (signal.aborted || !mountedRef.current) return;
             if (!started) {
               started = true;
               setMessages((m) => [...m, { role: "assistant", content: txt }]);
             } else {
               setLastAssistant(txt);
             }
-            queue.feed(txt);
+            if (!mutedRef.current) queue.feed(txt);
           };
           try {
-            const full = await streamChat(id, next, onText, undefined, custom);
+            const full = await streamChat(id, next, onText, signal, custom);
+            signal.throwIfAborted();
             if (started) setLastAssistant(full);
             else setMessages((m) => [...m, { role: "assistant", content: full }]);
-            await queue.end(full);
-          } catch {
+            await queue.end(mutedRef.current ? "" : full);
+          } catch (err) {
+            queue.stop();
+            if (signal.aborted || started) throw err;
             // Streaming unavailable -> plain endpoint; speak the whole reply.
-            const r = await postChat(id, next, undefined, custom);
+            const r = await postChat(id, next, signal, custom);
+            signal.throwIfAborted();
             if (started) setLastAssistant(r.reply);
             else setMessages((m) => [...m, { role: "assistant", content: r.reply }]);
-            await queue.end(r.reply);
+            const fallback = createSpeechQueue(id);
+            callQueueRef.current = fallback;
+            const cancelFallback = () => fallback.stop();
+            signal.addEventListener("abort", cancelFallback, { once: true });
+            void fallback.started.then(() => { if (!signal.aborted) onSpeaking(); });
+            try { await fallback.end(mutedRef.current ? "" : r.reply); }
+            finally {
+              signal.removeEventListener("abort", cancelFallback);
+              if (callQueueRef.current === fallback) callQueueRef.current = null;
+            }
           } finally {
+            signal.removeEventListener("abort", cancelSpeech);
             if (callQueueRef.current === queue) callQueueRef.current = null;
           }
         },
@@ -373,15 +444,20 @@ export default function Conversation() {
           callQueueRef.current = null;
           speakingRef.current?.stop();
         },
-        onError: (msg) => setError(msg),
+        onError: (msg) => { if (mountedRef.current) setError(msg); },
       });
+      if (!mountedRef.current || attempt !== callAttemptRef.current) { call.end(); return; }
+      callRef.current = call;
       setCallPhase("listening");
     } catch {
-      setError("无法开始通话，请允许麦克风权限，或用打字 / 按住说话。");
+      if (mountedRef.current) setError("无法开始通话，请允许麦克风权限，或用打字 / 点击录音。");
+    } finally {
+      if (mountedRef.current) setCallStarting(false);
     }
   }
 
   function endCall() {
+    callAttemptRef.current += 1;
     callRef.current?.end();
     callRef.current = null;
     setCallPhase(null);
@@ -430,10 +506,10 @@ export default function Conversation() {
             ? "Pip 正在想怎么回答…"
             : booting
               ? "正在连接 Pip…"
-              : "和 Pip 聊聊吧 — 打字、按住说话，或开始通话";
+              : "准备好了就开口，Pip 会陪你聊下去";
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-screen flex-col" style={{ height: "100dvh" }}>
       <PlayfulBackground accent={t.base} />
       {ScenarioIcon && (
         <ScenarioIcon
@@ -454,12 +530,19 @@ export default function Conversation() {
           </Link>
           <button
             type="button"
-            onClick={() => setMuted((m) => !m)}
+            onClick={() => {
+              if (!muted) { speakingRef.current?.stop(); callQueueRef.current?.stop(); }
+              mutedRef.current = !muted;
+              setMuted(!muted);
+            }}
             aria-label={muted ? "开启朗读" : "关闭朗读"}
             title={muted ? "开启朗读" : "关闭朗读"}
             className="grid h-10 w-10 place-items-center rounded-full border border-border bg-surface text-ink shadow-soft transition-transform hover:-translate-y-0.5"
           >
             {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+          </button>
+          <button type="button" onClick={() => setShowVoiceSettings((value) => !value)} aria-label="语音设置" aria-expanded={showVoiceSettings} disabled={inCall || callStarting} className="grid h-10 w-10 place-items-center rounded-full border border-border bg-surface text-ink shadow-soft disabled:opacity-40">
+            <Settings2 className="h-4 w-4" />
           </button>
         </div>
         <div className="flex min-w-0 items-center gap-2">
@@ -487,7 +570,7 @@ export default function Conversation() {
 
       <div className="mx-auto mt-3 flex w-full max-w-2xl shrink-0 flex-col items-center px-5 text-center">
         <div className="relative">
-          <Buddy mood={stageMood} size={callPhase ? 124 : 112} color={t.base} />
+          <Buddy mood={stageMood} size={callPhase ? 100 : 88} color={t.base} />
           {ScenarioIcon && (
             <span
               className="absolute bottom-1 right-1 grid h-9 w-9 place-items-center rounded-full border-2 border-bg shadow-soft"
@@ -504,6 +587,17 @@ export default function Conversation() {
         >
           {stageStatus}
         </p>
+        {showVoiceSettings && (
+          <div className="mt-3 w-full rounded-2xl border border-border bg-surface p-3 text-left shadow-soft">
+            <label htmlFor="conversation-voice" className="mb-1 block text-sm font-bold">语音播放方式</label>
+            <select id="conversation-voice" value={voiceEngine} onChange={(event) => setVoiceEngine(event.target.value as VoiceEngine)} className="w-full rounded-xl border border-border bg-surface-2 p-2 text-sm">
+              <option value="iflytek">云端语音 · 推荐</option>
+              <option value="browser">设备语音 · 音质因设备而异</option>
+              <option value="local">本地模型 · 实验功能，首次需下载</option>
+            </select>
+            <Link to="/me" className="mt-2 inline-block text-xs font-semibold underline">调整音色与语速</Link>
+          </div>
+        )}
         {inCall && liveCaption && (
           <p
             aria-live="polite"
@@ -532,7 +626,7 @@ export default function Conversation() {
                       previousPartnerMessage(messages, i) ?? "",
                     custom: isCustom ? customScene ?? undefined : undefined,
                     meta: turnMeta[i] ?? { source: "typed" },
-                    onUseSuggestion: (suggestion) => setInput(suggestion),
+                    onUseSuggestion: (suggestion) => { setInput(suggestion); setInputMode("text"); },
                   }
                 : undefined
             }
@@ -540,17 +634,18 @@ export default function Conversation() {
         ))}
         {((loading && !streaming) || callPhase === "thinking") && <TypingBubble theme={t} />}
         {error && (
-          <p
+          <div
             role="alert"
             className="mx-auto w-fit rounded-full bg-[#ffe8e3] px-4 py-2 text-center text-xs font-semibold text-[#e6503d]"
           >
             {error}
-          </p>
+            {canRetry && !inCall && <button type="button" onClick={() => void send(undefined, undefined, true)} disabled={loading} className="ml-2 font-bold underline">重试回复</button>}
+          </div>
         )}
         <div ref={endRef} />
       </main>
 
-      <footer className="mx-auto w-full max-w-2xl shrink-0 px-5 pb-6 pt-2">
+      <footer className="mx-auto w-full max-w-2xl shrink-0 px-5 pt-2" style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
         {inCall ? (
           <div className="flex flex-col items-center gap-2">
             <button
@@ -571,6 +666,14 @@ export default function Conversation() {
           </div>
         ) : (
           <>
+            <div role="group" aria-label="练习输入方式" className="mb-3 flex justify-center gap-2">
+              {(["voice", "text"] as const).map((mode) => <button key={mode} type="button" aria-pressed={inputMode === mode} onClick={() => setInputMode(mode)} disabled={recording || transcribing || callStarting} className={cn("min-h-10 rounded-full px-5 text-sm font-bold", inputMode === mode ? "bg-surface text-ink shadow-soft" : "text-muted")}>{mode === "voice" ? "语音练习" : "文字练习"}</button>)}
+            </div>
+            {inputMode === "voice" && (
+              <button type="button" onClick={startCall} disabled={booting || loading || recording || transcribing || callStarting} className="mb-3 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 font-display text-lg font-bold text-[#271a16] shadow-pop disabled:opacity-50" style={{ background: t.base }}>
+                {callStarting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Phone className="h-5 w-5" />}{callStarting ? "正在连接麦克风…" : "开始语音对话"}
+              </button>
+            )}
             {hints && (
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <span className="text-[0.66rem] font-bold uppercase tracking-wide text-muted">提示</span>
@@ -580,6 +683,7 @@ export default function Conversation() {
                     type="button"
                     onClick={() => {
                       setInput(h);
+                      setInputMode("text");
                       setHints(null);
                     }}
                     className="rounded-full border border-border bg-surface-2 px-3 py-1.5 text-xs font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
@@ -601,11 +705,11 @@ export default function Conversation() {
               <button
                 type="button"
                 onClick={handleMic}
-                disabled={transcribing || booting}
+                disabled={transcribing || booting || loading || callStarting}
                 aria-label={recording ? "结束录音" : "开始录音"}
                 title={recording ? "结束录音" : "按一下说，再按结束"}
                 className={cn(
-                  "grid h-11 w-11 shrink-0 place-items-center rounded-full text-white shadow-soft transition-transform active:scale-95 disabled:opacity-50",
+                  "grid h-11 w-11 shrink-0 place-items-center rounded-full text-[#271a16] shadow-soft transition-transform active:scale-95 disabled:opacity-50",
                   recording && "animate-pulse",
                 )}
                 style={{ background: recording ? "var(--danger)" : t.base }}
@@ -618,7 +722,8 @@ export default function Conversation() {
                   <Mic className="h-5 w-5" />
                 )}
               </button>
-              <input
+              {inputMode === "text" ? <input
+                aria-label="英文回复"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -635,28 +740,20 @@ export default function Conversation() {
                 }
                 disabled={booting || recording || transcribing}
                 className="min-w-0 flex-1 bg-transparent px-2 text-ink outline-none placeholder:text-muted"
-              />
-              <button
+              /> : <p className="min-w-0 flex-1 px-2 text-sm text-muted">{recording ? "正在录音，再点一次结束" : transcribing ? "正在识别…" : "也可点击麦克风录一句"}</p>}
+              {inputMode === "text" && <button
                 type="button"
                 onClick={() => send()}
                 disabled={loading || booting || recording || transcribing || !input.trim()}
                 aria-label="发送"
-                className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-white shadow-soft transition-transform active:scale-95 disabled:opacity-40"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-[#271a16] shadow-soft transition-transform active:scale-95 disabled:opacity-40"
                 style={{ background: t.base }}
               >
                 <Send className="h-5 w-5" strokeWidth={2.4} />
-              </button>
+              </button>}
             </div>
             <div className="mt-2 flex items-center justify-center gap-3">
-              <button
-                type="button"
-                onClick={startCall}
-                disabled={booting}
-                className="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-bold text-white shadow-soft transition-transform hover:-translate-y-0.5 disabled:opacity-50"
-                style={{ background: t.base }}
-              >
-                <Phone className="h-3.5 w-3.5" /> 通话模式
-              </button>
+              <p className="text-xs text-muted">{inputMode === "voice" ? "通话自动接话 · 点击录音，再点结束" : "按 Enter 发送 · 点英文可查词"}</p>
               <button
                 type="button"
                 onClick={getHints}

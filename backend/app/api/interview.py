@@ -1,4 +1,4 @@
-"""Timed Q&A (TOEFL-style independent speaking) — questions + scoring.
+"""Timed Take an Interview practice — questions and transcript-based feedback.
 
 The client runs a 45s-per-question drill, transcribes each spoken answer via
 ASR, then sends the transcripts here for an ETS-style rating and sample answers.
@@ -22,23 +22,23 @@ from app.services.deepseek import DeepSeekClient, DeepSeekError
 
 router = APIRouter(tags=["interview"])
 
-_SCENARIO_SYSTEM = """You are a TOEFL iBT speaking coach. Generate ONE fresh TOEFL-style INDEPENDENT speaking question grounded in a realistic, everyday scenario (study, work, travel, technology, relationships, daily life).
+_SCENARIO_SYSTEM = """You are a TOEFL iBT speaking coach helping a learner prepare for Take an Interview. Generate ONE fresh interview question grounded in a realistic context (study, work, travel, technology, relationships, daily life).
 
-It must match the real TOEFL independent format (state and defend an opinion / preference / agree-or-disagree), be one or two clear sentences, and be answerable in about 45 seconds.
+Ask about a personal experience, a reason, or an opinion the learner can develop with details. Use one or two clear, conversational sentences answerable in about 45 seconds.
 
 Return ONLY JSON: {"questions": ["..."]}."""
 
-_SCORE_SYSTEM = """You are an experienced TOEFL iBT speaking rater. You receive TOEFL-style independent speaking questions and a test-taker's spoken answer (auto-transcribed from speech, so ignore minor transcription noise and missing punctuation).
+_SCORE_SYSTEM = """You are an English speaking coach providing practice feedback for Take an Interview. You receive interview questions and the learner's answer transcript, so ignore minor transcription noise and missing punctuation.
 
-Rate each answer like an ETS independent speaking task, judging delivery, language use, and topic development.
+Assess relevance, language use, coherence, and development of ideas. You have no audio: do not claim to assess pronunciation, actual speaking speed, pauses, or intonation. These are practice reference scores, not official ETS scores.
 
 For EACH item return an object with:
 - "question": echo the question.
 - "answer": echo the transcript (may be empty).
-- "score": integer 0-6 (TOEFL-style band for this single answer; 6 = excellent, 0 = no/irrelevant answer).
+- "score": integer 0-6 (practice reference score; 6 = excellent, 0 = no/irrelevant answer).
 - "level": one of "Good", "Fair", "Limited", "Weak".
-- "feedback": 2-3 sentences in Chinese covering delivery / language / development, ending with one concrete, actionable tip.
-- "sample_answer": a natural, high-scoring (band 6) sample answer in English, about 100-130 words (~45 seconds spoken), directly answering the question.
+- "feedback": 2-3 sentences in Chinese covering language, coherence, and idea development, ending with one concrete, actionable tip.
+- "sample_answer": a natural, well-developed sample answer in English, about 70-100 words, directly answering the interview question.
 
 Return ONLY JSON: {"overall": <number 0-6, the average of the scores>, "results": [ ... in the same order as the input ]}."""
 

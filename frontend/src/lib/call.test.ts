@@ -64,6 +64,11 @@ function pushFrame(value: number): void {
 describe("voice call ASR engine boundaries", () => {
   beforeEach(() => {
     mocks.openAsrStream.mockReset();
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+    const track = { onended: null, stop: vi.fn() };
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: {
+      getUserMedia: vi.fn(async () => ({ getAudioTracks: () => [track], getTracks: () => [track] })),
+    } });
   });
 
   afterEach(() => {
@@ -105,6 +110,7 @@ describe("voice call ASR engine boundaries", () => {
       expect(transcribe).toHaveBeenCalledWith(
         expect.any(ArrayBuffer),
         "local",
+        expect.any(AbortSignal),
       ),
     );
     expect(mocks.openAsrStream).not.toHaveBeenCalled();
@@ -113,6 +119,7 @@ describe("voice call ASR engine boundaries", () => {
         "hello locally",
         expect.any(ArrayBuffer),
         expect.any(Function),
+        expect.any(AbortSignal),
       ),
     );
     call.end();
@@ -168,8 +175,68 @@ describe("voice call ASR engine boundaries", () => {
       expect(transcribe).toHaveBeenCalledWith(
         expect.any(ArrayBuffer),
         "local",
+        expect.any(AbortSignal),
       ),
     );
     call.end();
+  });
+
+  it("transcribes the short utterance that interrupts Pip, including its first frame", async () => {
+    let finishFirst: () => void = () => {};
+    const transcribe = vi.fn(async (_pcm: ArrayBuffer, _engine: string, _signal: AbortSignal) => "user turn");
+    const reply = vi.fn(async (_text, _pcm, onSpeaking) => {
+      onSpeaking();
+      if (reply.mock.calls.length === 1) await new Promise<void>((resolve) => { finishFirst = resolve; });
+    });
+    const interrupt = vi.fn();
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => true, transcribe, reply, interrupt, onError: vi.fn() });
+    try {
+      pushFrame(0.1); pushFrame(0.1);
+      for (let i = 0; i < 4; i++) pushFrame(0);
+      await vi.waitFor(() => expect(reply).toHaveBeenCalledOnce());
+      pushFrame(0.2); pushFrame(0.2); pushFrame(0.2);
+      expect(interrupt).toHaveBeenCalledOnce();
+      for (let i = 0; i < 4; i++) pushFrame(0);
+      await vi.waitFor(() => expect(transcribe).toHaveBeenCalledTimes(2));
+      const pcm = transcribe.mock.calls[1][0] as ArrayBuffer;
+      expect(new DataView(pcm).getInt16(0, true)).toBeGreaterThan(5000);
+    } finally { call.end(); finishFirst(); }
+  });
+
+  it("does not let the interrupted turn reopen the mic during the next transcription", async () => {
+    let finishFirst: () => void = () => {};
+    let finishSecond: (text: string) => void = () => {};
+    const onPhase = vi.fn();
+    const transcribe = vi.fn().mockResolvedValueOnce("first").mockImplementationOnce(() => new Promise<string>((resolve) => { finishSecond = resolve; }));
+    const reply = vi.fn(async (_text, _pcm, onSpeaking) => {
+      onSpeaking();
+      await new Promise<void>((resolve) => { finishFirst = resolve; });
+    });
+    const call = await startVoiceCall({ onPhase, preferLocalAsr: () => true, transcribe, reply, interrupt: vi.fn(), onError: vi.fn() });
+    try {
+      pushFrame(0.1); pushFrame(0.1);
+      for (let i = 0; i < 4; i++) pushFrame(0);
+      await vi.waitFor(() => expect(reply).toHaveBeenCalledOnce());
+      for (let i = 0; i < 5; i++) pushFrame(0.2);
+      for (let i = 0; i < 4; i++) pushFrame(0);
+      await vi.waitFor(() => expect(transcribe).toHaveBeenCalledTimes(2));
+      finishFirst();
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+      expect(onPhase.mock.calls.at(-1)?.[0]).toBe("thinking");
+    } finally { call.end(); finishFirst(); finishSecond(""); }
+  });
+
+  it("releases a microphone which finishes reconnecting after hangup", async () => {
+    const first = { onended: null as (() => void) | null, stop: vi.fn() };
+    const late = { onended: null, stop: vi.fn() };
+    let complete: (stream: unknown) => void = () => {};
+    const getUserMedia = vi.fn().mockResolvedValueOnce({ getAudioTracks: () => [first], getTracks: () => [first] }).mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }));
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => true, transcribe: vi.fn(), reply: vi.fn(), onError: vi.fn() });
+    first.onended?.();
+    await vi.waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(2));
+    call.end();
+    complete({ getAudioTracks: () => [late], getTracks: () => [late] });
+    await vi.waitFor(() => expect(late.stop).toHaveBeenCalledOnce());
   });
 });
