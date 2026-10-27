@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { DictionaryProvider } from "./components/dictionary/DictionaryProvider";
 import { Onboarding } from "./components/Onboarding";
 import { AppHeader } from "./components/AppHeader";
+import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 
 // Route-level code splitting: each page ships as its own chunk and loads on
 // navigation, so the initial bundle (Home) stays small. Heavy deps that only a
@@ -28,6 +29,7 @@ export default function App() {
     <DictionaryProvider>
       <div className={`app-route route-${section}`}>
         {!focused && <AppHeader />}
+        <RouteErrorBoundary key={location.pathname}>
         <Suspense
           fallback={
             <div role="status" className="route-loading">
@@ -53,6 +55,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
+        </RouteErrorBoundary>
         <Onboarding />
       </div>
     </DictionaryProvider>
