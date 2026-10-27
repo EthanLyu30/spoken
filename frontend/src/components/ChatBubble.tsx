@@ -26,16 +26,16 @@ export function ChatBubble({
   const isPip = role === "assistant";
 
   return (
-    <div className={cn("flex", isPip ? "justify-start" : "justify-end")}>
+    <div className={cn("chat-turn flex", isPip ? "pip-turn justify-start" : "user-turn justify-end")}>
       <div
         className={cn(
-          "max-w-[88%] rounded-3xl px-4 py-3 shadow-soft sm:max-w-[80%]",
+          "chat-message max-w-[88%] rounded-3xl px-4 py-3 shadow-soft sm:max-w-[80%]",
           isPip ? "rounded-tl-md" : "rounded-tr-md",
         )}
         style={
           isPip
-            ? { background: theme.soft, color: "#43302b" }
-            : { background: "var(--coral)", color: "var(--coral-fg)" }
+            ? { background: theme.soft, color: "var(--ink)" }
+            : { background: "#f7eee2", color: "var(--ink)" }
         }
       >
         <p className="text-[0.66rem] font-bold uppercase tracking-wide opacity-70">

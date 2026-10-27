@@ -39,6 +39,7 @@ import {
 import { Buddy, type BuddyMood } from "../components/Buddy";
 import { ChatBubble } from "../components/ChatBubble";
 import { PlayfulBackground } from "../components/PlayfulBackground";
+import { Wordmark } from "../components/Wordmark";
 import { cn } from "../lib/utils";
 
 const localOpeners: Record<string, string> = {
@@ -56,7 +57,7 @@ export default function Conversation() {
   const customScene = useCustomScene((s) => s.scene);
   const scenario = scenarioId && !isCustom ? getScenario(scenarioId) : undefined;
   const id = isCustom ? "custom" : scenario?.id ?? "";
-  const t = themeFor(id);
+  const t = { ...themeFor(id), base: "#ff6251", soft: "#fcf4eb", deep: "#dc493b" };
   const ScenarioIcon = scenario ? scenarioIcons[scenario.icon] : isCustom ? Sparkles : null;
   const fallbackOpener =
     (isCustom ? customScene?.opening_line : id ? localOpeners[id] : "") ||
@@ -509,7 +510,7 @@ export default function Conversation() {
               : "准备好了就开口，Pip 会陪你聊下去";
 
   return (
-    <div className="flex h-screen flex-col" style={{ height: "100dvh" }}>
+    <div className="conversation-page flex h-screen flex-col" style={{ height: "100dvh" }}>
       <PlayfulBackground accent={t.base} />
       {ScenarioIcon && (
         <ScenarioIcon
@@ -520,10 +521,11 @@ export default function Conversation() {
         />
       )}
 
-      <header className="mx-auto flex w-full max-w-2xl shrink-0 items-center justify-between gap-3 px-5 pt-6">
+      <header className="focus-header">
+        <Wordmark />
         <div className="flex shrink-0 items-center gap-2">
           <Link
-            to="/"
+            to="/scenes"
             className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
           >
             <ArrowLeft className="h-4 w-4" /> 返回
@@ -568,12 +570,13 @@ export default function Conversation() {
         </div>
       </header>
 
-      <div className="mx-auto mt-3 flex w-full max-w-2xl shrink-0 flex-col items-center px-5 text-center">
+      <div className="conversation-workspace"><div className="conversation-chat">
+      <div className="conversation-status">
         <div className="relative">
-          <Buddy mood={stageMood} size={callPhase ? 100 : 88} color={t.base} />
+          <Buddy mood={stageMood} size={34} color={t.base} />
           {ScenarioIcon && (
             <span
-              className="absolute bottom-1 right-1 grid h-9 w-9 place-items-center rounded-full border-2 border-bg shadow-soft"
+              className="hidden absolute bottom-1 right-1 grid h-9 w-9 place-items-center rounded-full border-2 border-bg shadow-soft"
               style={{ background: t.soft, color: t.deep }}
             >
               <ScenarioIcon className="h-5 w-5" strokeWidth={2.4} />
@@ -595,7 +598,7 @@ export default function Conversation() {
               <option value="browser">设备语音 · 音质因设备而异</option>
               <option value="local">本地模型 · 实验功能，首次需下载</option>
             </select>
-            <Link to="/me" className="mt-2 inline-block text-xs font-semibold underline">调整音色与语速</Link>
+            <Link to="/me?tab=voice" className="mt-2 inline-block text-xs font-semibold underline">调整音色与语速</Link>
           </div>
         )}
         {inCall && liveCaption && (
@@ -609,7 +612,7 @@ export default function Conversation() {
         )}
       </div>
 
-      <main className="mx-auto w-full min-h-0 max-w-2xl flex-1 space-y-3 overflow-y-auto px-5 py-4">
+      <main className="practice-log min-h-0 flex-1 space-y-5 overflow-y-auto">
         {messages.map((m, i) => (
           <ChatBubble
             key={i}
@@ -645,7 +648,7 @@ export default function Conversation() {
         <div ref={endRef} />
       </main>
 
-      <footer className="mx-auto w-full max-w-2xl shrink-0 px-5 pt-2" style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
+      <footer className="practice-composer w-full shrink-0 pt-2" style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
         {inCall ? (
           <div className="flex flex-col items-center gap-2">
             <button
@@ -771,6 +774,7 @@ export default function Conversation() {
           </>
         )}
       </footer>
+      </div><aside className="practice-context"><p className="eyebrow">YOUR SCENE</p><h2>{ScenarioIcon && <ScenarioIcon />}{scenario?.titleZh || customScene?.title_zh || "自由对话"}</h2><p>{scenario?.subtitle || customScene?.partner_role || "和 Pip 练一段真实对话。"}</p><section><h3>这次试着做到</h3><p className="scene-goal">{scenario?.goal || customScene?.goal || "用自己的方式展开对话，试着把想法说完整。"}</p></section><section><p className="eyebrow">A LITTLE HELP</p><p>遇到卡壳的时候，可以先看一句提示，再用自己的方式接着聊。</p><button type="button" className="ui-secondary" disabled={booting || hintLoading || inCall} onClick={getHints}><Lightbulb />给我一句提示</button></section><p>点击英文单词可以查释义、听发音并收藏。</p></aside></div>
     </div>
   );
 }
