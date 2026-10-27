@@ -132,9 +132,10 @@ export default function Progress() {
       <main className="mx-auto w-full max-w-3xl px-5 py-6">
         <div className="mb-6">
           <p className="eyebrow">Your progress · 我的进度</p>
-          <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">能力趋势</h1>
+          <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">每一次开口，都算进步。</h1>
         </div>
 
+        {status === "ready" && <div className="progress-metrics"><div><strong>{sessions.length}</strong><span>累计对话</span></div><div><strong>{new Set(sessions.map((s) => s.scenario_id)).size}</strong><span>体验场景</span></div><div><strong>{sessions.length ? Math.round(sessions.reduce((sum, s) => sum + s.overall, 0) / sessions.length) : "—"}</strong><span>平均得分</span></div><Link to="/scenes" className="ui-secondary">开始新的练习</Link></div>}
         {status === "loading" && (
           <section className="card grid place-items-center p-10 text-center">
             <Buddy mood="idle" size={110} />

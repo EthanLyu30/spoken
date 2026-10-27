@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, Mic, RotateCcw, Send, Timer, Volume2 } from "lucide-react";
+import { Loader2, Mic, Send, Timer } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
@@ -14,20 +14,12 @@ import {
 } from "../lib/api";
 import { transcribeSpeech } from "../lib/transcribe";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
-import { speakText } from "../lib/speech";
+import { InterviewResults } from "../components/InterviewResults";
 
 const ANSWER_SECONDS = 45;
 
 type Phase = "intro" | "quiz" | "scoring" | "results" | "error";
 type QPhase = "ready" | "recording" | "transcribing";
-
-const MAX_BAND = 6;
-
-function bandColor(score: number): string {
-  if (score >= 5) return "#2fa274";
-  if (score >= 3) return "#e07f1c";
-  return "#e6503d";
-}
 
 export default function Interview() {
   const [phase, setPhase] = useState<Phase>("intro");
@@ -146,38 +138,16 @@ export default function Interview() {
     <div className="min-h-screen pb-24">
       <PlayfulBackground />
 
-      <header className="mx-auto w-full max-w-2xl px-5 pt-6">
-        <Link
-          to="/"
-          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
-        >
-          <ArrowLeft className="h-4 w-4" /> 回首页
-        </Link>
-      </header>
-
-      <main className="mx-auto w-full max-w-2xl px-5 py-6">
+      <main className="mx-auto w-full max-w-2xl px-5 py-6 interview-page">
         {phase === "intro" && (
-          <section className="card p-6 text-center md:p-8">
-            <Buddy mood="happy" size={120} className="mx-auto" />
-            <p className="eyebrow mt-2">Timed Q&A · 限时问答</p>
-            <h1 className="mt-1 font-display text-2xl font-semibold text-ink">Take an Interview · 口语访谈</h1>
-            <p className="mx-auto mt-2 max-w-md text-sm text-muted">
-              围绕经历、理由和观点练习即兴回答，共 4 题、每题 45 秒。完成后查看表达建议和参考答案，练习自然、有条理地回应访谈问题。
-            </p>
-            <div className="mt-5">
-              <Button size="lg" onClick={begin}>
-                开始测试
-              </Button>
-            </div>
-            <p className="mt-3 text-xs text-muted">需要麦克风权限 · 建议在安静环境作答</p>
-          </section>
+          <section className="interview-intro"><div><p className="eyebrow">TAKE AN INTERVIEW</p><h1>每个问题，都是一次<br />自然表达的机会。</h1><p className="intro-description">围绕经历、理由和观点，练习自然、有条理地回应访谈问题。</p><div className="interview-facts"><span><strong>4</strong>道问题</span><span><strong>45</strong>秒 / 题</span><span><strong>6</strong>分制参考</span></div><Button size="lg" onClick={begin}>开始访谈练习</Button><p className="interview-note">需要麦克风权限 · 建议在安静环境作答</p></div><aside><Buddy mood="happy" size={170} /><h2>不急着完美，先把想法说出来。</h2><ol><li>看到题目，组织一下思路</li><li>点击开始回答，45 秒内自然表达</li><li>完成四题，回看建议和参考答案</li></ol><p>基于转写内容提供练习反馈，不包含发音评测。</p></aside></section>
         )}
 
         {phase === "scoring" && (
           <section className="card grid place-items-center p-10 text-center">
             <Buddy mood="talking" size={120} />
             <h1 className="mt-3 font-display text-xl font-semibold text-ink">
-              {result === null && questions.length === 0 ? "正在出题…" : "正在按托福标准评分…"}
+              {result === null && questions.length === 0 ? "正在出题…" : "正在整理访谈反馈…"}
             </h1>
             <p className="mt-1 text-sm text-muted">稍等一下，马上好</p>
           </section>
@@ -199,7 +169,7 @@ export default function Interview() {
         )}
 
         {phase === "quiz" && (
-          <section className="card p-6 md:p-8">
+          <div className="interview-quiz-grid"><section className="interview-question card p-6 md:p-8">
             <div className="mb-4 flex items-center justify-between">
               <span className="rounded-full bg-surface-2 px-3 py-1 text-xs font-bold text-coral-deep">
                 第 {idx + 1} / {questions.length} 题
@@ -250,76 +220,10 @@ export default function Interview() {
                 </>
               )}
             </div>
-          </section>
+          </section><aside className="interview-trail"><h2>本次访谈</h2>{questions.map((q, i) => <div key={q} className={i === idx ? "active" : ""}><span>第 {i + 1} 题 {i < answers.length ? "· 已完成" : i === idx ? "· 正在回答" : "· 待作答"}</span><p>{q}</p></div>)}<p>想好思路后再开始，准备时间不计入作答。</p></aside></div>
         )}
 
-        {phase === "results" && result && (
-          <>
-            <section className="card flex items-center gap-5 p-6">
-              <Ring pct={(result.overall / MAX_BAND) * 100} size={104} stroke={11} color={bandColor(result.overall)}>
-                <div className="text-center">
-                  <div className="font-display text-2xl font-bold tabnum text-ink">{result.overall}</div>
-                  <div className="text-[0.58rem] font-bold uppercase text-muted">/ {MAX_BAND}</div>
-                </div>
-              </Ring>
-              <div>
-                <p className="eyebrow">Your score · 总评</p>
-                <h1 className="mt-1 font-display text-2xl font-semibold text-ink">托福口语预估分</h1>
-                <p className="mt-1 text-sm text-muted">练习参考分 / {MAX_BAND} · 基于转写内容评估语言与内容组织</p>
-              </div>
-            </section>
-
-            <div className="mt-5 space-y-5">
-              {result.results.map((r, i) => (
-                <section key={i} className="card p-5 md:p-6">
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <span className="text-xs font-bold text-muted">第 {i + 1} 题</span>
-                    <span className="font-display text-lg font-bold tabnum" style={{ color: bandColor(r.score) }}>
-                      {r.score}
-                      <span className="ml-1 text-xs font-bold text-muted">/{MAX_BAND} · {r.level}</span>
-                    </span>
-                  </div>
-                  <h3 className="font-display font-semibold leading-snug text-ink">{r.question}</h3>
-
-                  <details className="mt-3 rounded-2xl bg-surface-2 p-3">
-                    <summary className="cursor-pointer text-sm font-bold text-ink">你的回答</summary>
-                    <p className="mt-2 text-sm text-muted">{r.answer || "（没有录到回答）"}</p>
-                  </details>
-
-                  <p className="mt-3 text-sm leading-relaxed text-ink">
-                    <span className="font-bold text-coral-deep">点评：</span>
-                    {r.feedback}
-                  </p>
-
-                  <div className="mt-3 rounded-2xl border border-border bg-surface p-4">
-                    <div className="mb-1.5 flex items-center justify-between">
-                      <span className="text-xs font-bold uppercase tracking-wide text-coral-deep">
-                        高分范例 · Sample
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => speakText(r.sample_answer)}
-                        className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1 text-xs font-semibold text-ink"
-                      >
-                        <Volume2 className="h-3.5 w-3.5" /> 朗读
-                      </button>
-                    </div>
-                    <p className="text-sm leading-relaxed text-ink">{r.sample_answer}</p>
-                  </div>
-                </section>
-              ))}
-            </div>
-
-            <div className="mt-6 flex flex-wrap justify-center gap-3">
-              <Button size="lg" onClick={restart}>
-                <RotateCcw className="h-5 w-5" /> 再测一次
-              </Button>
-              <Button size="lg" variant="ghost" onClick={() => navigate("/")}>
-                回首页
-              </Button>
-            </div>
-          </>
-        )}
+        {phase === "results" && result && <InterviewResults result={result} onRestart={restart} onExit={() => navigate("/")} />}
       </main>
 
       <BottomNav />
