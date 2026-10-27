@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Award,
   Flame,
@@ -38,6 +39,8 @@ import { tokens } from "../lib/tokens";
 import { cn } from "../lib/utils";
 
 export default function Profile() {
+  const [search] = useSearchParams();
+  const settings = search.get("tab") === "voice";
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const words = useWords((s) => s.words);
   const ensureLoaded = useWords((s) => s.ensureLoaded);
@@ -87,7 +90,7 @@ export default function Profile() {
     { icon: Sparkles, title: "百词斩", desc: "收藏 50 个词", earned: wordCount >= 50 },
     { icon: Repeat, title: "复习标兵", desc: "复习过 10 个词", earned: reviewedCount >= 10 },
     { icon: Mic, title: "发音达人", desc: "跟读得分 ≥ 90", earned: bestPron >= 90 },
-    { icon: Timer, title: "口语考官", desc: "完成 3 次限时问答", earned: interviewCount >= 3 },
+    { icon: Timer, title: "口语考官", desc: "完成 3 次Take an Interview", earned: interviewCount >= 3 },
     { icon: Trophy, title: "高分达人", desc: "单次总分 ≥ 90", earned: best >= 90 },
     { icon: Award, title: "场景探索者", desc: "体验 5 个不同场景", earned: distinct >= 5 },
     { icon: Rocket, title: "升级达人", desc: "等级达到 Lv.3", earned: level >= 3 },
@@ -99,9 +102,12 @@ export default function Profile() {
       <PlayfulBackground />
 
       <main className="mx-auto w-full max-w-3xl px-5 py-8">
-        <ProfileHero level={level} xp={xp} xpNext={xpNext} />
+        <div className="ui-page-head"><div><p className="eyebrow">MY SPOKEN</p><h1>{settings ? "让声音，适合你的节奏。" : "把进步，变成自己的习惯。"}</h1><p>{settings ? "选择合适的播放方式，找到舒服的练习节奏。" : "每次开口都算数，看看你已经走了多远。"}</p></div><Link to="/scenes" className="ui-secondary">继续练习</Link></div>
+        <div className="profile-layout"><aside><ProfileHero level={level} xp={xp} xpNext={xpNext} /><nav className="profile-tabs" aria-label="个人中心设置"><Link to="/me" className={!settings ? "active" : ""}>资料与成就</Link><Link to="/me?tab=voice" className={settings ? "active" : ""}>语音设置</Link><Link to="/me#badges">成就徽章</Link><Link to="/me#practice-history">练习记录</Link></nav></aside><div className="profile-main">
+        {settings ? <VoiceSettings /> : <>
 
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+
+        <div className="profile-stats mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat icon={<MessageSquare className="h-4 w-4" />} value={sessionCount} label="练习次数" />
           <Stat icon={<Sparkles className="h-4 w-4" />} value={wordCount} label="收藏词" />
           <Stat icon={<Flame className="h-4 w-4" />} value={streak} label="连续天数" />
@@ -130,16 +136,15 @@ export default function Profile() {
 
         <PracticeHistory records={practice} />
 
-        <VoiceSettings />
 
-        <section className="card mt-5 p-6">
+        <section id="badges" className="card mt-5 p-6">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-display text-lg font-semibold text-ink">成就徽章</h2>
             <span className="text-sm font-semibold text-muted">
               {earnedCount}/{badges.length}
             </span>
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="profile-badges grid grid-cols-2 gap-3 sm:grid-cols-4">
             {badges.map((b) => (
               <div
                 key={b.title}
@@ -176,6 +181,7 @@ export default function Profile() {
             重新查看新手引导
           </button>
         </div>
+        </>}</div></div>
       </main>
 
       <BottomNav />
@@ -223,7 +229,7 @@ function VoiceSettings() {
   }
 
   return (
-    <section className="card mt-5 p-6">
+    <section className="voice-settings card mt-5 p-6">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-display text-lg font-semibold text-ink">语音设置</h2>
         {custom && (
@@ -352,7 +358,7 @@ function StreakCard({ streak }: { streak: number }) {
         <Flame className="h-8 w-8 text-[#e07f1c]" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="font-display text-lg font-semibold text-ink">🔥 {streak} 天连击</p>
+        <p className="font-display text-lg font-semibold text-ink">{streak} 天连击</p>
         <p className="mt-0.5 text-sm text-muted">
           {streak === 0
             ? "今天开练，点燃你的第一团火苗！"
@@ -415,11 +421,11 @@ function PracticeHistory({ records }: { records: PracticeRecord[] }) {
   const intv = records.filter((r) => r.kind === "interview");
 
   return (
-    <section className="card mt-5 p-6">
+    <section id="practice-history" className="card mt-5 p-6">
       <h2 className="font-display text-lg font-semibold text-ink">练习记录</h2>
       {records.length === 0 ? (
         <p className="mt-2 text-sm text-muted">
-          还没有跟读 / 限时问答记录。去「金句」点跟读评分，或试试「限时问答」，这里就会出现你的成长曲线。
+          还没有跟读 / Take an Interview记录。去「金句」点跟读评分，或试试「Take an Interview」，这里就会出现你的成长曲线。
         </p>
       ) : (
         <div className="mt-2 space-y-4">
@@ -431,7 +437,7 @@ function PracticeHistory({ records }: { records: PracticeRecord[] }) {
           )}
           {intv.length > 0 && (
             <div>
-              <p className="text-sm font-semibold text-ink">限时问答 · /6（最近 {intv.length} 次）</p>
+              <p className="text-sm font-semibold text-ink">Take an Interview · /6（最近 {intv.length} 次）</p>
               <EChart option={lineOption(intv, 6, "#2bb3a3")} height={190} className="mt-1" />
             </div>
           )}

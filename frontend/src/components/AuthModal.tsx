@@ -41,7 +41,7 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
+    <div className="auth-overlay fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true" aria-label={mode === "login" ? "登录账号" : "注册账号"}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-sm rounded-huge border border-border bg-surface p-6 shadow-pop">
         <button
@@ -81,6 +81,7 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
 
         <form onSubmit={submit} className="space-y-3">
           <input
+            aria-label="邮箱"
             type="email"
             inputMode="email"
             autoComplete="email"
@@ -91,6 +92,7 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
             className={inputCls}
           />
           <input
+            aria-label="密码"
             type="password"
             autoComplete={mode === "login" ? "current-password" : "new-password"}
             value={password}
@@ -100,7 +102,7 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
             minLength={6}
             className={inputCls}
           />
-          {err && <p className="text-sm font-semibold text-coral-deep">{err}</p>}
+          {err && <p role="alert" className="text-sm font-semibold text-coral-deep">{err}</p>}
           <Button type="submit" disabled={busy} className="w-full">
             {mode === "login" ? (
               <>

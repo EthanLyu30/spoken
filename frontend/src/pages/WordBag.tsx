@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, BookOpen, Check, Plus, Trash2, Volume2 } from "lucide-react";
+import { BookOpen, Check, Plus, Trash2, Volume2 } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
@@ -10,10 +10,6 @@ import { useWords } from "../store/words";
 import { speakText } from "../lib/speech";
 import { getScenario } from "../data/scenarios";
 import { themeFor } from "../lib/theme";
-import { cn } from "../lib/utils";
-
-const backLink =
-  "inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5";
 
 /** A word is due for review when it isn't mastered and its due date has passed. */
 function isDue(w: Word): boolean {
@@ -71,109 +67,13 @@ export default function WordBag() {
     setReview(true);
   }
 
-  return (
-    <div className="min-h-screen pb-24">
-      <PlayfulBackground />
-
-      <header className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-5 pt-6">
-        <Link to="/" className={backLink}>
-          <ArrowLeft className="h-4 w-4" /> 回首页
-        </Link>
-        {active.length > 0 && (
-          <button
-            type="button"
-            onClick={() => (review ? setReview(false) : startReview())}
-            className="inline-flex items-center gap-1.5 rounded-full bg-coral px-4 py-2 text-sm font-bold text-primary-fg shadow-pop transition-transform active:translate-y-0.5"
-          >
-            <BookOpen className="h-4 w-4" />
-            {review ? "列表" : dueCount > 0 ? `复习 ${dueCount}` : "复习"}
-          </button>
-        )}
-      </header>
-
-      <main className="mx-auto w-full max-w-3xl px-5 py-6">
-        <div className="mb-5">
-          <p className="eyebrow">Word bag · 生词本</p>
-          <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">我的生词本</h1>
-        </div>
-
-        {showLoading && (
-          <section className="card grid place-items-center p-10 text-center">
-            <Buddy mood="idle" size={110} />
-            <p className="mt-3 text-muted">正在加载…</p>
-          </section>
-        )}
-
-        {showError && (
-          <section className="card grid place-items-center gap-3 p-10 text-center">
-            <Buddy mood="idle" size={110} />
-            <p role="alert" className="font-semibold text-ink">读取失败，请确认后端在运行。</p>
-            <Link to="/">
-              <Button variant="soft">回首页</Button>
-            </Link>
-          </section>
-        )}
-
-        {showEmpty && (
-          <section className="card grid place-items-center gap-2 p-10 text-center">
-            <Buddy mood="happy" size={140} />
-            <h2 className="mt-2 font-display text-xl font-semibold text-ink">还没有收藏</h2>
-            <p className="text-muted">在课后小结点「收藏」存表达，在「金句」收藏句子，或在下面直接加单词。</p>
-          </section>
-        )}
-
-        {hasCache && (
-          <>
-            <div className="mb-4 flex gap-2">
-              {(["word", "sentence"] as const).map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => {
-                    setTab(k);
-                    setReview(false);
-                  }}
-                  className={cn(
-                    "rounded-full px-4 py-2 text-sm font-bold transition-transform active:translate-y-0.5",
-                    tab === k
-                      ? "bg-coral text-primary-fg shadow-pop"
-                      : "border border-border bg-surface text-ink shadow-soft hover:-translate-y-0.5",
-                  )}
-                >
-                  {k === "word" ? `单词 ${wordCount}` : `句子 ${sentCount}`}
-                </button>
-              ))}
-            </div>
-
-            {tab === "word" && (
-              <div className="mb-4 flex items-center gap-2 rounded-full border border-border bg-surface p-2 shadow-soft">
-                <input
-                  value={newWord}
-                  onChange={(e) => setNewWord(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") addWord();
-                  }}
-                  placeholder="添加一个想记的单词…（自动补释义和例句）"
-                  className="min-w-0 flex-1 bg-transparent px-3 text-ink outline-none placeholder:text-muted"
-                />
-                <button
-                  type="button"
-                  onClick={addWord}
-                  disabled={!newWord.trim()}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-full bg-coral px-4 py-2 text-sm font-bold text-primary-fg shadow-soft transition-transform active:translate-y-0.5 disabled:opacity-40"
-                >
-                  <Plus className="h-4 w-4" /> 添加
-                </button>
-              </div>
-            )}
-
-            {active.length === 0 ? (
-              <p className="rounded-2xl bg-surface-2 px-4 py-6 text-center text-sm text-muted">
-                {tab === "word" ? "还没有收藏单词，上面加一个吧。" : "还没有收藏句子，去「金句」收藏几句。"}
-              </p>
-            ) : review ? (
-              <ReviewDeck deck={deck} review={reviewWordId} onDone={() => setReview(false)} />
-            ) : (
+  return <div className="min-h-screen pb-24"><PlayfulBackground /><main className="mx-auto wordbag-page"><div className="ui-page-head"><div><p className="eyebrow">MY WORD BAG</p><h1>把好表达，留给下次用。</h1><p>收藏单词、短语和句子，用间隔复习记得更牢。</p></div><button type="button" className="ui-button" onClick={() => review ? setReview(false) : startReview()} disabled={!active.some((w) => !w.mastered)}><BookOpen />{review ? "列表" : dueCount > 0 ? `复习 ${dueCount}` : "开始复习"}</button></div>
+    <div className="wordbag-layout"><div><div className="wordbag-tabs">{(["word", "sentence"] as const).map((k) => <button key={k} type="button" aria-pressed={tab === k} onClick={() => { setTab(k); setReview(false); }}>{k === "word" ? `单词与短语 ${wordCount}` : `收藏句子 ${sentCount}`}</button>)}</div>
+    {tab === "word" && <div className="wordbag-add"><input aria-label="添加单词" value={newWord} onChange={(e) => setNewWord(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addWord(); }} placeholder="添加一个想记的单词…自动补释义和例句" /><button type="button" className="ui-button" disabled={!newWord.trim()} onClick={addWord}><Plus />添加</button></div>}
+    {showLoading && <p role="status" className="wordbag-state">正在加载你的收藏…</p>}
+    {showError && <section className="wordbag-state"><p role="alert">暂时无法读取收藏，请稍后重试。</p><button type="button" className="ui-secondary" onClick={() => void useWords.getState().refresh()}>重试读取</button></section>}
+    {showEmpty && <section className="wordbag-state"><Buddy mood="happy" size={90} /><h2>还没有收藏</h2><p>添加第一个单词，或去每日金句收藏喜欢的表达。</p><Link to="/daily" className="ui-link">去看看金句</Link></section>}
+    {hasCache && (review ? <ReviewDeck deck={deck} review={reviewWordId} onDone={() => setReview(false)} /> : active.length === 0 ? <p className="wordbag-state">{tab === "word" ? "还没有单词，试着加一个吧。" : "还没有收藏句子，去每日金句找找灵感。"}</p> : (
               <ul className="space-y-3">
                 {active.map((w) => {
                   const sc = w.scenario_id ? getScenario(w.scenario_id) : undefined;
@@ -248,14 +148,9 @@ export default function WordBag() {
                   );
                 })}
               </ul>
-            )}
-          </>
-        )}
-      </main>
-
-      <BottomNav />
-    </div>
-  );
+    ))}
+    </div><aside className="wordbag-aside"><h2>今天，复习这一小组。</h2><p>当前分组有 <strong>{dueCount}</strong> 条到期表达。记得的稍后再见，忘记的很快再练。</p><button type="button" className="ui-button" disabled={!active.some((w) => !w.mastered)} onClick={startReview}>开始复习</button><section><h3>把表达真正用起来</h3><p>先想意思，再翻面看答案。下次对话时，试着用上一句。</p><Link to="/scenes" className="ui-link">去场景里试试</Link></section></aside></div>
+  </main><BottomNav /></div>;
 }
 
 /** Spaced-repetition review: flip the card, then grade 记得 / 忘了. */

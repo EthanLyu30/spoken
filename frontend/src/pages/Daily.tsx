@@ -105,16 +105,16 @@ export default function Daily() {
     <div className="min-h-screen pb-24">
       <PlayfulBackground />
 
-      <main className="mx-auto w-full max-w-3xl px-5 py-8">
+      <main className="daily-page mx-auto w-full max-w-3xl px-5 py-8">
         <div className="mb-4">
           <p className="eyebrow">Daily lines · 每日金句</p>
-          <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">今日五句</h1>
+          <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">今天，带走五句好表达。</h1>
           <p className="mt-1 text-sm text-muted">
-            选自电影 / 演讲 / 文学 / 名人，标注出处 · 每天轮换一小组，可点「🔎」去搜原句。
+            选自电影、演讲、文学和生活智慧，每天积累一点，下一次自然说出来。
           </p>
         </div>
 
-        <div className="mb-4 flex flex-wrap gap-2">
+        <div className="daily-filters mb-4 flex flex-wrap gap-2">
           {(["all", ...presentCats] as const).map((c) => (
             <button
               key={c}
@@ -132,7 +132,7 @@ export default function Daily() {
           ))}
         </div>
 
-        <div className="mb-5 flex flex-wrap items-center gap-2.5">
+        <div className="daily-actions mb-5 flex flex-wrap items-center gap-2.5">
           <button
             type="button"
             onClick={shuffle}
@@ -150,7 +150,7 @@ export default function Daily() {
             {genState === "loading" ? "生成中…" : "AI 生成新句"}
           </button>
           <span className="text-xs font-semibold text-muted">
-            {fromAi ? "✨ AI 原创 · 无出处" : "精选 · 标注出处"}
+            {fromAi ? "AI 原创 · 无出处" : "精选 · 标注出处"}
           </span>
         </div>
 
@@ -164,7 +164,7 @@ export default function Daily() {
           {lines.map((q, i) => {
             const src = sourceOf(q);
             return (
-              <li key={`${q.text}-${i}`} className="card relative overflow-hidden p-5 md:p-6">
+              <li key={`${q.text}-${i}`} className="daily-quote-row card relative overflow-hidden p-5 md:p-6">
                 <span className="absolute -right-3 -top-4 font-display text-6xl font-bold text-coral opacity-10">
                   {i + 1}
                 </span>
@@ -176,7 +176,7 @@ export default function Daily() {
                 <p className="mt-1 text-sm text-muted">{q.zh}</p>
                 {q.usage && (
                   <p className="mt-1.5 rounded-xl bg-surface-2 px-2.5 py-1.5 text-xs font-semibold text-leaf-deep">
-                    💬 场景 · {q.usage}
+                    使用场景 · {q.usage}
                   </p>
                 )}
                 <div className="mt-3 flex flex-wrap items-center gap-3">

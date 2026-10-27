@@ -31,7 +31,7 @@ export function ProfileHero({ level, xp, xpNext }: { level: number; xp: number; 
   }, []);
 
   const name = user?.display_name?.trim() ?? "";
-  const title = name ? `${name}的小屋` : "我的小屋";
+  const title = name || (user ? "我的账号" : "你好，练习者");
 
   async function onPickAvatar(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -59,7 +59,7 @@ export function ProfileHero({ level, xp, xpNext }: { level: number; xp: number; 
   }
 
   return (
-    <section className="card flex flex-col items-center gap-3 p-6 text-center">
+    <section className="profile-identity card flex flex-col items-center gap-3 p-6 text-center">
       <div className="relative">
         {user ? (
           <button

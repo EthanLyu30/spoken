@@ -30,8 +30,8 @@ const SLIDES: Slide[] = [
   {
     mood: "listening",
     icon: Timer,
-    title: "限时问答 + 发音评测",
-    body: "仿新托福口语独立题，45 秒作答、按标准打分给范例；跟读还能拿到逐词、逐音素的发音分。",
+    title: "Take an Interview 与跟读",
+    body: "Take an Interview 共 4 题、每题 45 秒，练习经历描述与观点表达；完成后回看转写内容、表达建议和范例。单独跟读还能查看逐词、逐音素的发音反馈。",
     tint: "#e2f6ee",
   },
   {
@@ -59,16 +59,11 @@ export function Onboarding() {
 
   return (
     <div
-      className="fixed inset-0 z-[60] grid place-items-center p-5 backdrop-blur-sm"
+      role="dialog" aria-modal="true" aria-label="认识 Spoken" className="onboarding-overlay fixed inset-0 z-[60] grid place-items-center p-5 backdrop-blur-sm"
       style={{ background: "rgba(67,48,43,0.45)" }}
     >
       <div className="card w-full max-w-md p-7 text-center shadow-pop">
         <div className="relative mx-auto grid place-items-center">
-          <span
-            aria-hidden
-            className="absolute h-28 w-28 rounded-full"
-            style={{ background: `radial-gradient(circle, ${slide.tint}, transparent 70%)` }}
-          />
           <Buddy mood={slide.mood} size={132} />
         </div>
         <span
@@ -102,7 +97,7 @@ export function Onboarding() {
             跳过
           </button>
           {last ? (
-            <Button onClick={finish}>开始练习 🎉</Button>
+            <Button onClick={finish}>开始练习</Button>
           ) : (
             <Button onClick={() => setI((x) => x + 1)}>
               下一步 <ArrowRight className="h-4 w-4" />
