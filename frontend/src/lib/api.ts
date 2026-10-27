@@ -442,14 +442,14 @@ export interface InterviewScore {
   results: InterviewResult[];
 }
 
-/** TOEFL-style independent speaking questions for the timed drill. */
+/** Take an Interview questions for the timed four-question drill. */
 export function getInterviewQuestions(n = 4, signal?: AbortSignal): Promise<string[]> {
   return request<{ questions: string[] }>(`/api/interview/questions?n=${n}`, { signal }).then(
     (r) => r.questions,
   );
 }
 
-/** Rate the spoken answers (ETS-style) and return feedback + sample answers. */
+/** Evaluate transcript language and organization; return practice feedback and samples. */
 export function scoreInterview(
   items: { question: string; answer: string }[],
   signal?: AbortSignal,

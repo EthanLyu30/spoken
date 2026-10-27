@@ -12,7 +12,17 @@ import { fileToAvatarDataUrl } from "../lib/image";
  * - logged in: your avatar (tap to upload), an editable name shown as
  *   「{名字}的小屋」, the email, and a logout action — all in one hero.
  */
-export function ProfileHero({ level, xp, xpNext }: { level: number; xp: number; xpNext: number }) {
+export function ProfileHero({
+  level,
+  xp,
+  xpNext,
+  statsKnown = true,
+}: {
+  level: number;
+  xp: number;
+  xpNext: number;
+  statsKnown?: boolean;
+}) {
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
   const refresh = useAuth((s) => s.refresh);
@@ -85,7 +95,13 @@ export function ProfileHero({ level, xp, xpNext }: { level: number; xp: number; 
         ) : (
           <Buddy mood="happy" size={120} />
         )}
-        <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickAvatar} />
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={onPickAvatar}
+        />
       </div>
 
       <div className="w-full">
@@ -122,7 +138,9 @@ export function ProfileHero({ level, xp, xpNext }: { level: number; xp: number; 
           </div>
         ) : (
           <div className="flex items-center justify-center gap-1.5">
-            <h1 className="font-display text-2xl font-semibold text-ink">{title}</h1>
+            <h2 className="font-display text-2xl font-semibold text-ink">
+              {title}
+            </h2>
             {user && (
               <button
                 type="button"
@@ -139,7 +157,9 @@ export function ProfileHero({ level, xp, xpNext }: { level: number; xp: number; 
           </div>
         )}
 
-        <p className="mt-0.5 text-sm text-muted">Lv.{level} · 和 Pip 一起成长</p>
+        <p className="mt-0.5 text-sm text-muted">
+          {statsKnown ? `Lv.${level} · 和 Pip 一起成长` : "和 Pip 一起成长"}
+        </p>
 
         {user ? (
           <div className="mt-1 flex flex-wrap items-center justify-center gap-x-2 text-xs text-muted">
@@ -164,15 +184,17 @@ export function ProfileHero({ level, xp, xpNext }: { level: number; xp: number; 
         )}
       </div>
 
-      <div className="w-full max-w-xs">
-        <div className="mb-1 flex justify-between text-xs font-semibold text-muted">
-          <span>Lv.{level}</span>
-          <span className="tabnum">
-            {xp} / {xpNext} XP
-          </span>
+      {statsKnown && (
+        <div className="w-full max-w-xs">
+          <div className="mb-1 flex justify-between text-xs font-semibold text-muted">
+            <span>Lv.{level}</span>
+            <span className="tabnum">
+              {xp} / {xpNext} XP
+            </span>
+          </div>
+          <ProgressBar value={(xp / xpNext) * 100} color="var(--tangerine)" />
         </div>
-        <ProgressBar value={(xp / xpNext) * 100} color="var(--tangerine)" />
-      </div>
+      )}
 
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
     </section>

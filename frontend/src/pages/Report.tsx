@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Download, Lightbulb, RotateCcw, Sparkles } from "lucide-react";
+import {
+  ArrowLeft,
+  Download,
+  Lightbulb,
+  RotateCcw,
+  Sparkles,
+} from "lucide-react";
 import { Buddy } from "../components/Buddy";
-import { Ring } from "../components/ui/Ring";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { Button } from "../components/ui/Button";
 import { InteractiveEnglishText } from "../components/dictionary/InteractiveEnglishText";
@@ -25,8 +30,10 @@ export default function Report() {
   const messages = useSession((s) => s.messages);
   const isCustom = scenarioId === "custom";
   const customScene = useCustomScene((s) => s.scene);
-  const scenario = scenarioId && !isCustom ? getScenario(scenarioId) : undefined;
-  const sceneLabel = scenario?.titleZh ?? (isCustom ? customScene?.title_zh : undefined);
+  const scenario =
+    scenarioId && !isCustom ? getScenario(scenarioId) : undefined;
+  const sceneLabel =
+    scenario?.titleZh ?? (isCustom ? customScene?.title_zh : undefined);
   const hasSession = !!scenarioId && messages.some((m) => m.role === "user");
 
   const [feedback, setFeedback] = useState<FeedbackResponse | null>(null);
@@ -52,12 +59,19 @@ export default function Report() {
     const myId = ++reqId.current;
     setLoading(true);
     setError(null);
-    postFeedback(scenarioId, messages, ctrl.signal, isCustom ? customScene ?? undefined : undefined)
+    postFeedback(
+      scenarioId,
+      messages,
+      ctrl.signal,
+      isCustom ? (customScene ?? undefined) : undefined,
+    )
       .then((f) => {
         if (myId !== reqId.current) return;
         setFeedback(f);
-        if (practiceId) void persistSessionOnce(scenarioId, messages, f, practiceId)
-          .catch(() => setSaveError(true));
+        if (practiceId)
+          void persistSessionOnce(scenarioId, messages, f, practiceId).catch(
+            () => setSaveError(true),
+          );
       })
       .catch(() => {
         if (!ctrl.signal.aborted && myId === reqId.current)
@@ -74,9 +88,14 @@ export default function Report() {
   async function retrySave() {
     if (!scenarioId || !practiceId || !feedback || saving) return;
     setSaving(true);
-    try { await persistSessionOnce(scenarioId, messages, feedback, practiceId); setSaveError(false); }
-    catch { setSaveError(true); }
-    finally { setSaving(false); }
+    try {
+      await persistSessionOnce(scenarioId, messages, feedback, practiceId);
+      setSaveError(false);
+    } catch {
+      setSaveError(true);
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (!hasSession) {
@@ -85,8 +104,12 @@ export default function Report() {
         <PlayfulBackground />
         <div className="text-center">
           <Buddy mood="happy" size={150} className="mx-auto" />
-          <h1 className="mt-4 font-display text-2xl font-semibold text-ink">还没有可复盘的对话</h1>
-          <p className="mt-2 text-muted">先去和 Pip 聊一段，这里就会出现你的课后小结。</p>
+          <h1 className="mt-4 font-display text-2xl font-semibold text-ink">
+            还没有可复盘的对话
+          </h1>
+          <p className="mt-2 text-muted">
+            先去和 Pip 聊一段，这里就会出现你的课后小结。
+          </p>
           <Link to="/" className="mt-6 inline-block">
             <Button size="lg">去挑一个场景</Button>
           </Link>
@@ -104,18 +127,39 @@ export default function Report() {
           <ArrowLeft className="h-4 w-4" /> 回首页
         </Link>
         {feedback && !loading && (
-          <button type="button" onClick={() => window.print()} className={backLink}>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className={backLink}
+          >
             <Download className="h-4 w-4" /> 下载 PDF
           </button>
         )}
       </header>
 
       <main className="mx-auto w-full max-w-3xl px-5 py-6">
-        {saveError && <div role="alert" className="mb-4 rounded-2xl border border-border bg-surface p-4 text-sm text-ink">小结已生成，记录暂未保存。<button type="button" onClick={() => void retrySave()} disabled={saving} className="ml-2 font-bold underline">{saving ? "保存中…" : "重试保存"}</button></div>}
+        {saveError && (
+          <div
+            role="alert"
+            className="mb-4 rounded-2xl border border-border bg-surface p-4 text-sm text-ink"
+          >
+            小结已生成，记录暂未保存。
+            <button
+              type="button"
+              onClick={() => void retrySave()}
+              disabled={saving}
+              className="ml-2 font-bold underline"
+            >
+              {saving ? "保存中…" : "重试保存"}
+            </button>
+          </div>
+        )}
         {loading && (
           <section className="card grid place-items-center p-10 text-center">
             <Buddy mood="talking" size={120} />
-            <h1 className="mt-3 font-display text-xl font-semibold text-ink">Pip 正在帮你复盘…</h1>
+            <h1 className="mt-3 font-display text-xl font-semibold text-ink">
+              Pip 正在帮你复盘…
+            </h1>
             <p className="mt-1 text-sm text-muted">正在分析这次对话的发挥</p>
           </section>
         )}
@@ -123,9 +167,13 @@ export default function Report() {
         {error && !loading && (
           <section className="card grid place-items-center gap-4 p-10 text-center">
             <Buddy mood="idle" size={110} />
-            <p role="alert" className="font-semibold text-ink">{error}</p>
+            <p role="alert" className="font-semibold text-ink">
+              {error}
+            </p>
             <div className="flex gap-3">
-              <Button onClick={() => setAttempt((value) => value + 1)}>重试生成</Button>
+              <Button onClick={() => setAttempt((value) => value + 1)}>
+                重试生成
+              </Button>
               <Link to={`/practice/${scenarioId}`}>
                 <Button variant="soft">回到对话</Button>
               </Link>
@@ -146,28 +194,29 @@ export default function Report() {
               <div className="grid items-center gap-6 md:grid-cols-[auto_1fr_auto]">
                 <Buddy mood="cheer" size={128} className="mx-auto" />
                 <div className="text-center md:text-left">
-                  <p className="eyebrow">课后小结 · Debrief{sceneLabel ? ` · ${sceneLabel}` : ""}</p>
+                  <p className="eyebrow">
+                    课后小结 · Debrief{sceneLabel ? ` · ${sceneLabel}` : ""}
+                  </p>
                   <h1 className="mt-1 font-display text-2xl font-semibold leading-snug text-ink md:text-3xl">
                     {feedback.summary}
                   </h1>
                   <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[#fff5d8] px-3 py-1.5 text-sm font-bold text-[#cf9612]">
-                    <Sparkles className="h-4 w-4" /> +{40 + Math.round(feedback.overall)} XP
+                    <Sparkles className="h-4 w-4" /> +
+                    {40 + Math.round(feedback.overall)} XP
                   </span>
                 </div>
-                <Ring pct={feedback.overall} size={118} stroke={12} color="var(--coral)">
-                  <div className="text-center">
-                    <div className="font-display text-3xl font-bold leading-none tabnum text-ink">
-                      {feedback.overall}
-                    </div>
-                    <div className="text-[0.62rem] font-bold uppercase text-muted">总分</div>
-                  </div>
-                </Ring>
+                <div className="report-score">
+                  <strong>{feedback.overall}</strong>
+                  <span>/ 100 · 练习参考分</span>
+                </div>
               </div>
             </section>
 
             <div className="mt-6 grid gap-6 md:grid-cols-2">
               <section className="card p-6">
-                <h2 className="font-display text-lg font-semibold text-ink">能力拆解 · Skills</h2>
+                <h2 className="font-display text-lg font-semibold text-ink">
+                  能力拆解 · Skills
+                </h2>
                 <div className="mt-4 space-y-4">
                   {feedback.scores.map((s, i) => (
                     <div key={s.key}>
@@ -177,21 +226,31 @@ export default function Report() {
                         </span>
                         <span
                           className="font-bold tabnum"
-                          style={{ color: SCORE_COLORS[i % SCORE_COLORS.length] }}
+                          style={{
+                            color: SCORE_COLORS[i % SCORE_COLORS.length],
+                          }}
                         >
                           {s.score}
                         </span>
                       </div>
-                      <ProgressBar value={s.score} color={SCORE_COLORS[i % SCORE_COLORS.length]} height={10} />
+                      <ProgressBar
+                        value={s.score}
+                        color={SCORE_COLORS[i % SCORE_COLORS.length]}
+                        height={10}
+                      />
                     </div>
                   ))}
                 </div>
               </section>
 
               <section className="card p-6">
-                <h2 className="font-display text-lg font-semibold text-ink">纠错 · Corrections</h2>
+                <h2 className="font-display text-lg font-semibold text-ink">
+                  纠错 · Corrections
+                </h2>
                 {feedback.corrections.length === 0 ? (
-                  <p className="mt-3 text-sm text-muted">这次没有明显的语法错误，很棒！</p>
+                  <p className="mt-3 text-sm text-muted">
+                    这次没有明显的语法错误，很棒！
+                  </p>
                 ) : (
                   <div className="mt-4 space-y-3">
                     {feedback.corrections.map((c, i) => (
@@ -199,7 +258,10 @@ export default function Report() {
                         <p className="text-sm text-muted line-through">
                           <InteractiveEnglishText text={c.original} />
                         </p>
-                        <p className="mt-1 text-sm font-bold" style={{ color: "var(--leaf-deep)" }}>
+                        <p
+                          className="mt-1 text-sm font-bold"
+                          style={{ color: "var(--leaf-deep)" }}
+                        >
                           <InteractiveEnglishText text={c.suggestion} />
                         </p>
                         <p className="mt-1 text-xs text-muted">{c.note}</p>
@@ -212,24 +274,35 @@ export default function Report() {
 
             <div className="mt-6 grid gap-6 md:grid-cols-2">
               <section className="card p-6">
-                <h2 className="font-display text-lg font-semibold text-ink">好用表达 · Phrases</h2>
+                <h2 className="font-display text-lg font-semibold text-ink">
+                  好用表达 · Phrases
+                </h2>
                 {feedback.phrases.length === 0 ? (
-                  <p className="mt-3 text-sm text-muted">继续积累地道表达吧！</p>
+                  <p className="mt-3 text-sm text-muted">
+                    继续积累地道表达吧！
+                  </p>
                 ) : (
                   <ul className="mt-4 space-y-2.5">
                     {feedback.phrases.map((p, i) => {
                       const collected = words.some((w) => w.text === p.text);
                       return (
-                        <li key={i} className="flex flex-wrap items-center gap-2">
+                        <li
+                          key={i}
+                          className="flex flex-wrap items-center gap-2"
+                        >
                           <span className="rounded-full bg-surface-2 px-3 py-1 text-sm font-semibold text-ink">
                             <InteractiveEnglishText text={p.text} />
                           </span>
                           <span className="text-xs text-muted">{p.note}</span>
                           <button
                             type="button"
-                            title={collected ? "再次点击取消收藏" : "收藏到生词本"}
+                            title={
+                              collected ? "再次点击取消收藏" : "收藏到生词本"
+                            }
                             onClick={() => {
-                              const existing = words.find((w) => w.text === p.text);
+                              const existing = words.find(
+                                (w) => w.text === p.text,
+                              );
                               if (existing) {
                                 removeWord(existing.id);
                                 return;
@@ -258,8 +331,12 @@ export default function Report() {
                     <Lightbulb className="h-5 w-5" />
                   </span>
                   <div>
-                    <h2 className="font-display text-lg font-semibold text-ink">Pip 的建议</h2>
-                    <p className="mt-1 text-sm leading-relaxed text-ink">{feedback.tip}</p>
+                    <h2 className="font-display text-lg font-semibold text-ink">
+                      Pip 的建议
+                    </h2>
+                    <p className="mt-1 text-sm leading-relaxed text-ink">
+                      {feedback.tip}
+                    </p>
                   </div>
                 </div>
               </section>

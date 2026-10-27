@@ -32,7 +32,7 @@ export function EChart({ option, height = 280, className }: EChartProps) {
   }, []);
 
   useEffect(() => {
-    chartRef.current?.setOption(option, true);
+    chartRef.current?.setOption({ animation: false, ...option }, true);
   }, [option]);
 
   return <div ref={ref} style={{ height }} className={className} />;

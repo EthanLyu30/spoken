@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, ChevronRight, Minus, TrendingDown, TrendingUp } from "lucide-react";
+import { ChevronRight, Minus, TrendingDown, TrendingUp } from "lucide-react";
 import type { EChartsOption } from "echarts";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
@@ -18,9 +18,6 @@ import {
 import { getScenario } from "../data/scenarios";
 import { tokens } from "../lib/tokens";
 import { cn } from "../lib/utils";
-
-const backLink =
-  "inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5";
 
 type Status = "loading" | "ready" | "error";
 
@@ -123,19 +120,48 @@ export default function Progress() {
     <div className="min-h-screen pb-24">
       <PlayfulBackground />
 
-      <header className="mx-auto w-full max-w-3xl px-5 pt-6">
-        <Link to="/" className={backLink}>
-          <ArrowLeft className="h-4 w-4" /> 回首页
-        </Link>
-      </header>
-
       <main className="mx-auto w-full max-w-3xl px-5 py-6">
         <div className="mb-6">
           <p className="eyebrow">Your progress · 我的进度</p>
-          <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">每一次开口，都算进步。</h1>
+          <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">
+            每一次开口，都算进步。
+          </h1>
         </div>
 
-        {status === "ready" && <div className="progress-metrics"><div><strong>{sessions.length}</strong><span>累计对话</span></div><div><strong>{new Set(sessions.map((s) => s.scenario_id)).size}</strong><span>体验场景</span></div><div><strong>{sessions.length ? Math.round(sessions.reduce((sum, s) => sum + s.overall, 0) / sessions.length) : "—"}</strong><span>平均得分</span></div><Link to="/scenes" className="ui-secondary">开始新的练习</Link></div>}
+        {status === "ready" && (
+          <div className="progress-metrics">
+            <div>
+              <strong>{sessions.length}</strong>
+              <span>累计对话</span>
+            </div>
+            <div>
+              <strong>
+                {new Set(sessions.map((s) => s.scenario_id)).size}
+              </strong>
+              <span>体验场景</span>
+            </div>
+            <div>
+              <strong>
+                {sessions.length
+                  ? Math.round(
+                      sessions.reduce((sum, s) => sum + s.overall, 0) /
+                        sessions.length,
+                    )
+                  : "—"}
+              </strong>
+              <span>平均得分</span>
+            </div>
+            {insights?.available && insights.weakest ? (
+              <a href="#growth-insights" className="ui-secondary">
+                下一步：练练{insights.weakest.label_zh}
+              </a>
+            ) : (
+              <Link to="/scenes" className="ui-secondary">
+                开始新的练习
+              </Link>
+            )}
+          </div>
+        )}
         {status === "loading" && (
           <section className="card grid place-items-center p-10 text-center">
             <Buddy mood="idle" size={110} />
@@ -158,8 +184,12 @@ export default function Progress() {
         {status === "ready" && sessions.length === 0 && (
           <section className="card grid place-items-center gap-2 p-10 text-center">
             <Buddy mood="happy" size={140} />
-            <h2 className="mt-2 font-display text-xl font-semibold text-ink">还没有练习记录</h2>
-            <p className="text-muted">完成一次对话并查看小结，这里就会出现你的能力趋势。</p>
+            <h2 className="mt-2 font-display text-xl font-semibold text-ink">
+              还没有练习记录
+            </h2>
+            <p className="text-muted">
+              完成一次对话并查看小结，这里就会出现你的能力趋势。
+            </p>
             <Link to="/" className="mt-3">
               <Button size="lg">去练一段</Button>
             </Link>
@@ -168,72 +198,34 @@ export default function Progress() {
 
         {status === "ready" && sessions.length > 0 && (
           <div className="space-y-6">
-            {insights?.available && insights.weakest && (
-              <section className="card p-6">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="font-display text-lg font-semibold text-ink">成长洞察</h2>
-                    <p className="text-sm text-muted">
-                      最近 {insights.sessions} 次练习的能力分析
-                    </p>
-                  </div>
-                  <TrendBadge delta={insights.overall_delta} />
-                </div>
-
-                <div className="mt-4 rounded-2xl bg-surface-2 p-4">
-                  <p className="text-sm text-muted">最该练的一项</p>
-                  <p className="mt-0.5 font-display text-xl font-semibold text-ink">
-                    {insights.weakest.label_zh}
-                    <span className="ml-2 text-base font-semibold text-muted">
-                      均分 {insights.weakest.avg}
-                    </span>
-                  </p>
-                  {insights.strongest && insights.strongest.key !== insights.weakest.key && (
-                    <p className="mt-1 text-sm text-muted">
-                      最稳的是「{insights.strongest.label_zh}」（{insights.strongest.avg}
-                      ），继续保持～
-                    </p>
-                  )}
-                </div>
-
-                <ul className="mt-4 space-y-2.5">
-                  {insights.skills.map((s) => (
-                    <li key={s.key} className="flex items-center gap-3">
-                      <span className="w-20 shrink-0 font-semibold text-ink">{s.label_zh}</span>
-                      <span className="h-2 flex-1 overflow-hidden rounded-full bg-surface-2">
-                        <span
-                          className="block h-full rounded-full"
-                          style={{ width: `${s.avg}%`, background: tokens.coral }}
-                        />
-                      </span>
-                      <span className="tabnum w-8 shrink-0 text-right text-sm text-muted">
-                        {s.avg}
-                      </span>
-                      <TrendBadge delta={s.delta} small />
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-
             <div className="grid gap-6 md:grid-cols-2">
               <section className="card p-6">
-                <h2 className="font-display text-lg font-semibold text-ink">总分趋势</h2>
-                <p className="text-sm text-muted">最近 {sessions.length} 次练习</p>
+                <h2 className="font-display text-lg font-semibold text-ink">
+                  总分趋势
+                </h2>
+                <p className="text-sm text-muted">
+                  最近 {sessions.length} 次练习
+                </p>
                 <EChart option={lineOption} height={260} className="mt-2" />
               </section>
               <section className="card p-6">
-                <h2 className="font-display text-lg font-semibold text-ink">最近一次能力雷达</h2>
+                <h2 className="font-display text-lg font-semibold text-ink">
+                  最近一次能力雷达
+                </h2>
                 {radarOption ? (
                   <EChart option={radarOption} height={260} className="mt-2" />
                 ) : (
-                  <p className="mt-3 text-sm text-muted">最近一次没有能力评分。</p>
+                  <p className="mt-3 text-sm text-muted">
+                    最近一次没有能力评分。
+                  </p>
                 )}
               </section>
             </div>
 
             <section className="card p-6">
-              <h2 className="font-display text-lg font-semibold text-ink">历史记录</h2>
+              <h2 className="font-display text-lg font-semibold text-ink">
+                历史记录
+              </h2>
               <p className="text-sm text-muted">点任意一条，回看小结与对话</p>
               <ul className="mt-3 divide-y divide-border">
                 {sessions.map((s) => {
@@ -250,8 +242,12 @@ export default function Progress() {
                         className="-mx-2 flex items-center justify-between gap-3 rounded-2xl px-2 py-3 transition-colors hover:bg-surface-2"
                       >
                         <div className="min-w-0">
-                          <p className="truncate font-semibold text-ink">{label}</p>
-                          <p className="text-xs text-muted">{formatTime(s.created_at)}</p>
+                          <p className="truncate font-semibold text-ink">
+                            {label}
+                          </p>
+                          <p className="text-xs text-muted">
+                            {formatTime(s.created_at)}
+                          </p>
                         </div>
                         <span className="flex shrink-0 items-center gap-1.5">
                           <span
@@ -268,6 +264,65 @@ export default function Progress() {
                 })}
               </ul>
             </section>
+            {insights?.available && insights.weakest && (
+              <section id="growth-insights" className="card p-6">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-display text-lg font-semibold text-ink">
+                      成长洞察
+                    </h2>
+                    <p className="text-sm text-muted">
+                      最近 {insights.sessions} 次练习的能力分析
+                    </p>
+                  </div>
+                  <TrendBadge delta={insights.overall_delta} />
+                </div>
+
+                <details className="insight-details">
+                  <summary>查看各项能力与练习建议</summary>
+                  <div className="mt-4 rounded-2xl bg-surface-2 p-4">
+                    <p className="text-sm text-muted">最该练的一项</p>
+                    <p className="mt-0.5 font-display text-xl font-semibold text-ink">
+                      {insights.weakest.label_zh}
+                      <span className="ml-2 text-base font-semibold text-muted">
+                        均分 {insights.weakest.avg}
+                      </span>
+                    </p>
+                    {insights.strongest &&
+                      insights.strongest.key !== insights.weakest.key && (
+                        <p className="mt-1 text-sm text-muted">
+                          最稳的是「{insights.strongest.label_zh}」（
+                          {insights.strongest.avg}
+                          ），继续保持～
+                        </p>
+                      )}
+                  </div>
+
+                  <ul className="mt-4 space-y-2.5">
+                    {insights.skills.map((s) => (
+                      <li key={s.key} className="flex items-center gap-3">
+                        <span className="w-20 shrink-0 font-semibold text-ink">
+                          {s.label_zh}
+                        </span>
+                        <span className="h-2 flex-1 overflow-hidden rounded-full bg-surface-2">
+                          <span
+                            className="block h-full rounded-full"
+                            style={{
+                              width: `${s.avg}%`,
+                              background: tokens.coral,
+                            }}
+                          />
+                        </span>
+                        <span className="tabnum w-8 shrink-0 text-right text-sm text-muted">
+                          {s.avg}
+                        </span>
+                        <TrendBadge delta={s.delta} small />
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              </section>
+            )}
           </div>
         )}
       </main>
@@ -277,9 +332,16 @@ export default function Progress() {
 }
 
 /** Coloured pill showing a skill's short-term trend (+/- points). */
-function TrendBadge({ delta, small = false }: { delta: number; small?: boolean }) {
+function TrendBadge({
+  delta,
+  small = false,
+}: {
+  delta: number;
+  small?: boolean;
+}) {
   const dir = delta > 0 ? "up" : delta < 0 ? "down" : "flat";
-  const Icon = dir === "up" ? TrendingUp : dir === "down" ? TrendingDown : Minus;
+  const Icon =
+    dir === "up" ? TrendingUp : dir === "down" ? TrendingDown : Minus;
   const cls =
     dir === "up"
       ? "bg-[#e6f7ef] text-[#2fa274]"
@@ -298,7 +360,11 @@ function TrendBadge({ delta, small = false }: { delta: number; small?: boolean }
       title={`相比更早的练习${word} ${delta === 0 ? "" : sign} 分`}
     >
       <Icon className={small ? "h-3.5 w-3.5" : "h-4 w-4"} />
-      {small ? (delta === 0 ? "持平" : sign) : `${word} ${delta === 0 ? "" : sign}`}
+      {small
+        ? delta === 0
+          ? "持平"
+          : sign
+        : `${word} ${delta === 0 ? "" : sign}`}
     </span>
   );
 }

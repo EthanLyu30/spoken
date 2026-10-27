@@ -116,7 +116,10 @@ export default function Interview() {
   async function scoreAll(allAnswers: string[]) {
     setPhase("scoring");
     try {
-      const items = questions.map((q, i) => ({ question: q, answer: allAnswers[i] ?? "" }));
+      const items = questions.map((q, i) => ({
+        question: q,
+        answer: allAnswers[i] ?? "",
+      }));
       const res = await scoreInterview(items);
       setResult(res);
       savePractice("interview", res.overall, "限时问答").catch(() => undefined);
@@ -140,14 +143,55 @@ export default function Interview() {
 
       <main className="mx-auto w-full max-w-2xl px-5 py-6 interview-page">
         {phase === "intro" && (
-          <section className="interview-intro"><div><p className="eyebrow">TAKE AN INTERVIEW</p><h1>每个问题，都是一次<br />自然表达的机会。</h1><p className="intro-description">围绕经历、理由和观点，练习自然、有条理地回应访谈问题。</p><div className="interview-facts"><span><strong>4</strong>道问题</span><span><strong>45</strong>秒 / 题</span><span><strong>6</strong>分制参考</span></div><Button size="lg" onClick={begin}>开始访谈练习</Button><p className="interview-note">需要麦克风权限 · 建议在安静环境作答</p></div><aside><Buddy mood="happy" size={170} /><h2>不急着完美，先把想法说出来。</h2><ol><li>看到题目，组织一下思路</li><li>点击开始回答，45 秒内自然表达</li><li>完成四题，回看建议和参考答案</li></ol><p>基于转写内容提供练习反馈，不包含发音评测。</p></aside></section>
+          <section className="interview-intro">
+            <div>
+              <p className="eyebrow">TAKE AN INTERVIEW</p>
+              <h1>
+                每个问题，都是一次
+                <br />
+                自然表达的机会。
+              </h1>
+              <p className="intro-description">
+                围绕经历、理由和观点，练习自然、有条理地回应访谈问题。
+              </p>
+              <div className="interview-facts">
+                <span>
+                  <strong>4</strong>道问题
+                </span>
+                <span>
+                  <strong>45</strong>秒 / 题
+                </span>
+                <span>
+                  <strong>6</strong>分制参考
+                </span>
+              </div>
+              <Button size="lg" onClick={begin}>
+                开始访谈练习
+              </Button>
+              <p className="interview-note">
+                需要麦克风权限 · 建议在安静环境作答
+              </p>
+            </div>
+            <aside>
+              <Buddy mood="happy" size={170} />
+              <h2>不急着完美，先把想法说出来。</h2>
+              <ol>
+                <li>看到题目，组织一下思路</li>
+                <li>点击开始回答，45 秒内自然表达</li>
+                <li>完成四题，回看建议和参考答案</li>
+              </ol>
+              <p>基于转写内容提供练习反馈，不包含发音评测。</p>
+            </aside>
+          </section>
         )}
 
         {phase === "scoring" && (
           <section className="card grid place-items-center p-10 text-center">
             <Buddy mood="talking" size={120} />
             <h1 className="mt-3 font-display text-xl font-semibold text-ink">
-              {result === null && questions.length === 0 ? "正在出题…" : "正在整理访谈反馈…"}
+              {result === null && questions.length === 0
+                ? "正在出题…"
+                : "正在整理访谈反馈…"}
             </h1>
             <p className="mt-1 text-sm text-muted">稍等一下，马上好</p>
           </section>
@@ -156,7 +200,9 @@ export default function Interview() {
         {phase === "error" && (
           <section className="card grid place-items-center gap-4 p-10 text-center">
             <Buddy mood="idle" size={110} />
-            <p role="alert" className="font-semibold text-ink">{error}</p>
+            <p role="alert" className="font-semibold text-ink">
+              {error}
+            </p>
             <div className="flex gap-3">
               <Button variant="soft" onClick={() => setPhase("intro")}>
                 重新开始
@@ -169,61 +215,101 @@ export default function Interview() {
         )}
 
         {phase === "quiz" && (
-          <div className="interview-quiz-grid"><section className="interview-question card p-6 md:p-8">
-            <div className="mb-4 flex items-center justify-between">
-              <span className="rounded-full bg-surface-2 px-3 py-1 text-xs font-bold text-coral-deep">
-                第 {idx + 1} / {questions.length} 题
-              </span>
-              {qPhase === "recording" && (
-                <span className="inline-flex items-center gap-1.5 text-sm font-bold text-[#e6503d]">
-                  <Timer className="h-4 w-4" /> {left}s
+          <div className="interview-quiz-grid">
+            <section className="interview-question card p-6 md:p-8">
+              <div className="mb-4 flex items-center justify-between">
+                <span className="rounded-full bg-surface-2 px-3 py-1 text-xs font-bold text-coral-deep">
+                  第 {idx + 1} / {questions.length} 题
                 </span>
-              )}
-            </div>
-
-            <h2 className="font-display text-xl font-semibold leading-snug text-ink md:text-2xl">
-              {questions[idx]}
-            </h2>
-
-            <div className="mt-6 grid place-items-center gap-4">
-              {qPhase === "recording" ? (
-                <>
-                  <Ring pct={(left / ANSWER_SECONDS) * 100} size={120} stroke={12} color="var(--coral)">
-                    <div className="text-center">
-                      <div className="font-display text-3xl font-bold tabnum text-ink">{left}</div>
-                      <div className="text-[0.6rem] font-bold uppercase text-muted">秒</div>
-                    </div>
-                  </Ring>
-                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted">
-                    <Mic className="h-4 w-4 animate-pulse text-[#e6503d]" /> 正在录音，开口说英文…
+                {qPhase === "recording" && (
+                  <span className="inline-flex items-center gap-1.5 text-sm font-bold text-[#e6503d]">
+                    <Timer className="h-4 w-4" /> {left}s
                   </span>
-                  <Button onClick={() => void finishAnswer()}>
-                    <Send className="h-5 w-5" /> 提交回答
-                  </Button>
-                </>
-              ) : qPhase === "transcribing" ? (
-                <span className="inline-flex items-center gap-2 text-muted">
-                  <Loader2 className="h-5 w-5 animate-spin" /> 识别中…
-                </span>
-              ) : (
-                <>
-                  <Buddy mood="listening" size={104} />
-                  <p className="text-sm text-muted">想好思路后点开始，计时 45 秒</p>
-                  <Button size="lg" onClick={startAnswer}>
-                    <Mic className="h-5 w-5" /> 开始回答（45 秒）
-                  </Button>
-                  {error && (
-                    <p role="alert" className="text-xs font-semibold text-[#e6503d]">
-                      {error}
+                )}
+              </div>
+
+              <h2 className="font-display text-xl font-semibold leading-snug text-ink md:text-2xl">
+                {questions[idx]}
+              </h2>
+
+              <div className="mt-6 grid place-items-center gap-4">
+                {qPhase === "recording" ? (
+                  <>
+                    <Ring
+                      pct={(left / ANSWER_SECONDS) * 100}
+                      size={120}
+                      stroke={12}
+                      color="var(--coral)"
+                    >
+                      <div className="text-center">
+                        <div className="font-display text-3xl font-bold tabnum text-ink">
+                          {left}
+                        </div>
+                        <div className="text-[0.6rem] font-bold uppercase text-muted">
+                          秒
+                        </div>
+                      </div>
+                    </Ring>
+                    <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted">
+                      <Mic className="h-4 w-4 animate-pulse text-[#e6503d]" />{" "}
+                      正在录音，开口说英文…
+                    </span>
+                    <Button onClick={() => void finishAnswer()}>
+                      <Send className="h-5 w-5" /> 提交回答
+                    </Button>
+                  </>
+                ) : qPhase === "transcribing" ? (
+                  <span className="inline-flex items-center gap-2 text-muted">
+                    <Loader2 className="h-5 w-5 animate-spin" /> 识别中…
+                  </span>
+                ) : (
+                  <>
+                    <Buddy mood="listening" size={104} />
+                    <p className="text-sm text-muted">
+                      想好思路后点开始，计时 45 秒
                     </p>
-                  )}
-                </>
-              )}
-            </div>
-          </section><aside className="interview-trail"><h2>本次访谈</h2>{questions.map((q, i) => <div key={q} className={i === idx ? "active" : ""}><span>第 {i + 1} 题 {i < answers.length ? "· 已完成" : i === idx ? "· 正在回答" : "· 待作答"}</span><p>{q}</p></div>)}<p>想好思路后再开始，准备时间不计入作答。</p></aside></div>
+                    <Button size="lg" onClick={startAnswer}>
+                      <Mic className="h-5 w-5" /> 开始回答（45 秒）
+                    </Button>
+                    {error && (
+                      <p
+                        role="alert"
+                        className="text-xs font-semibold text-[#e6503d]"
+                      >
+                        {error}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            </section>
+            <aside className="interview-trail">
+              <h2>本次访谈</h2>
+              {questions.map((q, i) => (
+                <div key={q} className={i === idx ? "active" : ""}>
+                  <span>
+                    第 {i + 1} 题{" "}
+                    {i < answers.length
+                      ? "· 已完成"
+                      : i === idx
+                        ? "· 正在回答"
+                        : "· 待作答"}
+                  </span>
+                  <p>{q}</p>
+                </div>
+              ))}
+              <p>想好思路后再开始，准备时间不计入作答。</p>
+            </aside>
+          </div>
         )}
 
-        {phase === "results" && result && <InterviewResults result={result} onRestart={restart} onExit={() => navigate("/")} />}
+        {phase === "results" && result && (
+          <InterviewResults
+            result={result}
+            onRestart={restart}
+            onExit={() => navigate("/")}
+          />
+        )}
       </main>
 
       <BottomNav />

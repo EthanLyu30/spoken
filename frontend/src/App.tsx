@@ -27,24 +27,33 @@ export default function App() {
   return (
     <DictionaryProvider>
       <div className={`app-route route-${section}`}>
-      {!focused && <AppHeader />}
-      <Suspense fallback={<div role="status" className="route-loading">正在打开页面…</div>}>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/scenes" element={<Scenes />} />
-          <Route path="/custom" element={<CustomScenePage />} />
-          <Route path="/interview" element={<Interview />} />
-          <Route path="/practice/:scenarioId" element={<Conversation key={location.pathname} />} />
-          <Route path="/report/:sessionId" element={<Report />} />
-          <Route path="/session/:id" element={<SessionView />} />
-          <Route path="/progress" element={<Progress />} />
-          <Route path="/words" element={<WordBag />} />
-          <Route path="/me" element={<Profile />} />
-          <Route path="/daily" element={<Daily />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
-      <Onboarding />
+        {!focused && <AppHeader />}
+        <Suspense
+          fallback={
+            <div role="status" className="route-loading">
+              正在打开页面…
+            </div>
+          }
+        >
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/scenes" element={<Scenes />} />
+            <Route path="/custom" element={<CustomScenePage />} />
+            <Route path="/interview" element={<Interview />} />
+            <Route
+              path="/practice/:scenarioId"
+              element={<Conversation key={location.pathname} />}
+            />
+            <Route path="/report/:sessionId" element={<Report />} />
+            <Route path="/session/:id" element={<SessionView />} />
+            <Route path="/progress" element={<Progress />} />
+            <Route path="/words" element={<WordBag />} />
+            <Route path="/me" element={<Profile />} />
+            <Route path="/daily" element={<Daily />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+        <Onboarding />
       </div>
     </DictionaryProvider>
   );

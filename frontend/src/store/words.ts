@@ -1,6 +1,13 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { deleteWord, getWords, patchWord, postWord, reviewWord, type Word } from "../lib/api";
+import {
+  deleteWord,
+  getWords,
+  patchWord,
+  postWord,
+  reviewWord,
+  type Word,
+} from "../lib/api";
 
 /**
  * Single source of truth for the word bag, cached in localStorage so pages open
@@ -13,6 +20,7 @@ import { deleteWord, getWords, patchWord, postWord, reviewWord, type Word } from
  * entries; they are never persisted and are reconciled when the POST resolves.
  */
 let tempSeq = -1;
+let ownerGeneration = 0;
 
 interface CollectPayload {
   text: string;
@@ -58,15 +66,24 @@ export const useWords = create<WordsState>()(
       },
 
       refresh: async (signal) => {
+        const generation = ownerGeneration;
         set({ refreshing: true, error: false });
         try {
           const ws = await getWords(signal);
+          if (generation !== ownerGeneration) return;
           set((s) => {
             // Preserve optimistic entries the server hasn't seen yet.
-            const temps = s.words.filter((w) => w.id < 0 && !ws.some((x) => x.text === w.text));
-            return { words: [...temps, ...ws], fetchedOnce: true, refreshing: false };
+            const temps = s.words.filter(
+              (w) => w.id < 0 && !ws.some((x) => x.text === w.text),
+            );
+            return {
+              words: [...temps, ...ws],
+              fetchedOnce: true,
+              refreshing: false,
+            };
           });
         } catch {
+          if (generation !== ownerGeneration) return;
           if (signal?.aborted) {
             set({ refreshing: false });
             return;
@@ -76,6 +93,7 @@ export const useWords = create<WordsState>()(
       },
 
       collect: (payload) => {
+        const generation = ownerGeneration;
         const text = payload.text.trim();
         if (!text || get().words.some((w) => w.text === text)) return;
         const id = tempSeq--;
@@ -98,42 +116,74 @@ export const useWords = create<WordsState>()(
           kind: payload.kind,
         })
           .then((real) => {
+            if (generation !== ownerGeneration) return;
             if (get().words.some((w) => w.id === id)) {
-              set((s) => ({ words: s.words.map((w) => (w.id === id ? real : w)) }));
+              set((s) => ({
+                words: s.words.map((w) => (w.id === id ? real : w)),
+              }));
             } else {
               // Un-collected before the save landed — drop the orphaned server row.
               deleteWord(real.id).catch(() => undefined);
             }
           })
-          .catch(() => set((s) => ({ words: s.words.filter((w) => w.id !== id) })));
+          .catch(() => {
+            if (generation === ownerGeneration)
+              set((s) => ({ words: s.words.filter((w) => w.id !== id) }));
+          });
       },
 
       remove: (id) => {
+        const generation = ownerGeneration;
         const target = get().words.find((w) => w.id === id);
         if (!target) return;
         set((s) => ({ words: s.words.filter((w) => w.id !== id) }));
         if (id < 0) return; // not yet saved server-side
-        deleteWord(id).catch(() => set((s) => ({ words: [target, ...s.words] })));
+        deleteWord(id).catch(() => {
+          if (generation === ownerGeneration)
+            set((s) => ({ words: [target, ...s.words] }));
+        });
       },
 
       toggleMaster: (id) => {
+        const generation = ownerGeneration;
         const target = get().words.find((w) => w.id === id);
         if (!target || id < 0) return;
         const mastered = !target.mastered;
-        set((s) => ({ words: s.words.map((w) => (w.id === id ? { ...w, mastered } : w)) }));
+        set((s) => ({
+          words: s.words.map((w) => (w.id === id ? { ...w, mastered } : w)),
+        }));
         patchWord(id, mastered)
-          .then((u) => set((s) => ({ words: s.words.map((w) => (w.id === id ? u : w)) })))
-          .catch(() => set((s) => ({ words: s.words.map((w) => (w.id === id ? target : w)) })));
+          .then((u) => {
+            if (generation === ownerGeneration)
+              set((s) => ({
+                words: s.words.map((w) => (w.id === id ? u : w)),
+              }));
+          })
+          .catch(() => {
+            if (generation === ownerGeneration)
+              set((s) => ({
+                words: s.words.map((w) => (w.id === id ? target : w)),
+              }));
+          });
       },
 
       review: (id, remembered) => {
+        const generation = ownerGeneration;
         if (id < 0) return;
         reviewWord(id, remembered)
-          .then((u) => set((s) => ({ words: s.words.map((w) => (w.id === id ? u : w)) })))
+          .then((u) => {
+            if (generation === ownerGeneration)
+              set((s) => ({
+                words: s.words.map((w) => (w.id === id ? u : w)),
+              }));
+          })
           .catch(() => undefined);
       },
 
-      reset: () => set({ words: [], fetchedOnce: false, refreshing: false, error: false }),
+      reset: () => {
+        ownerGeneration += 1;
+        set({ words: [], fetchedOnce: false, refreshing: false, error: false });
+      },
     }),
     {
       name: "spoken-words",

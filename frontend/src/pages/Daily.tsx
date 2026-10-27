@@ -19,10 +19,17 @@ import { cn } from "../lib/utils";
 const SET_SIZE = 5;
 
 type Line = Quote | DailyLine;
-const sourceOf = (q: Line): string | undefined => ("source" in q ? q.source : undefined);
+const sourceOf = (q: Line): string | undefined =>
+  "source" in q ? q.source : undefined;
 
 /** Categories that actually have entries, in display order. */
-const ORDER: QuoteCategory[] = ["movie", "speech", "literature", "people", "proverb"];
+const ORDER: QuoteCategory[] = [
+  "movie",
+  "speech",
+  "literature",
+  "people",
+  "proverb",
+];
 const presentCats = ORDER.filter((c) => quotes.some((q) => q.category === c));
 
 /** Day-of-year, so the starting window rotates once per day. */
@@ -36,7 +43,10 @@ function dayOfYear(): number {
 function rotateWindow<T>(arr: T[], start: number, n: number): T[] {
   const len = arr.length;
   if (len === 0) return [];
-  return Array.from({ length: Math.min(n, len) }, (_, i) => arr[(((start + i) % len) + len) % len]);
+  return Array.from(
+    { length: Math.min(n, len) },
+    (_, i) => arr[(((start + i) % len) + len) % len],
+  );
 }
 
 export default function Daily() {
@@ -44,7 +54,9 @@ export default function Daily() {
   const [cat, setCat] = useState<QuoteCategory | "all">("all");
   const [page, setPage] = useState(0);
   const [aiLines, setAiLines] = useState<DailyLine[] | null>(null);
-  const [genState, setGenState] = useState<"idle" | "loading" | "error">("idle");
+  const [genState, setGenState] = useState<"idle" | "loading" | "error">(
+    "idle",
+  );
 
   // Collected state comes from the shared word store (cached + optimistic), so
   // the collect button flips instantly and stays in sync across pages.
@@ -52,9 +64,15 @@ export default function Daily() {
   const ensureLoaded = useWords((s) => s.ensureLoaded);
   const collect = useWords((s) => s.collect);
   const removeWord = useWords((s) => s.remove);
-  const savedIds = useMemo(() => new Map(words.map((w) => [w.text, w.id])), [words]);
+  const savedIds = useMemo(
+    () => new Map(words.map((w) => [w.text, w.id])),
+    [words],
+  );
 
-  const pool = useMemo(() => (cat === "all" ? quotes : quotes.filter((q) => q.category === cat)), [cat]);
+  const pool = useMemo(
+    () => (cat === "all" ? quotes : quotes.filter((q) => q.category === cat)),
+    [cat],
+  );
   const base = dayOfYear() * SET_SIZE;
   const curated = useMemo(
     () => rotateWindow(pool, base + page * SET_SIZE, SET_SIZE),
@@ -108,7 +126,9 @@ export default function Daily() {
       <main className="daily-page mx-auto w-full max-w-3xl px-5 py-8">
         <div className="mb-4">
           <p className="eyebrow">Daily lines · 每日金句</p>
-          <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">今天，带走五句好表达。</h1>
+          <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">
+            今天，带走五句好表达。
+          </h1>
           <p className="mt-1 text-sm text-muted">
             选自电影、演讲、文学和生活智慧，每天积累一点，下一次自然说出来。
           </p>
@@ -155,7 +175,10 @@ export default function Daily() {
         </div>
 
         {genState === "error" && (
-          <p role="alert" className="mb-4 rounded-2xl bg-surface-2 px-4 py-3 text-sm text-muted">
+          <p
+            role="alert"
+            className="mb-4 rounded-2xl bg-surface-2 px-4 py-3 text-sm text-muted"
+          >
             生成失败，请确认后端在运行后重试。先看看下面的精选金句吧。
           </p>
         )}
@@ -164,16 +187,21 @@ export default function Daily() {
           {lines.map((q, i) => {
             const src = sourceOf(q);
             return (
-              <li key={`${q.text}-${i}`} className="daily-quote-row card relative overflow-hidden p-5 md:p-6">
+              <li
+                key={`${q.text}-${i}`}
+                className="daily-quote-row card relative overflow-hidden p-5 md:p-6"
+              >
                 <span className="absolute -right-3 -top-4 font-display text-6xl font-bold text-coral opacity-10">
                   {i + 1}
                 </span>
                 <p className="font-display text-lg font-semibold leading-snug text-ink md:text-xl">
                   <InteractiveEnglishText text={q.text} />
                 </p>
-                <p className="mt-1.5 text-sm font-bold text-coral-deep">— {q.author}</p>
-                {src && <p className="mt-0.5 text-xs font-semibold text-muted">出处 · {src}</p>}
-                <p className="mt-1 text-sm text-muted">{q.zh}</p>
+                <p className="quote-meta">
+                  <span>— {q.author}</span>
+                  {src && <span> · {src}</span>}
+                  <span> · {q.zh}</span>
+                </p>
                 {q.usage && (
                   <p className="mt-1.5 rounded-xl bg-surface-2 px-2.5 py-1.5 text-xs font-semibold text-leaf-deep">
                     使用场景 · {q.usage}
@@ -190,7 +218,9 @@ export default function Daily() {
                   <button
                     type="button"
                     onClick={() => toggleSave(q)}
-                    title={savedIds.has(q.text) ? "再次点击取消收藏" : "收藏到生词本"}
+                    title={
+                      savedIds.has(q.text) ? "再次点击取消收藏" : "收藏到生词本"
+                    }
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold shadow-soft transition-transform hover:-translate-y-0.5",
                       savedIds.has(q.text)
@@ -198,7 +228,8 @@ export default function Daily() {
                         : "border border-border bg-surface text-ink",
                     )}
                   >
-                    <Check className="h-3.5 w-3.5" /> {savedIds.has(q.text) ? "已收藏" : "收藏"}
+                    <Check className="h-3.5 w-3.5" />{" "}
+                    {savedIds.has(q.text) ? "已收藏" : "收藏"}
                   </button>
                   <PronounceButton text={q.text} />
                   {!fromAi && (

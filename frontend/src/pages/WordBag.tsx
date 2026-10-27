@@ -31,6 +31,7 @@ export default function WordBag() {
 
   const [open, setOpen] = useState<number | null>(null);
   const [review, setReview] = useState(false);
+  const [reviewKey, setReviewKey] = useState(0);
   const [deck, setDeck] = useState<Word[]>([]); // snapshot for the review session
   const [tab, setTab] = useState<"word" | "sentence">("word");
   const [newWord, setNewWord] = useState("");
@@ -64,93 +65,230 @@ export default function WordBag() {
     const pool = dueNow.length ? dueNow : active.filter((w) => !w.mastered);
     if (!pool.length) return;
     setDeck(pool);
+    setReviewKey((key) => key + 1);
     setReview(true);
   }
 
-  return <div className="min-h-screen pb-24"><PlayfulBackground /><main className="mx-auto wordbag-page"><div className="ui-page-head"><div><p className="eyebrow">MY WORD BAG</p><h1>把好表达，留给下次用。</h1><p>收藏单词、短语和句子，用间隔复习记得更牢。</p></div><button type="button" className="ui-button" onClick={() => review ? setReview(false) : startReview()} disabled={!active.some((w) => !w.mastered)}><BookOpen />{review ? "列表" : dueCount > 0 ? `复习 ${dueCount}` : "开始复习"}</button></div>
-    <div className="wordbag-layout"><div><div className="wordbag-tabs">{(["word", "sentence"] as const).map((k) => <button key={k} type="button" aria-pressed={tab === k} onClick={() => { setTab(k); setReview(false); }}>{k === "word" ? `单词与短语 ${wordCount}` : `收藏句子 ${sentCount}`}</button>)}</div>
-    {tab === "word" && <div className="wordbag-add"><input aria-label="添加单词" value={newWord} onChange={(e) => setNewWord(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addWord(); }} placeholder="添加一个想记的单词…自动补释义和例句" /><button type="button" className="ui-button" disabled={!newWord.trim()} onClick={addWord}><Plus />添加</button></div>}
-    {showLoading && <p role="status" className="wordbag-state">正在加载你的收藏…</p>}
-    {showError && <section className="wordbag-state"><p role="alert">暂时无法读取收藏，请稍后重试。</p><button type="button" className="ui-secondary" onClick={() => void useWords.getState().refresh()}>重试读取</button></section>}
-    {showEmpty && <section className="wordbag-state"><Buddy mood="happy" size={90} /><h2>还没有收藏</h2><p>添加第一个单词，或去每日金句收藏喜欢的表达。</p><Link to="/daily" className="ui-link">去看看金句</Link></section>}
-    {hasCache && (review ? <ReviewDeck deck={deck} review={reviewWordId} onDone={() => setReview(false)} /> : active.length === 0 ? <p className="wordbag-state">{tab === "word" ? "还没有单词，试着加一个吧。" : "还没有收藏句子，去每日金句找找灵感。"}</p> : (
-              <ul className="space-y-3">
-                {active.map((w) => {
-                  const sc = w.scenario_id ? getScenario(w.scenario_id) : undefined;
-                  const t = themeFor(w.scenario_id);
-                  const isOpen = open === w.id;
-                  return (
-                    <li key={w.id} className="card overflow-hidden p-0">
-                      <button
-                        type="button"
-                        onClick={() => setOpen(isOpen ? null : w.id)}
-                        className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left"
-                      >
-                        <span
-                          className="font-display font-semibold text-ink"
-                          style={w.mastered ? { textDecoration: "line-through", opacity: 0.55 } : undefined}
+  return (
+    <div className="min-h-screen pb-24">
+      <PlayfulBackground />
+      <main className="mx-auto wordbag-page">
+        <div className="ui-page-head">
+          <div>
+            <p className="eyebrow">MY WORD BAG</p>
+            <h1>把好表达，留给下次用。</h1>
+            <p>收藏单词、短语和句子，用间隔复习记得更牢。</p>
+          </div>
+          <button
+            type="button"
+            className="ui-button"
+            onClick={() => (review ? setReview(false) : startReview())}
+            disabled={!active.some((w) => !w.mastered)}
+          >
+            <BookOpen />
+            {review ? "列表" : dueCount > 0 ? `复习 ${dueCount}` : "开始复习"}
+          </button>
+        </div>
+        <div className="wordbag-layout">
+          <div>
+            <div className="wordbag-tabs">
+              {(["word", "sentence"] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  aria-pressed={tab === k}
+                  onClick={() => {
+                    setTab(k);
+                    setReview(false);
+                  }}
+                >
+                  {k === "word"
+                    ? `单词与短语 ${wordCount}`
+                    : `收藏句子 ${sentCount}`}
+                </button>
+              ))}
+            </div>
+            {tab === "word" && (
+              <div className="wordbag-add">
+                <input
+                  aria-label="添加单词"
+                  value={newWord}
+                  onChange={(e) => setNewWord(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") addWord();
+                  }}
+                  placeholder="添加一个想记的单词…自动补释义和例句"
+                />
+                <button
+                  type="button"
+                  className="ui-button"
+                  disabled={!newWord.trim()}
+                  onClick={addWord}
+                >
+                  <Plus />
+                  添加
+                </button>
+              </div>
+            )}
+            {showLoading && (
+              <p role="status" className="wordbag-state">
+                正在加载你的收藏…
+              </p>
+            )}
+            {showError && (
+              <section className="wordbag-state">
+                <p role="alert">暂时无法读取收藏，请稍后重试。</p>
+                <button
+                  type="button"
+                  className="ui-secondary"
+                  onClick={() => void useWords.getState().refresh()}
+                >
+                  重试读取
+                </button>
+              </section>
+            )}
+            {showEmpty && (
+              <section className="wordbag-state">
+                <Buddy mood="happy" size={90} />
+                <h2>还没有收藏</h2>
+                <p>添加第一个单词，或去每日金句收藏喜欢的表达。</p>
+                <Link to="/daily" className="ui-link">
+                  去看看金句
+                </Link>
+              </section>
+            )}
+            {hasCache &&
+              (review ? (
+                <ReviewDeck
+                  key={reviewKey}
+                  deck={deck}
+                  review={reviewWordId}
+                  onDone={() => setReview(false)}
+                />
+              ) : active.length === 0 ? (
+                <p className="wordbag-state">
+                  {tab === "word"
+                    ? "还没有单词，试着加一个吧。"
+                    : "还没有收藏句子，去每日金句找找灵感。"}
+                </p>
+              ) : (
+                <ul className="space-y-3">
+                  {active.map((w) => {
+                    const sc = w.scenario_id
+                      ? getScenario(w.scenario_id)
+                      : undefined;
+                    const t = themeFor(w.scenario_id);
+                    const isOpen = open === w.id;
+                    return (
+                      <li key={w.id} className="card overflow-hidden p-0">
+                        <button
+                          type="button"
+                          onClick={() => setOpen(isOpen ? null : w.id)}
+                          className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left"
                         >
-                          {w.text}
-                        </span>
-                        <span className="flex items-center gap-2">
-                          {w.mastered && <Check className="h-4 w-4 text-leaf" />}
-                          <span className="max-w-[9rem] truncate text-sm text-muted">{w.meaning}</span>
-                        </span>
-                      </button>
-                      {isOpen && (
-                        <div className="border-t border-border bg-surface-2 px-5 py-4">
-                          {w.meaning && (
-                            <p className="text-sm text-ink">
-                              <span className="font-bold">释义：</span>
+                          <span
+                            className="font-display font-semibold text-ink"
+                            style={
+                              w.mastered
+                                ? {
+                                    textDecoration: "line-through",
+                                    opacity: 0.55,
+                                  }
+                                : undefined
+                            }
+                          >
+                            {w.text}
+                          </span>
+                          <span className="flex items-center gap-2">
+                            {w.mastered && (
+                              <Check className="h-4 w-4 text-leaf" />
+                            )}
+                            <span className="max-w-[9rem] truncate text-sm text-muted">
                               {w.meaning}
-                            </p>
-                          )}
-                          {w.example && (
-                            <p className="mt-1 text-sm text-ink">
-                              <span className="font-bold">例句：</span>
-                              {w.example}
-                            </p>
-                          )}
-                          {sc && (
-                            <span
-                              className="mt-2 inline-block rounded-full px-2 py-0.5 text-xs font-semibold"
-                              style={{ background: t.soft, color: t.deep }}
-                            >
-                              {sc.titleZh}
                             </span>
-                          )}
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() => speakText(w.text)}
-                              className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-ink"
-                            >
-                              <Volume2 className="h-3.5 w-3.5" /> 朗读
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => toggleMaster(w.id)}
-                              className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-ink"
-                            >
-                              <Check className="h-3.5 w-3.5" /> {w.mastered ? "取消掌握" : "标记掌握"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => removeWord(w.id)}
-                              className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-[#e6503d]"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" /> 删除
-                            </button>
+                          </span>
+                        </button>
+                        {isOpen && (
+                          <div className="border-t border-border bg-surface-2 px-5 py-4">
+                            {w.meaning && (
+                              <p className="text-sm text-ink">
+                                <span className="font-bold">释义：</span>
+                                {w.meaning}
+                              </p>
+                            )}
+                            {w.example && (
+                              <p className="mt-1 text-sm text-ink">
+                                <span className="font-bold">例句：</span>
+                                {w.example}
+                              </p>
+                            )}
+                            {sc && (
+                              <span
+                                className="mt-2 inline-block rounded-full px-2 py-0.5 text-xs font-semibold"
+                                style={{ background: t.soft, color: t.deep }}
+                              >
+                                {sc.titleZh}
+                              </span>
+                            )}
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => speakText(w.text)}
+                                className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-ink"
+                              >
+                                <Volume2 className="h-3.5 w-3.5" /> 朗读
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => toggleMaster(w.id)}
+                                className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-ink"
+                              >
+                                <Check className="h-3.5 w-3.5" />{" "}
+                                {w.mastered ? "取消掌握" : "标记掌握"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => removeWord(w.id)}
+                                className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-[#e6503d]"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" /> 删除
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-    ))}
-    </div><aside className="wordbag-aside"><h2>今天，复习这一小组。</h2><p>当前分组有 <strong>{dueCount}</strong> 条到期表达。记得的稍后再见，忘记的很快再练。</p><button type="button" className="ui-button" disabled={!active.some((w) => !w.mastered)} onClick={startReview}>开始复习</button><section><h3>把表达真正用起来</h3><p>先想意思，再翻面看答案。下次对话时，试着用上一句。</p><Link to="/scenes" className="ui-link">去场景里试试</Link></section></aside></div>
-  </main><BottomNav /></div>;
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ))}
+          </div>
+          <aside className="wordbag-aside">
+            <h2>今天，复习这一小组。</h2>
+            <p>
+              当前分组有 <strong>{dueCount}</strong>{" "}
+              条到期表达。记得的稍后再见，忘记的很快再练。
+            </p>
+            <button
+              type="button"
+              className="ui-button"
+              disabled={!active.some((w) => !w.mastered)}
+              onClick={startReview}
+            >
+              开始复习
+            </button>
+            <section>
+              <h3>把表达真正用起来</h3>
+              <p>先想意思，再翻面看答案。下次对话时，试着用上一句。</p>
+              <Link to="/scenes" className="ui-link">
+                去场景里试试
+              </Link>
+            </section>
+          </aside>
+        </div>
+      </main>
+      <BottomNav />
+    </div>
+  );
 }
 
 /** Spaced-repetition review: flip the card, then grade 记得 / 忘了. */
@@ -172,11 +310,15 @@ function ReviewDeck({
     return (
       <section className="card grid place-items-center gap-3 p-8 text-center">
         <Buddy mood="cheer" size={120} />
-        <h3 className="font-display text-xl font-semibold text-ink">复习完成！</h3>
+        <h3 className="font-display text-xl font-semibold text-ink">
+          复习完成！
+        </h3>
         <p className="text-sm text-muted">
           记得 {stats.know} · 待加强 {stats.again}
         </p>
-        <p className="text-xs text-muted">记得的词会过段时间再出现，忘了的很快会再考你。</p>
+        <p className="text-xs text-muted">
+          记得的词会过段时间再出现，忘了的很快会再考你。
+        </p>
         <Button onClick={onDone}>回到列表</Button>
       </section>
     );
@@ -184,7 +326,9 @@ function ReviewDeck({
 
   function answer(remembered: boolean) {
     review(w.id, remembered); // optimistic — the store syncs the SRS schedule in the background
-    setStats((s) => (remembered ? { ...s, know: s.know + 1 } : { ...s, again: s.again + 1 }));
+    setStats((s) =>
+      remembered ? { ...s, know: s.know + 1 } : { ...s, again: s.again + 1 },
+    );
     setFlipped(false);
     setI((x) => x + 1);
   }
@@ -200,11 +344,15 @@ function ReviewDeck({
         className="grid min-h-[9rem] w-full place-items-center rounded-3xl bg-surface-2 px-6 py-8"
       >
         {!flipped ? (
-          <span className="font-display text-2xl font-bold text-ink">{w.text}</span>
+          <span className="font-display text-2xl font-bold text-ink">
+            {w.text}
+          </span>
         ) : (
           <div>
             <p className="text-lg text-ink">{w.meaning || "（暂无释义）"}</p>
-            {w.example && <p className="mt-2 text-sm text-muted">{w.example}</p>}
+            {w.example && (
+              <p className="mt-2 text-sm text-muted">{w.example}</p>
+            )}
           </div>
         )}
       </button>

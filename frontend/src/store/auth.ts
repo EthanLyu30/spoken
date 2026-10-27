@@ -25,7 +25,10 @@ interface AuthState {
   /** Validate the persisted token against the server; clears it if stale. */
   refresh: () => Promise<void>;
   /** Edit display name / avatar of the logged-in account. */
-  updateProfile: (patch: { display_name?: string; avatar_url?: string }) => Promise<void>;
+  updateProfile: (patch: {
+    display_name?: string;
+    avatar_url?: string;
+  }) => Promise<void>;
 }
 
 function swapOwner() {
@@ -36,7 +39,7 @@ function swapOwner() {
 
 export const useAuth = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       user: null,
 
       login: async (email, password) => {
@@ -60,16 +63,22 @@ export const useAuth = create<AuthState>()(
       },
 
       refresh: async () => {
+        const expectedOwner = get().user;
         try {
-          set({ user: await getMe() });
+          const user = await getMe();
+          if (get().user === expectedOwner) set({ user });
         } catch {
+          if (get().user !== expectedOwner) return;
           clearToken();
           set({ user: null });
+          swapOwner();
         }
       },
 
       updateProfile: async (patch) => {
-        set({ user: await updateProfileApi(patch) });
+        const expectedOwner = get().user;
+        const user = await updateProfileApi(patch);
+        if (get().user === expectedOwner) set({ user });
       },
     }),
     {
