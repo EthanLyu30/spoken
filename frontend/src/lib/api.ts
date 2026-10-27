@@ -8,6 +8,9 @@ import { useVoice } from "../store/voice";
 import { getToken } from "./authToken";
 import { getClientId } from "./clientId";
 import { readChatStream } from "./chatStream";
+import { transcribeDirect } from "./directAsr";
+import { withTimeout } from "./requestTimeout";
+export { withTimeout } from "./requestTimeout";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const DEFAULT_TIMEOUT = 60_000; // generous: DeepSeek replies can be slow
@@ -27,16 +30,6 @@ export interface HealthResponse {
  * Combine the caller's abort signal with a timeout so a hung request fails
  * cleanly (surfaced as an error the UI can show) instead of spinning forever.
  */
-export function withTimeout(signal: AbortSignal | undefined | null, ms: number): AbortSignal | undefined {
-  if (typeof AbortSignal === "undefined" || typeof AbortSignal.timeout !== "function") {
-    return signal ?? undefined;
-  }
-  const timeout = AbortSignal.timeout(ms);
-  if (!signal) return timeout;
-  const anyFn = (AbortSignal as unknown as { any?: (s: AbortSignal[]) => AbortSignal }).any;
-  return anyFn ? anyFn([signal, timeout]) : signal;
-}
-
 async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
@@ -349,6 +342,12 @@ export async function fetchTtsStream(
 
 /** Transcribe 16 kHz mono PCM via the backend (iFlytek ASR). */
 export async function postAsr(pcm: ArrayBuffer, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
+  try {
+    return await transcribeDirect(pcm, signal);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+  }
   const res = await fetch(`${BASE_URL}/api/asr`, {
     method: "POST",
     headers: { "Content-Type": "application/octet-stream" },

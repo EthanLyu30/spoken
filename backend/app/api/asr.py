@@ -10,11 +10,28 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.responses import JSONResponse
 
 from app.core.config import Settings, get_settings
+from app.core.deps import get_client_id
+from app.services.xf_auth import build_auth_url
 from app.services.xf_asr import XfAsrClient, XfAsrError, XfAsrStream
 
 router = APIRouter(tags=["asr"])
+
+
+@router.post("/asr/session")
+def asr_session(
+    settings: Settings = Depends(get_settings),
+    _client_id: str = Depends(get_client_id),
+) -> JSONResponse:
+    """Issue a timestamp-signed provider handshake; audio stays in the browser."""
+    if not (settings.xf_app_id and settings.xf_api_key and settings.xf_api_secret):
+        raise HTTPException(status_code=503, detail="语音识别暂不可用。", headers={"Cache-Control": "no-store"})
+    return JSONResponse({
+        "url": build_auth_url("iat-api.xfyun.cn", "/v2/iat", settings.xf_api_key, settings.xf_api_secret),
+        "app_id": settings.xf_app_id,
+    }, headers={"Cache-Control": "no-store"})
 
 
 def get_asr_client() -> XfAsrClient:

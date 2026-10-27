@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { openAsrStream } from "./asrStream";
+import { openRelayAsrStream } from "./asrStream";
 
 class Socket {
   static OPEN = 1;
@@ -20,7 +20,7 @@ class Socket {
 }
 
 async function ready(onClose = vi.fn()) {
-  const opening = openAsrStream({ onPartial: vi.fn(), onClose });
+  const opening = openRelayAsrStream({ onPartial: vi.fn(), onClose });
   const socket = Socket.instances.at(-1)!;
   socket.onopen?.();
   socket.message({ type: "ready" });

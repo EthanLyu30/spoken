@@ -122,7 +122,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
             if (asr === opened) asr = null;
           },
         });
-        if (ended || generation !== asrGeneration) {
+        if (ended || generation !== asrGeneration || busy || !started) {
           opened.close();
           return;
         }
@@ -296,8 +296,9 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     // transcribes in real time (captions) and the final is ready the instant
     // they stop — no separate upload round-trip.
     if (started && asr && !utteranceUsesLocalAsr) {
+      const currentStream = asr;
       for (; cloudFramesSent < collected.length; cloudFramesSent++) {
-        asr.send(floatToPcm16(resampleTo16k(collected[cloudFramesSent], rate)));
+        currentStream.send(floatToPcm16(resampleTo16k(collected[cloudFramesSent], rate)));
       }
     }
 
@@ -413,9 +414,8 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   }
   cb.onPhase("listening");
 
-  // Open the streaming-ASR connection in the background; the first utterance
-  // uses buffered ASR if the handshake hasn't completed yet.
-  if (!(cb.preferLocalAsr?.() ?? false)) void ensureStream();
+  // Open cloud ASR at speech onset. An idle direct-provider socket expires
+  // before a learner who pauses to think has sent any audio.
 
   // Keep the context alive: browsers suspend it when backgrounded / on device
   // changes, which would silently freeze the call.

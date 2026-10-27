@@ -76,6 +76,18 @@ describe("voice call ASR engine boundaries", () => {
     vi.unstubAllGlobals();
   });
 
+  it("waits for actual speech before opening a cloud provider session", async () => {
+    const opened = { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn() };
+    mocks.openAsrStream.mockResolvedValue(opened);
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => false, transcribe: vi.fn(), reply: vi.fn(), onError: vi.fn() });
+    try {
+      for (let i = 0; i < 5; i++) pushFrame(0);
+      expect(mocks.openAsrStream).not.toHaveBeenCalled();
+      pushFrame(0.1);
+      expect(mocks.openAsrStream).toHaveBeenCalledOnce();
+    } finally { call.end(); }
+  });
+
   it("keeps a locally-selected utterance off the iFlytek stream", async () => {
     vi.stubGlobal("AudioContext", FakeAudioContext);
     const track = { onended: null, stop: vi.fn() };
@@ -151,14 +163,19 @@ describe("voice call ASR engine boundaries", () => {
     );
     let localReady = false;
     const transcribe = vi.fn(async () => "local text");
+    const onPhase = vi.fn();
     const call = await startVoiceCall({
-      onPhase: vi.fn(),
+      onPhase,
       preferLocalAsr: () => localReady,
       transcribe,
       reply: vi.fn(async () => undefined),
       onError: vi.fn(),
     });
+    expect(mocks.openAsrStream).not.toHaveBeenCalled();
+    pushFrame(0.1); pushFrame(0.1);
+    for (let i = 0; i < 4; i++) pushFrame(0);
     expect(mocks.openAsrStream).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(onPhase.mock.calls.at(-1)?.[0]).toBe("listening"));
 
     localReady = true;
     pushFrame(0.1);
@@ -249,6 +266,7 @@ describe("voice call ASR engine boundaries", () => {
     try {
       await Promise.resolve();
       pushFrame(0.1); pushFrame(0.1);
+      await Promise.resolve();
       mocks.openAsrStream.mock.calls[0][0].onClose();
       pushFrame(0.2); pushFrame(0.2);
       for (let i = 0; i < 4; i++) pushFrame(0);

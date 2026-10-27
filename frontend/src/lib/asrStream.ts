@@ -11,6 +11,8 @@
  * `postAsr` path, so streaming is a pure enhancement, never a hard dependency.
  */
 
+import { openDirectAsrStream } from "./directAsr";
+
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 function streamUrl(): string {
@@ -44,7 +46,12 @@ const FINAL_TIMEOUT_MS = 8000;
  * rejects if streaming is unavailable (unconfigured creds, network, timeout),
  * which is the signal to fall back to the buffered endpoint.
  */
-export function openAsrStream(
+export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us"): Promise<AsrStream> {
+  try { return await openDirectAsrStream(cb, language); }
+  catch { return openRelayAsrStream(cb, language); }
+}
+
+export function openRelayAsrStream(
   cb: AsrStreamCallbacks,
   language = "en_us",
 ): Promise<AsrStream> {
