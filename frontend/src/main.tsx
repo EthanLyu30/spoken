@@ -8,6 +8,7 @@ import "@fontsource-variable/nunito";
 
 import App from "./App";
 import "./index.css";
+import "./ui.css";
 import { bootstrapLocalSpeechModels } from "./lib/localSpeech/bootstrap";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

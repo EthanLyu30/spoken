@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { DictionaryProvider } from "./components/dictionary/DictionaryProvider";
 import { Onboarding } from "./components/Onboarding";
+import { AppHeader } from "./components/AppHeader";
 
 // Route-level code splitting: each page ships as its own chunk and loads on
 // navigation, so the initial bundle (Home) stays small. Heavy deps that only a
@@ -20,9 +21,13 @@ const SessionView = lazy(() => import("./pages/SessionView"));
 
 export default function App() {
   const location = useLocation();
+  const focused = location.pathname.startsWith("/practice/");
+  const section = location.pathname.split("/")[1] || "home";
   return (
     <DictionaryProvider>
-      <Suspense fallback={null}>
+      <div className={`app-route route-${section}`}>
+      {!focused && <AppHeader />}
+      <Suspense fallback={<div role="status" className="route-loading">正在打开页面…</div>}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/custom" element={<CustomScenePage />} />
@@ -38,6 +43,7 @@ export default function App() {
         </Routes>
       </Suspense>
       <Onboarding />
+      </div>
     </DictionaryProvider>
   );
 }

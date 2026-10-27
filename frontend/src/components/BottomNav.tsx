@@ -1,11 +1,11 @@
 import { NavLink } from "react-router-dom";
-import { BookOpen, Home, Quote, Timer, TrendingUp, User } from "lucide-react";
+import { BookOpen, Home, Route, Timer, TrendingUp, User } from "lucide-react";
 import { cn } from "../lib/utils";
 
 const items = [
   { to: "/", icon: Home, label: "首页", end: true },
-  { to: "/daily", icon: Quote, label: "金句", end: false },
-  { to: "/interview", icon: Timer, label: "问答", end: false },
+  { to: "/scenes", icon: Route, label: "场景", end: false },
+  { to: "/interview", icon: Timer, label: "访谈", end: false },
   { to: "/words", icon: BookOpen, label: "生词本", end: false },
   { to: "/progress", icon: TrendingUp, label: "进度", end: false },
   { to: "/me", icon: User, label: "我的", end: false },
@@ -16,7 +16,7 @@ export function BottomNav() {
   return (
     <nav
       aria-label="主导航"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_-18px_rgba(120,72,40,0.5)]"
+      className="mobile-bottom-nav fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface pb-[env(safe-area-inset-bottom)]"
     >
       <div className="mx-auto flex max-w-md items-stretch justify-around px-1 py-1.5">
         {items.map((it) => (

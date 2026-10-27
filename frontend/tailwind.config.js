@@ -32,22 +32,8 @@ export default {
         danger: "var(--danger)",
       },
       fontFamily: {
-        display: [
-          '"Fredoka Variable"',
-          '"Fredoka"',
-          '"PingFang SC"',
-          '"Hiragino Sans GB"',
-          '"Microsoft YaHei"',
-          "sans-serif",
-        ],
-        body: [
-          '"Nunito Variable"',
-          '"Nunito"',
-          '"PingFang SC"',
-          '"Hiragino Sans GB"',
-          '"Microsoft YaHei"',
-          "sans-serif",
-        ],
+        display: ['"Microsoft YaHei"', '"PingFang SC"', '"Segoe UI"', 'sans-serif'],
+        body: ['"Microsoft YaHei"', '"PingFang SC"', '"Segoe UI"', 'sans-serif'],
       },
       borderRadius: {
         DEFAULT: "var(--radius)",

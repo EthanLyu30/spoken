@@ -1,0 +1,71 @@
+/* Approved warm editorial system. Business state remains in existing components. */
+.app-route { min-height:100dvh; }
+.app-header { height:82px; background:#fffdf9; border-bottom:1px solid var(--border); position:relative; z-index:45; }
+.app-header-inner { width:calc(100% - 96px); max-width:1440px; margin:auto; height:100%; display:grid; grid-template-columns:220px 1fr 85px; align-items:center; gap:24px; }
+.wordmark { display:inline-flex; align-items:center; gap:8px; width:fit-content; font:800 30px/1 "Segoe UI",sans-serif; letter-spacing:-1px; }
+.wordmark img { width:49px; height:59px; object-fit:contain; }
+.desktop-nav { display:flex; height:100%; align-items:stretch; justify-content:center; gap:29px; }
+.desktop-nav > a,.tools-menu > button { display:flex; align-items:center; gap:8px; position:relative; font-size:16px; white-space:nowrap; background:none; }
+.desktop-nav svg { width:21px; height:21px; stroke-width:1.7; }
+.desktop-nav .active { color:var(--coral-deep); font-weight:700; }
+.desktop-nav > .active::after { content:""; height:2px; position:absolute; bottom:15px; left:0; right:0; background:var(--coral); }
+.tools-menu { position:relative; display:flex; }
+.menu-chevron { width:13px!important; height:13px!important; }
+.nav-dropdown { position:absolute; top:68px; left:0; min-width:175px; border:1px solid var(--border); background:var(--surface); padding:7px; border-radius:13px; box-shadow:0 10px 30px #34201912; }
+.nav-dropdown a { display:flex; gap:10px; align-items:center; padding:10px; font-size:14px; border-radius:8px; }
+.nav-dropdown a:hover { background:var(--surface-2); }
+.account-entry { display:flex; align-items:center; justify-content:flex-end; gap:10px; padding-left:18px; border-left:1px solid var(--border); }
+.account-entry img,.account-avatar { width:40px; height:40px; border-radius:50%; object-fit:cover; }
+.account-avatar { display:grid; place-items:center; background:#f2e5d5; color:#7e5541; }
+.account-avatar svg { width:23px; }
+.mobile-bottom-nav { display:none; }
+.route-loading { padding:60px 24px; text-align:center; color:var(--muted); }
+.buddy-art { display:inline-grid; place-items:center; flex-shrink:0; }
+.buddy-art img { width:100%; height:100%; object-fit:contain; }
+.buddy-listening,.buddy-talking { animation:buddy-breathe 1.7s ease-in-out infinite; }
+@keyframes buddy-breathe { 50% { transform:translateY(-3px); } }
+.app-route > .min-h-screen { min-height:calc(100dvh - 82px); padding-bottom:32px; }
+.app-route > div > main:not(.practice-log),.app-route > div > header:not(.focus-header) { width:calc(100% - 160px); max-width:1280px; padding-left:0; padding-right:0; }
+.app-route > div > main { padding-top:28px; }
+.app-route > div > header { padding-top:24px; }
+.app-route main h1 { font-size:36px; line-height:1.4; font-weight:800; letter-spacing:-.6px; }
+.app-route main h2 { line-height:1.5; font-weight:750; }
+.app-route .eyebrow { color:#a28b7a; font:550 10px/1.6 "Segoe UI",sans-serif; letter-spacing:1.6px; }
+.app-route .card { box-shadow:none; }
+.app-route button { transition:background-color .15s,color .15s,opacity .15s; }
+.app-route button:disabled { cursor:not-allowed; }
+.app-route .shadow-pop,.app-route .shadow-soft { box-shadow:none; }
+.app-route .hover\:-translate-y-0\.5:hover { transform:none; }
+.ui-button,.ui-secondary { display:inline-flex; align-items:center; justify-content:center; gap:9px; min-height:44px; padding:9px 22px; border:1px solid var(--coral); border-radius:28px; background:var(--coral); color:white; font-size:14px; font-weight:700; }
+.ui-button svg,.ui-secondary svg { width:19px; height:19px; }
+.ui-secondary { background:var(--surface); color:var(--ink); border-color:var(--border); }
+.ui-link { display:inline-flex; gap:8px; align-items:center; color:var(--coral-deep); font-weight:700; }
+.ui-link svg { width:18px; height:18px; }
+.ui-title { display:flex; gap:12px; align-items:center; }
+.ui-title::before { content:""; width:23px; height:3px; border-radius:3px; background:var(--coral); }
+.ui-page-head { display:flex; justify-content:space-between; align-items:center; gap:25px; margin-bottom:26px; }
+.ui-page-head p { margin-top:8px; color:var(--muted); font-size:14px; }
+.scene-tabs { display:flex; width:fit-content; gap:5px; background:#f3ede4; padding:4px; border-radius:26px; }
+.scene-tabs a { display:flex; gap:8px; align-items:center; min-height:38px; border-radius:22px; padding:7px 18px; color:var(--muted); font-size:13px; }
+.scene-tabs a.active { background:var(--surface); color:var(--coral-deep); font-weight:700; }
+.scene-tabs svg { width:17px; height:17px; }
+.ui-section { border-top:1px solid var(--border); padding:24px 0; }
+@media(min-width:901px) and (max-width:1300px) {
+ .app-header-inner { width:calc(100% - 48px); grid-template-columns:180px 1fr 60px; gap:12px; }
+ .desktop-nav { gap:20px; }.desktop-nav > a,.tools-menu > button { font-size:14px; }
+ .app-route > div > main:not(.practice-log),.app-route > div > header:not(.focus-header) { width:calc(100% - 96px); }
+}
+@media(max-width:900px) {
+ .app-header { height:66px; }.app-header-inner { width:calc(100% - 32px); display:flex; justify-content:space-between; }
+ .wordmark { font-size:25px; }.wordmark img { width:39px; height:48px; }
+ .desktop-nav { display:none; }.account-entry { border:0; }.account-avatar,.account-entry img { width:35px; height:35px; }
+ .mobile-bottom-nav { display:block; }.mobile-bottom-nav > div { max-width:600px; }
+ .app-route > .min-h-screen { min-height:calc(100dvh - 66px); padding-bottom:92px; }
+ .app-route > div > main:not(.practice-log),.app-route > div > header:not(.focus-header) { width:calc(100% - 36px); }
+ .app-route > div > main { padding-top:22px; }
+ .app-route main h1 { font-size:28px; }
+ .ui-page-head { align-items:flex-start; flex-direction:column; gap:18px; }
+ .scene-tabs a { padding:7px 14px; font-size:12px; }
+}
+@media(prefers-reduced-motion:reduce) { .buddy-art { animation:none; } }
+@media print { .app-header,.mobile-bottom-nav { display:none!important; }.app-route > div > main { width:100%!important; max-width:none!important; } }
