@@ -24,10 +24,28 @@ _FRAME = 1280  # 40 ms of 16 kHz / 16-bit mono audio
 # iFlytek tolerates faster-than-real-time upload for buffered audio; a small gap
 # still avoids overrunning the server. This cuts post-utterance ASR lag ~4x.
 _SEND_INTERVAL = 0.01  # 10 ms between 40 ms frames (was 40 ms)
+_OPEN_TIMEOUT = 2.0
+_CLOSE_TIMEOUT = 0.25
+_FINAL_TIMEOUT = 3.0  # leave room for the browser's 8 s final deadline
+_TRANSCRIBE_TIMEOUT = 30.0
 
 
 class XfAsrError(RuntimeError):
     """Raised when an iFlytek ASR request cannot be completed."""
+
+
+async def _connect(settings: Settings):
+    """Retry a transient dial failure once; never retry a submitted utterance."""
+    for attempt in range(2):
+        url = build_auth_url(_HOST, _PATH, settings.xf_api_key, settings.xf_api_secret)
+        try:
+            return await websockets.connect(
+                url, max_size=None, open_timeout=_OPEN_TIMEOUT,
+                close_timeout=_CLOSE_TIMEOUT,
+            )
+        except (TimeoutError, OSError) as exc:
+            if attempt == 1:
+                raise XfAsrError("语音识别连接暂时不稳定，请重试。") from exc
 
 
 class XfAsrClient:
@@ -41,18 +59,33 @@ class XfAsrClient:
         if not pcm:
             raise XfAsrError("no audio to transcribe")
 
-        url = build_auth_url(_HOST, _PATH, s.xf_api_key, s.xf_api_secret)
         transcript: list[str] = []
+        ws = None
+        tasks: list[asyncio.Task] = []
         try:
-            async with websockets.connect(url, max_size=None) as ws:
-                await asyncio.gather(
-                    self._send(ws, pcm, language),
-                    self._recv(ws, transcript),
-                )
+            ws = await _connect(s)
+            tasks = [
+                asyncio.create_task(self._send(ws, pcm, language)),
+                asyncio.create_task(self._recv(ws, transcript)),
+            ]
+            await asyncio.wait_for(asyncio.gather(*tasks), timeout=_TRANSCRIBE_TIMEOUT)
         except XfAsrError:
             raise
+        except TimeoutError as exc:
+            raise XfAsrError("语音识别等待超时，请重试。") from exc
         except Exception as exc:  # network / protocol
             raise XfAsrError(f"iFlytek ASR request failed: {exc}") from exc
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            if ws is not None:
+                try:
+                    await ws.close()
+                except Exception:
+                    pass  # a failed close must not discard a completed transcript
 
         return "".join(transcript).strip()
 
@@ -61,8 +94,7 @@ class XfAsrClient:
         first = True
         for i in range(0, total, _FRAME):
             chunk = pcm[i : i + _FRAME]
-            last = i + _FRAME >= total
-            status = 0 if first else (2 if last else 1)
+            status = 0 if first else 1
             frame: dict = {
                 "data": {
                     "status": status,
@@ -82,9 +114,8 @@ class XfAsrClient:
                 first = False
             await ws.send(json.dumps(frame))
             await asyncio.sleep(_SEND_INTERVAL)  # pace uploads without 1x replay
-        # Ensure a final frame if the audio length was an exact multiple.
-        if total % _FRAME == 0:
-            await ws.send(json.dumps({"data": {"status": 2, "audio": ""}}))
+        # One explicit end marker also covers a single sub-40 ms audio frame.
+        await ws.send(json.dumps({"data": {"status": 2, "audio": ""}}))
 
     async def _recv(self, ws, out: list[str]) -> None:
         async for message in ws:
@@ -147,9 +178,10 @@ class XfAsrStream:
         s = self._s
         if not (s.xf_app_id and s.xf_api_key and s.xf_api_secret):
             raise XfAsrError("iFlytek credentials are not configured")
-        url = build_auth_url(_HOST, _PATH, s.xf_api_key, s.xf_api_secret)
         try:
-            self._ws = await websockets.connect(url, max_size=None)
+            self._ws = await _connect(s)
+        except XfAsrError:
+            raise
         except Exception as exc:  # network / handshake
             raise XfAsrError(f"iFlytek ASR connect failed: {exc}") from exc
         self._recv_task = asyncio.create_task(self._stream_recv())
@@ -177,8 +209,9 @@ class XfAsrStream:
                     "domain": "iat",
                     "accent": "mandarin",
                     "vad_eos": 10000,  # we end the turn ourselves via finish()
-                    "dwa": "wpgs",  # streaming dynamic correction (revisable partials)
                 }
+                if self._language == "zh_cn":
+                    frame["business"]["dwa"] = "wpgs"
                 self._first = False
             await self._ws.send(json.dumps(frame))
 
@@ -192,13 +225,16 @@ class XfAsrStream:
             await self._ws.send(json.dumps({"data": {"status": 2, "audio": ""}}))
         except Exception:
             pass  # connection may already be closing; still drain what we have
+        timed_out = False
         try:
-            await asyncio.wait_for(self._done.wait(), timeout=10)
+            await asyncio.wait_for(self._done.wait(), timeout=_FINAL_TIMEOUT)
         except asyncio.TimeoutError:
-            pass
+            timed_out = True
         await self._close()
         if self._error:
             raise self._error
+        if timed_out:
+            raise XfAsrError("语音识别等待超时，请重试。")
         return self._current_text()
 
     async def abort(self) -> None:
@@ -236,7 +272,9 @@ class XfAsrStream:
                     )
                     break
                 data = resp.get("data") or {}
-                self._apply(data.get("result") or {})
+                result = data.get("result")
+                if result:
+                    self._apply(result)
                 text = self._current_text()
                 if text and text != self._last_text:
                     self._last_text = text

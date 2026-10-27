@@ -1,13 +1,15 @@
 import json
 import asyncio
 import base64
+import pytest
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from app.api.asr import get_asr_stream_factory
 from app.core.config import get_settings
 from app.main import app
-from app.services.xf_asr import XfAsrStream
+from app.services.xf_asr import XfAsrStream, XfAsrError
 
 client = TestClient(app)
 
@@ -106,6 +108,32 @@ def test_end_without_audio_returns_empty_final():
         assert ws.receive_json()["type"] == "ready"
         ws.send_text(json.dumps({"type": "end"}))
         assert ws.receive_json() == {"type": "final", "text": ""}
+
+
+def test_provider_failure_closes_the_relay_instead_of_accepting_only_the_audio_tail():
+    _use()
+    attempts = []
+
+    class FailedStream(_FakeStream):
+        async def open(self):
+            raise XfAsrError("opening timed out")
+
+    def make(settings, on_partial, *, language="en_us"):
+        attempts.append(True)
+        cls = FailedStream if len(attempts) == 1 else _FakeStream
+        return cls(settings, on_partial, language=language)
+
+    app.dependency_overrides[get_asr_stream_factory] = lambda: make
+    with client.websocket_connect("/api/asr/stream") as ws:
+        ws.send_json({"type": "start"})
+        assert ws.receive_json()["type"] == "ready"
+        ws.send_bytes(bytes(1280))
+        assert ws.receive_json() == {"type": "error", "message": "opening timed out"}
+        ws.send_bytes(bytes(1280))
+        ws.send_json({"type": "end"})
+        with pytest.raises(WebSocketDisconnect):
+            ws.receive_json()
+    assert len(attempts) == 1
 
 
 # --- wpgs dynamic-correction assembly (pure logic, no network) ---

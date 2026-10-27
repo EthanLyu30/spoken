@@ -239,4 +239,24 @@ describe("voice call ASR engine boundaries", () => {
     complete({ getAudioTracks: () => [late], getTracks: () => [late] });
     await vi.waitFor(() => expect(late.stop).toHaveBeenCalledOnce());
   });
+
+  it("falls back to the whole recording when the cloud relay closes midway through speech", async () => {
+    const opened = { send: vi.fn(), finishUtterance: vi.fn(async () => "tail only"), close: vi.fn() };
+    mocks.openAsrStream.mockResolvedValue(opened);
+    const transcribe = vi.fn(async (_pcm: ArrayBuffer) => "complete user turn");
+    const reply = vi.fn(async () => undefined);
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => false, transcribe, reply, onError: vi.fn() });
+    try {
+      await Promise.resolve();
+      pushFrame(0.1); pushFrame(0.1);
+      mocks.openAsrStream.mock.calls[0][0].onClose();
+      pushFrame(0.2); pushFrame(0.2);
+      for (let i = 0; i < 4; i++) pushFrame(0);
+      await vi.waitFor(() => expect(transcribe).toHaveBeenCalledOnce());
+      expect(opened.finishUtterance).not.toHaveBeenCalled();
+      const pcm = transcribe.mock.calls[0][0];
+      expect(new DataView(pcm).getInt16(0, true)).toBe(3276);
+      await vi.waitFor(() => expect(reply).toHaveBeenCalledWith("complete user turn", expect.any(ArrayBuffer), expect.any(Function), expect.any(AbortSignal)));
+    } finally { call.end(); }
+  });
 });

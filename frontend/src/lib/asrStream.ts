@@ -60,8 +60,11 @@ export function openAsrStream(
 
     let ready = false;
     let pendingFinal: ((text: string) => void) | null = null;
+    let finalTimer: ReturnType<typeof setTimeout> | undefined;
 
     const settlePending = (text: string) => {
+      clearTimeout(finalTimer);
+      finalTimer = undefined;
       const r = pendingFinal;
       pendingFinal = null;
       r?.(text);
@@ -102,11 +105,20 @@ export function openAsrStream(
             return;
           }
           // Don't hang the turn if the final never arrives.
-          setTimeout(() => {
-            if (pendingFinal === res) settlePending("");
+          finalTimer = setTimeout(() => {
+            if (pendingFinal !== res) return;
+            settlePending("");
+            // A late final belongs to this utterance. Retire the connection so
+            // it cannot settle a later turn while buffered ASR is recovering.
+            try {
+              ws.close();
+            } catch {
+              cb.onClose?.();
+            }
           }, FINAL_TIMEOUT_MS);
         }),
       close: () => {
+        settlePending("");
         try {
           ws.send(JSON.stringify({ type: "close" }));
         } catch {
@@ -153,7 +165,7 @@ export function openAsrStream(
       }
       if (msg.type === "partial") cb.onPartial(msg.text ?? "");
       else if (msg.type === "final") settlePending(msg.text ?? "");
-      else if (msg.type === "error") settlePending("");
+      else if (msg.type === "error") api.close();
     };
 
     ws.onerror = () => {

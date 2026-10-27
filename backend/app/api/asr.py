@@ -84,7 +84,9 @@ async def _relay_utterance(websocket: WebSocket, settings, make_stream, language
         return True
     except XfAsrError as exc:
         await websocket.send_json({"type": "error", "message": str(exc)})
-        return False
+        # Remaining queued frames still belong to this failed utterance. Close
+        # the relay so they cannot become a new session with a tail-only final.
+        return True
     finally:
         if stream is not None:
             await stream.abort()
