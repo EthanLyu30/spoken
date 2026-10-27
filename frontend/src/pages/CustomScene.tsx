@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, Sparkles, Wand2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Loader2, Sparkles, Wand2 } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
+import { SceneTabs } from "../components/SceneTabs";
 import { createCustomScene } from "../lib/api";
 import { useCustomScene } from "../store/custom";
 
@@ -42,31 +43,12 @@ export default function CustomScenePage() {
     <div className="min-h-screen pb-24">
       <PlayfulBackground />
 
-      <header className="mx-auto w-full max-w-2xl px-5 pt-6">
-        <Link
-          to="/"
-          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
-        >
-          <ArrowLeft className="h-4 w-4" /> 回首页
-        </Link>
-      </header>
-
-      <main className="mx-auto w-full max-w-2xl px-5 py-6">
-        <div className="mb-5 flex items-center gap-3">
-          <Buddy mood={loading ? "talking" : "happy"} size={92} />
-          <div>
-            <p className="eyebrow">Custom scene · 自定义场景</p>
-            <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">
-              想练什么，自己说了算
-            </h1>
-            <p className="mt-1 text-sm text-muted">
-              描述一个场景，Pip 立刻变身对应角色，陪你即兴对话。
-            </p>
-          </div>
-        </div>
-
+      <main className="mx-auto w-full max-w-2xl px-5 py-6 custom-page">
+        <div className="ui-page-head"><div><p className="eyebrow">CUSTOM SCENE</p><h1>想练什么，自己说了算</h1><p>描述一个场景，Pip 立刻变身对应角色，陪你即兴对话。</p></div><SceneTabs /></div>
+        <div className="custom-layout"><div>
         <section className="card p-5 md:p-6">
           <textarea
+            aria-label="想练习的场景"
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
             onKeyDown={(e) => {
@@ -119,6 +101,7 @@ export default function CustomScenePage() {
             </button>
           ))}
         </div>
+        </div><aside className="custom-aside"><Buddy mood={loading ? "talking" : "happy"} size={100} /><h2>一句话，就能搭好场景。</h2><p>告诉 Pip 你在哪里、想扮演什么角色、希望练习什么。</p><div><h3>比如，可以这样描述</h3><p>“我在伦敦的一家咖啡馆，想点一杯燕麦拿铁，并问问有没有无麸质点心。”</p></div><p>中英文都可以，不需要准备完整剧本。</p></aside></div>
       </main>
 
       <BottomNav />

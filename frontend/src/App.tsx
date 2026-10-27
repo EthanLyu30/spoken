@@ -9,6 +9,7 @@ import { AppHeader } from "./components/AppHeader";
 // few pages use — e.g. echarts on Profile/Progress — no longer weigh down first
 // paint.
 const Home = lazy(() => import("./pages/Home"));
+const Scenes = lazy(() => import("./pages/Scenes"));
 const Conversation = lazy(() => import("./pages/Conversation"));
 const Report = lazy(() => import("./pages/Report"));
 const Progress = lazy(() => import("./pages/Progress"));
@@ -30,6 +31,7 @@ export default function App() {
       <Suspense fallback={<div role="status" className="route-loading">正在打开页面…</div>}>
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/scenes" element={<Scenes />} />
           <Route path="/custom" element={<CustomScenePage />} />
           <Route path="/interview" element={<Interview />} />
           <Route path="/practice/:scenarioId" element={<Conversation key={location.pathname} />} />

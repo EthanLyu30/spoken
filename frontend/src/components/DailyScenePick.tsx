@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Dices, Loader2, Play, Sparkles } from "lucide-react";
+import { ArrowRight, Loader2, RefreshCw } from "lucide-react";
 import { getScenarioSuggestion, type CustomScene } from "../lib/api";
 import { useCustomScene } from "../store/custom";
 
@@ -71,54 +71,8 @@ export function DailyScenePick() {
     navigate("/practice/custom");
   }
 
-  // Nothing to show and it failed — stay out of the way.
-  if (error && !scene) return null;
-
-  return (
-    <section className="card relative mt-6 overflow-hidden p-5 md:p-6">
-      <Sparkles
-        aria-hidden
-        className="pointer-events-none absolute -right-3 -top-3 h-24 w-24 text-coral opacity-10"
-      />
-      <p className="eyebrow">今日新场景 · Daily pick</p>
-
-      {loading && !scene ? (
-        <div className="mt-3 space-y-2">
-          <div className="h-6 w-2/3 animate-pulse rounded-full bg-surface-2" />
-          <div className="h-4 w-1/2 animate-pulse rounded-full bg-surface-2" />
-        </div>
-      ) : scene ? (
-        <>
-          <h3 className="mt-1.5 font-display text-xl font-semibold text-ink">
-            {scene.title_zh || scene.title}
-          </h3>
-          <p className="mt-0.5 text-sm font-semibold text-coral-deep">{scene.title}</p>
-          {scene.source && (
-            <span className="mt-2 inline-block rounded-full bg-surface-2 px-2.5 py-1 text-xs font-bold text-coral-deep">
-              灵感 · {scene.source}
-            </span>
-          )}
-          <p className="mt-1.5 text-sm text-muted">{scene.goal}</p>
-          <div className="mt-4 flex flex-wrap items-center gap-2.5">
-            <button
-              type="button"
-              onClick={play}
-              className="inline-flex items-center gap-1.5 rounded-full bg-coral px-5 py-2.5 text-sm font-bold text-primary-fg shadow-pop transition-transform active:translate-y-0.5"
-            >
-              <Play className="h-4 w-4" /> 去练这个
-            </button>
-            <button
-              type="button"
-              onClick={() => void load(undefined, true)}
-              disabled={loading}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2.5 text-sm font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5 disabled:opacity-50"
-            >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Dices className="h-4 w-4" />}
-              换一个
-            </button>
-          </div>
-        </>
-      ) : null}
-    </section>
-  );
+  return <section className="daily-pick"><div className="pick-heading"><h2 className="ui-title">今日推荐 <small>DAILY PICK</small></h2><button type="button" className="ui-secondary pick-refresh" onClick={() => void load(undefined, true)} disabled={loading}>{loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}换一个</button></div>
+    {loading && !scene ? <div role="status" className="pick-loading">正在准备今天的推荐…</div> : scene ? <div className="pick-body"><div className="pick-image" role="img" aria-label="温暖的咖啡馆，开启今天的真实对话" /><div className="pick-copy">{scene.source && <span className="pick-source">灵感 · {scene.source}</span>}<h3>{scene.title_zh || scene.title}</h3><p className="pick-english">{scene.title}</p><p className="pick-goal">{scene.goal}</p><button type="button" className="ui-link" onClick={play}><span><ArrowRight /></span>去练这个</button></div></div> : null}
+    {error && <p role="alert" className="pick-error">推荐暂时无法更新{scene ? "，仍可练习上一个场景。" : "。"}<button type="button" onClick={() => void load()}>重试推荐</button></p>}
+  </section>;
 }

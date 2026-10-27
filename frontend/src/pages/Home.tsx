@@ -1,139 +1,17 @@
-import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Calendar, Sparkles, Timer, Wand2 } from "lucide-react";
-import { BuddyHero } from "../components/BuddyHero";
+import { ArrowRight, Mic, Quote, Route, Volume2 } from "lucide-react";
 import { DailyScenePick } from "../components/DailyScenePick";
-import { JourneyPath } from "../components/JourneyPath";
-import { Wordmark } from "../components/Wordmark";
-import { BackendStatus } from "../components/BackendStatus";
-import { StatChip } from "../components/StatChip";
-import { PlayfulBackground } from "../components/PlayfulBackground";
+import { DailyGoal } from "../components/DailyGoal";
 import { BottomNav } from "../components/BottomNav";
-import { chapters, getScenario, type Scenario } from "../data/scenarios";
-import { cn } from "../lib/utils";
-
-const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
-
-function greetingFor(d: Date): string {
-  const h = d.getHours();
-  if (h < 6) return "夜深啦，练一小会儿就早点休息～";
-  if (h < 12) return "早上好！开口练几句吧 ☀️";
-  if (h < 18) return "下午好，继续保持手感！";
-  return "晚上好，来热热身吧 🌙";
-}
+import { BackendStatus } from "../components/BackendStatus";
+import { quotes } from "../data/quotes";
+import { speakText } from "../lib/speech";
 
 export default function Home() {
-  const now = new Date();
-  const greeting = greetingFor(now);
-  const dateValue = `${now.getMonth() + 1}/${now.getDate()}`;
-  const weekday = WEEKDAYS[now.getDay()];
-  const [activeChapter, setActiveChapter] = useState(0);
-  const chapter = chapters[activeChapter];
-  const chapterScenarios = chapter.ids
-    .map((cid) => getScenario(cid))
-    .filter((s): s is Scenario => Boolean(s));
-
-  return (
-    <div className="min-h-screen pb-24">
-      <PlayfulBackground />
-
-      <header className="mx-auto flex w-full max-w-5xl items-center justify-between px-5 pt-6 sm:px-8">
-        <Wordmark />
-        <StatChip
-          icon={<Calendar className="h-4 w-4" />}
-          value={dateValue}
-          label={weekday}
-          tint="#e6f4fc"
-          fg="#2c8fc6"
-        />
-      </header>
-
-      <main className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-8">
-        <div className="animate-rise">
-          <BuddyHero greeting={greeting} />
-        </div>
-
-        <DailyScenePick />
-
-        <section className="mt-12">
-          <p className="eyebrow">Your journey · 闯关地图</p>
-          <h2 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">今天来练哪一关？</h2>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            {chapters.map((ch, i) => (
-              <button
-                key={ch.title}
-                type="button"
-                onClick={() => setActiveChapter(i)}
-                className={cn(
-                  "rounded-full px-4 py-2 text-sm font-bold transition-transform active:translate-y-0.5",
-                  i === activeChapter
-                    ? "bg-coral text-primary-fg shadow-pop"
-                    : "border border-border bg-surface text-ink shadow-soft hover:-translate-y-0.5",
-                )}
-              >
-                {ch.titleZh}
-              </button>
-            ))}
-          </div>
-
-          <p className="mt-3 text-sm font-semibold text-muted">
-            {chapter.title} · {chapterScenarios.length} 关
-          </p>
-
-          <JourneyPath key={chapter.title} scenarios={chapterScenarios} />
-        </section>
-
-        <Link
-          to="/custom"
-          className="card group mt-8 flex items-center gap-4 p-5 transition-transform hover:-translate-y-0.5 md:p-6"
-        >
-          <span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-coral text-primary-fg shadow-pop">
-            <Wand2 className="h-7 w-7" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="flex items-center gap-1.5 font-display text-lg font-semibold text-ink">
-              自定义场景
-              <Sparkles className="h-4 w-4 text-coral-deep" />
-            </p>
-            <p className="mt-0.5 text-sm text-muted">
-              一句话描述你想练的场景，Pip 立刻变身角色陪你即兴对话。
-            </p>
-          </div>
-          <span className="shrink-0 rounded-full bg-surface-2 px-3 py-1.5 text-xs font-bold text-coral-deep transition-colors group-hover:bg-coral group-hover:text-primary-fg">
-            去创建 →
-          </span>
-        </Link>
-
-        <Link
-          to="/interview"
-          className="card group mt-4 flex items-center gap-4 p-5 transition-transform hover:-translate-y-0.5 md:p-6"
-        >
-          <span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-leaf text-primary-fg shadow-pop">
-            <Timer className="h-7 w-7" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="flex items-center gap-1.5 font-display text-lg font-semibold text-ink">
-              限时问答
-              <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[0.6rem] font-bold text-coral-deep">
-                托福口语
-              </span>
-            </p>
-            <p className="mt-0.5 text-sm text-muted">
-              Take an Interview 专项：4 题、每题 45 秒，练习经历描述与观点表达。
-            </p>
-          </div>
-          <span className="shrink-0 rounded-full bg-surface-2 px-3 py-1.5 text-xs font-bold text-coral-deep transition-colors group-hover:bg-coral group-hover:text-primary-fg">
-            去挑战 →
-          </span>
-        </Link>
-      </main>
-
-      <footer className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-3 px-5 py-8 sm:px-8">
-        <span className="text-sm font-semibold text-muted">Spoken · 和 Pip 一起练英语口语</span>
-        <BackendStatus />
-      </footer>
-      <BottomNav />
-    </div>
-  );
+  const quote = quotes[Math.floor(Date.now() / 86400000) % quotes.length];
+  return <div className="min-h-screen pb-24 home-page">
+    <section className="home-hero"><div className="hero-inner"><p className="hero-kicker">PIP 和你一起，每天练习真实的英语对话</p><h1>今天，开口就好。</h1><p className="hero-subtitle">每天一点真实对话，让英语自然一点。</p><div className="hero-actions"><Link to="/practice/cafe" className="ui-button"><Mic />开始语音练习</Link><div><Link to="/scenes" className="ui-secondary"><Route />进入场景练习</Link><small>闯关地图 · 自定义场景</small></div></div></div></section>
+    <main className="mx-auto home-content"><div className="home-recommend"><DailyScenePick /><DailyGoal /></div><section className="home-quote"><h2><Quote />每日金句</h2><div><p>{quote.text}</p><small>{quote.zh} · {quote.author}{quote.source && `《${quote.source}》`}</small></div><button type="button" className="ui-secondary" onClick={() => speakText(quote.text)}><Volume2 />听一听</button><Link to="/daily" className="ui-link">更多金句<ArrowRight /></Link></section></main>
+    <footer className="home-footer"><span>Spoken · 和 Pip 一起练英语口语</span><BackendStatus /></footer><BottomNav />
+  </div>;
 }
