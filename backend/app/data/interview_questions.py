@@ -1,69 +1,102 @@
-"""Supplementary opinion prompts for Take an Interview speaking practice.
+"""Reviewed, topic-coherent practice for the post-January-2026 interview task.
 
-These curated prompts exercise reasons, preferences, and opinions. They are
-training material, not a complete official mock exam. The existing constant
-name is retained for compatibility with the catalogue and tests.
+Prompts are concise adaptations of linked public ETS samples, not recalled
+live exam questions. Each set preserves the experience-to-opinion progression.
 """
+from dataclasses import dataclass
 
-INDEPENDENT_QUESTIONS: list[str] = [
-    # --- Agree / disagree ---
-    "Do you agree or disagree with the following statement? Students should be required to take physical education classes. Use details and examples to explain your answer.",
-    "Do you agree or disagree? It is better to finish one task completely before starting another, rather than working on several tasks at the same time.",
-    "Do you agree or disagree with the following statement? Parents should let their children make their own mistakes and learn from them.",
-    "Do you agree or disagree with the following statement? A person should never make an important decision alone.",
-    "Do you agree or disagree? It is more important to be able to work with a group of people than to work independently.",
-    "Do you agree or disagree with the following statement? Universities should require every student to take a public speaking course.",
-    "Do you agree or disagree? People today spend too much time on personal enjoyment and not enough on their responsibilities.",
-    "Do you agree or disagree with the following statement? Children should be required to help with household chores as soon as they are able to.",
-    "Do you agree or disagree? It is better for students to have a part-time job while studying at university.",
-    "Do you agree or disagree? Schools should allow students to use smartphones in class for learning.",
-    "Do you agree or disagree with the following statement? Students should be highly organized in order to be successful in school.",
-    "Do you agree or disagree? People's social skills have declined as their use of technology has increased.",
-    "Do you agree or disagree with the following statement? People must love their jobs in order to be happy.",
-    "Do you agree or disagree? Being independent is more important than relying on others. Use specific details and examples.",
-    "Do you agree or disagree with the following statement? Social media does students more harm than good.",
-    "Do you agree or disagree? It is better to be a specialist in one field than to know a little about many fields.",
-    "Do you agree or disagree? Older people should avoid risky or adventurous activities the way young people enjoy them.",
-    # --- Paired preference ---
-    "Some people prefer to study alone. Others prefer to study with a group of classmates. Which do you prefer and why?",
-    "Some people like to plan their free-time activities very carefully. Others choose not to make plans. Which do you prefer?",
-    "Some students prefer to take online courses. Others prefer to take courses in a traditional classroom. Which do you think is better and why?",
-    "Some people prefer to spend their money as soon as they earn it. Others prefer to save for the future. Which do you prefer?",
-    "Some people prefer to live in a big city. Others prefer to live in a small town. Which do you prefer and why?",
-    "Some people like to try new things. Others prefer to stick with what they already know. Which kind of person are you?",
-    "Some students prefer teachers who are strict. Others prefer teachers who are easygoing. Which do you prefer and why?",
-    "Some people prefer to work for a large company. Others prefer to work for a small company. Which would you prefer and why?",
-    "Some people prefer to stay in touch with friends and family while traveling. Others prefer to disconnect and be alone. Which do you prefer and why?",
-    "Some people like to read reviews before seeing a movie. Others prefer to watch a film without reading reviews. Which do you prefer?",
-    "Some people prefer to be busy with something to do at all times. Others prefer to set aside time to do nothing. Which is better?",
-    "Would you prefer to work at one job your entire life, or to switch jobs every few years? Explain why.",
-    "When choosing a place to live, would you rather have a convenient but noisy place, or an inconvenient but quiet one?",
-    "Do you prefer to receive advice from people your own age, or from people who are older than you? Explain why.",
-    # --- Three-choice ---
-    "Your school has received money to improve student life. Should it spend the money on a new gym, a larger library, or better dining options? Explain why.",
-    "If you could improve one skill, which would you choose: speaking a foreign language, playing a musical instrument, or computer programming? Why?",
-    "Which is the most important quality in a coworker: being friendly, being reliable, or being knowledgeable? Explain why.",
-    "When visiting a new city, which would you most want to do: try the local food, visit historical sites, or shop at local markets? Why?",
-    "Which helps students learn the most: studying with classmates, getting help from a teacher, or watching online videos? Explain why.",
-    "Your town has money for one project. Should it build a new park, a public library, or a sports center? Why?",
-    "Which is the best way to stay healthy: eating well, exercising regularly, or getting enough sleep? Explain your choice.",
-    "Which is the most useful feature of a smartphone for a student: the camera, note-taking apps, or internet access? Explain why.",
-    "Which aspect of university life is most important: academic study, making friends, or joining clubs? Why?",
-    "To learn about a different culture, which is best: traveling there, reading about it, or talking with people from that culture? Explain why.",
-    "Which would most improve your daily life: having more free time, having more money, or having better health? Why?",
-    "If you were starting a small business, which would matter most: a good location, talented employees, or a strong online presence? Why?",
-    # --- Opinion / everyday ---
-    "What is one quality that makes someone a good friend? Use examples to support your answer.",
-    "Some people believe success in life comes from hard work. Others believe it comes from luck. What do you think?",
-    "What do you think is the best way for students to learn a foreign language? Explain with details.",
-    "Do you think it is better to be an only child or to have siblings? Explain your choice.",
-    "What is one change that would improve your school or workplace, and why?",
-    "Some people think it is important to keep up with the news every day. Others are not interested. What is your opinion?",
-    "Is it important for a leader to be a good public speaker? Explain why or why not.",
-    "Some believe that one day robots will replace humans at many jobs. What do you think, and why?",
-    "A company plans to build a factory in your hometown that will create jobs but also cause pollution. Would you support it? Why?",
-    "If you had to give a friend some bad news, would you do it in a quiet private place or a busy public one? Explain why.",
-    "Imagine you can donate money to a charity. Would you give it to a small local group or a large international one? Explain why.",
-    "If you could change one thing about your hometown, what would it be and why?",
-    "If you received a sum of money as a gift, what would you spend it on, and why?",
+@dataclass(frozen=True)
+class InterviewSet:
+    id: str
+    topic: str
+    topic_en: str
+    intro: str
+    questions: tuple[str, ...]
+    hints: tuple[str, ...]
+    source_title: str
+    source_url: str
+    source_kind: str = "official_adapted"
+    reviewed_at: str = "2026-10-28"
+
+def _ets(test: int) -> str:
+    return f"https://www.ets.org/content/dam/ets-org/pdfs/toefl/toefl-ibt-teachers-resources-practice-test-{test}.pdf"
+
+INTERVIEW_SETS = [
+    InterviewSet(
+        "inspire-writing-190", "写作与表达", "Writing and expression",
+        "You are taking part in an interview about writing in everyday life and education.",
+        (
+            "What do you usually write in daily life, and what purpose does that writing serve for you?",
+            "Do you find it more helpful to outline a piece before writing, or to start straight away? Explain your preference.",
+            "Should society protect the ability to write longer pieces, or place greater emphasis on brief digital messages? Why?",
+            "Would requiring creative writing in every student's general education be a good idea? Explain your view.",
+        ),
+        ("写什么 → 为什么写 → 帮助你解决了什么。", "选一种方法，再举一个具体写作场景。", "比较两种表达的用途，给出自己的侧重。", "表态后考虑不同专业学生的需要。"),
+        "Inspire SpeakEasy · Interview Practice #190（改编）",
+        "https://www.youtube.com/watch?v=SCGP0s0UmHE",
+        source_kind="video_adapted",
+    ),
+    InterviewSet(
+        "work-life-balance", "工作与生活", "Work–life balance",
+        "You are taking part in a research interview about balancing work and personal life.",
+        (
+            "What do you do to keep work or study from taking over your personal life? Describe a strategy that works for you.",
+            "Would a company's support for a balanced lifestyle influence your decision to work there? Explain your reasons.",
+            "Should employers offer flexible schedules or remote work even when they worry about reduced engagement? Why?",
+            "How might people's priorities between work and personal life change in the future? What could drive that change?",
+        ),
+        ("选一个具体做法，再说它怎样帮到你。", "先表态，再结合择业需求举例。", "说明收益，再回应对效率的担忧。", "预测一个变化，并解释原因。"),
+        "ETS Teacher Resources · Practice Test 1（改编）", _ets(1),
+    ),
+    InterviewSet(
+        "exercise-habits", "运动与健康", "Exercise habits",
+        "A researcher is interviewing you about exercise habits and fitness choices.",
+        (
+            "Describe an exercise that you or someone you know does regularly. What makes that activity a good choice?",
+            "Would you rather exercise on your own or with other people? Explain what you enjoy about your choice.",
+            "Is exercising outside better than exercising inside? Explain your opinion with an example.",
+            "Can smartphone fitness apps help people maintain their exercise goals? Why might they work or fail?",
+        ),
+        ("运动种类 → 频率 → 一个好处。", "选择一种，再用个人经历支撑。", "考虑环境、便利或坚持的难度。", "举一个功能，并说明它怎样影响习惯。"),
+        "ETS Teacher Resources · Practice Test 2（改编）", _ets(2),
+    ),
+    InterviewSet(
+        "career-choices", "职业选择", "Career choices",
+        "You have joined a research interview about choosing careers and changes in working life.",
+        (
+            "What career paths are common among people you know? Describe an example and why that path appeals to them.",
+            "When choosing a career, would you put enjoyment of the work or income first? Explain your priorities.",
+            "What are the benefits and drawbacks of moving between several careers instead of staying in one profession?",
+            "How do you think artificial intelligence could change opportunities in a field you might work in? Give reasons.",
+        ),
+        ("熟悉的职业 → 具体的人或经历。", "明确优先项，同时解释另一项的作用。", "先说明总体看法，再谈一个得失。", "选择一个职业，说明工作任务会怎样变化。"),
+        "ETS Teacher Resources · Practice Test 3（改编）", _ets(3),
+    ),
+    InterviewSet(
+        "food-preferences", "饮食与文化", "Food preferences",
+        "A researcher wants to learn about your food choices and the role of meals in everyday life.",
+        (
+            "What kinds of meals are popular among people your age? Explain what makes those meals appealing.",
+            "On a busy day, how do you usually get your meals? Describe a typical choice and the reason for it.",
+            "Do people have healthier eating habits now than in the past? Explain your view with an example.",
+            "How important is cooking traditional dishes for maintaining a connection with one's culture? Can other activities play a similar role?",
+        ),
+        ("选一类食物，说明受欢迎的原因。", "给出真实的一天，而不是罗列全部选项。", "围绕一个变化比较过去和现在。", "说明食物的文化意义，再考虑其他方式。"),
+        "ETS Teacher Resources · Practice Test 4（改编）", _ets(4),
+    ),
+    InterviewSet(
+        "urban-life", "城市生活", "Urban life",
+        "You are being interviewed for a research project about life in cities.",
+        (
+            "Think of a city you visited rather than lived in. What took you there, and what did you enjoy about the visit?",
+            "Do cities usually make you feel energized or overwhelmed? Explain what contributes to that feeling.",
+            "Does living in a city necessarily make someone's life more interesting? Discuss opportunities or experiences that support your view.",
+            "Should city governments invest in additional parks to improve residents' happiness? Explain the benefits and possible trade-offs.",
+        ),
+        ("一次旅行 → 原因 → 印象最深的一点。", "一个感受，配合具体场景。", "表态后谈工作、文化或休闲机会。", "说明绿地的作用，兼顾投入与其他需求。"),
+        "ETS · Updated Test at a Glance（改编）",
+        "https://www.ets.org/pdfs/toefl/toefl-ibt-test-at-a-glance.pdf",
+    ),
 ]
+# Retain the old import for integrations; the API samples a whole set now.
+INDEPENDENT_QUESTIONS = [q for group in INTERVIEW_SETS for q in group.questions]

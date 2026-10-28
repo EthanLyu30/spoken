@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import delete, desc, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.practice import PracticeRecord
 from app.models.session import PracticeSession
@@ -123,6 +123,7 @@ def compute_insights(db: Session, client_id: str, recent: int = INSIGHTS_RECENT)
     sessions = list(
         db.scalars(
             select(PracticeSession)
+            .options(selectinload(PracticeSession.scores))
             .where(PracticeSession.client_id == client_id)
             .order_by(desc(PracticeSession.created_at))
             .limit(recent)

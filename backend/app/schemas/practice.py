@@ -9,7 +9,7 @@ class PracticeCreate(BaseModel):
     kind: str = Field(min_length=1, max_length=24)  # pronunciation | interview
     score: float = Field(ge=0, le=100)  # native scale (pronunciation 0-100, interview 0-6)
     title: str = Field(default="", max_length=200)
-    detail: str = Field(default="", max_length=8000)
+    detail: str = Field(default="", max_length=48000)
 
 
 class PracticeRecordOut(BaseModel):
@@ -20,6 +20,10 @@ class PracticeRecordOut(BaseModel):
     score: float
     title: str
     created_at: datetime
+
+
+class PracticeDetailOut(PracticeRecordOut):
+    detail: str
 
 
 class Stats(BaseModel):

@@ -1,12 +1,15 @@
 """Practice records + aggregate stats endpoints."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_client_id
 from app.db import get_db
 from app.schemas.practice import Insights, PracticeCreate, PracticeRecordOut, Stats
 from app.services import practice as repo
+from app.models.practice import PracticeRecord
+from app.schemas.practice import PracticeDetailOut
 
 router = APIRouter(tags=["practice"])
 
@@ -33,6 +36,19 @@ def list_practice(
 @router.get("/stats", response_model=Stats)
 def stats(db: Session = Depends(get_db), client_id: str = Depends(get_client_id)) -> Stats:
     return Stats(**repo.compute_stats(db, client_id))
+
+
+@router.get("/practice/{record_id}", response_model=PracticeDetailOut)
+def practice_detail(
+    record_id: int, db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+) -> PracticeDetailOut:
+    record = db.scalar(select(PracticeRecord).where(
+        PracticeRecord.id == record_id, PracticeRecord.client_id == client_id,
+    ))
+    if record is None:
+        raise HTTPException(status_code=404, detail="Practice record not found")
+    return PracticeDetailOut.model_validate(record)
 
 
 @router.get("/stats/insights", response_model=Insights)

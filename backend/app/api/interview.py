@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import ValidationError
 
 from app.api.chat import get_client
-from app.data.interview_questions import INDEPENDENT_QUESTIONS
+from app.data.interview_questions import INTERVIEW_SETS
 from app.schemas.interview import (
     InterviewQuestions,
     InterviewResult,
@@ -21,12 +21,6 @@ from app.schemas.interview import (
 from app.services.deepseek import DeepSeekClient, DeepSeekError
 
 router = APIRouter(tags=["interview"])
-
-_SCENARIO_SYSTEM = """You are a TOEFL iBT speaking coach helping a learner prepare for Take an Interview. Generate ONE fresh interview question grounded in a realistic context (study, work, travel, technology, relationships, daily life).
-
-Ask about a personal experience, a reason, or an opinion the learner can develop with details. Use one or two clear, conversational sentences answerable in about 45 seconds.
-
-Return ONLY JSON: {"questions": ["..."]}."""
 
 _SCORE_SYSTEM = """You are an English speaking coach providing practice feedback for Take an Interview. You receive interview questions and the learner's answer transcript, so ignore minor transcription noise and missing punctuation.
 
@@ -43,50 +37,37 @@ For EACH item return an object with:
 Return ONLY JSON: {"overall": <number 0-6, the average of the scores>, "results": [ ... in the same order as the input ]}."""
 
 
-async def _ai_scenario_question(client: DeepSeekClient) -> str | None:
-    """One fresh scenario-grounded question, or None if generation fails."""
-    messages = [
-        {"role": "system", "content": _SCENARIO_SYSTEM},
-        {"role": "user", "content": "Give me one question for today."},
-    ]
-    try:
-        raw = await client.chat(
-            messages, temperature=0.95, max_tokens=120, response_format={"type": "json_object"}
-        )
-        items = [q for q in json.loads(raw).get("questions", []) if isinstance(q, str) and q.strip()]
-        return items[0].strip() if items else None
-    except (DeepSeekError, json.JSONDecodeError, ValueError, TypeError, KeyError):
-        return None
+@router.get("/interview/sets")
+def interview_sets() -> dict:
+    """Catalogue metadata only: no model call and no future questions leaked in UI."""
+    return {"sets": [
+        {"id": s.id, "topic": s.topic, "topic_en": s.topic_en, "intro": s.intro,
+         "question_count": len(s.questions), "source_title": s.source_title,
+         "source_url": s.source_url, "source_kind": s.source_kind,
+         "reviewed_at": s.reviewed_at}
+        for s in INTERVIEW_SETS
+    ]}
 
 
 @router.get("/interview/questions", response_model=InterviewQuestions)
 async def interview_questions(
-    n: int = 4,
-    ai: bool = True,
-    client: DeepSeekClient = Depends(get_client),
+    n: int = 4, ai: bool = False, set_id: str | None = None,
 ) -> InterviewQuestions:
-    """Real TOEFL questions from the bank, blended with one AI scenario question.
+    """Select one reviewed topic set. Legacy n/ai parameters remain accepted.
 
-    Always succeeds (the bank is the fallback), so the drill never blocks on the
-    model being unavailable.
+    ai no longer mixes unrelated generated questions into a sourced interview.
     """
-    n = max(1, min(n, 6))
-    pool = random.sample(INDEPENDENT_QUESTIONS, min(len(INDEPENDENT_QUESTIONS), n + 2))
-
-    if not ai:
-        return InterviewQuestions(questions=pool[:n])
-
-    questions = pool[: max(0, n - 1)]
-    extra = await _ai_scenario_question(client)
-    if extra and extra not in questions:
-        questions.append(extra)
-    # Top up from the bank if AI was unavailable or produced a duplicate.
-    for q in pool:
-        if len(questions) >= n:
-            break
-        if q not in questions:
-            questions.append(q)
-    return InterviewQuestions(questions=questions[:n])
+    group = next((s for s in INTERVIEW_SETS if s.id == set_id), None) if set_id else random.choice(INTERVIEW_SETS)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Interview set not found")
+    count = max(1, min(n, 4))
+    return InterviewQuestions(
+        questions=list(group.questions[:count]), set_id=group.id,
+        topic=group.topic, topic_en=group.topic_en, intro=group.intro,
+        hints=list(group.hints[:count]), source_title=group.source_title,
+        source_url=group.source_url, source_kind=group.source_kind,
+        reviewed_at=group.reviewed_at,
+    )
 
 
 @router.post("/interview/score", response_model=InterviewScoreResponse)
@@ -111,11 +92,13 @@ async def interview_score(
     try:
         data = json.loads(raw)
         results = [InterviewResult(**r) for r in data.get("results", []) if isinstance(r, dict)]
-        if not results:
-            raise ValueError("no results")
-        overall = data.get("overall")
-        if not isinstance(overall, (int, float)):
-            overall = sum(r.score for r in results) / len(results)
+        if not results or len(results) != len(req.items):
+            raise ValueError("incomplete results")
+        # Keep original transcripts and calculate the average deterministically.
+        for result, item in zip(results, req.items):
+            result.question = item.question
+            result.answer = item.answer
+        overall = sum(r.score for r in results) / len(results)
         overall = round(max(0.0, min(6.0, float(overall))), 1)
         return InterviewScoreResponse(overall=overall, results=results)
     except (json.JSONDecodeError, ValidationError, ValueError, TypeError) as exc:

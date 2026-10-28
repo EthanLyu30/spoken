@@ -5,6 +5,15 @@ from pydantic import BaseModel, Field
 
 class InterviewQuestions(BaseModel):
     questions: list[str]
+    set_id: str = ""
+    topic: str = ""
+    topic_en: str = ""
+    intro: str = ""
+    hints: list[str] = Field(default_factory=list)
+    source_title: str = ""
+    source_url: str = ""
+    source_kind: str = "official_adapted"
+    reviewed_at: str = ""
 
 
 class InterviewItem(BaseModel):

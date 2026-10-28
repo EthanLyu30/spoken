@@ -28,7 +28,7 @@ def test_interview_questions_bank_only():
     assert all(q in INDEPENDENT_QUESTIONS for q in qs)
 
 
-def test_interview_questions_blends_ai():
+def test_interview_questions_use_one_sourced_topic_without_ai():
     app.dependency_overrides[get_client] = lambda: _Stub(
         json.dumps({"questions": ["A fresh scenario question?"]})
     )
@@ -37,7 +37,10 @@ def test_interview_questions_blends_ai():
         assert resp.status_code == 200
         qs = resp.json()["questions"]
         assert len(qs) == 4
-        assert "A fresh scenario question?" in qs
+        assert "A fresh scenario question?" not in qs
+        assert resp.json()["set_id"]
+        assert resp.json()["source_url"].startswith("https://")
+        assert resp.json()["source_kind"] in {"official_adapted", "video_adapted"}
     finally:
         app.dependency_overrides.clear()
 
@@ -54,6 +57,24 @@ def test_interview_questions_ai_failure_falls_back_to_bank():
         assert len(resp.json()["questions"]) == 4  # bank still fills it
     finally:
         app.dependency_overrides.clear()
+
+
+def test_interview_catalogue_and_selected_set_are_consistent():
+    response = client.get("/api/interview/sets")
+    assert response.status_code == 200
+    sets = response.json()["sets"]
+    assert len(sets) >= 4
+    for entry in sets:
+        assert entry["question_count"] == 4
+        assert entry["source_url"].startswith("https://")
+        selected = client.get("/api/interview/questions", params={"set_id": entry["id"]}).json()
+        assert selected["set_id"] == entry["id"]
+        assert selected["topic"] == entry["topic"]
+        assert len(selected["questions"]) == len(selected["hints"]) == 4
+
+
+def test_interview_unknown_set_is_not_silently_replaced():
+    assert client.get("/api/interview/questions?set_id=missing").status_code == 404
 
 
 def test_interview_score():
@@ -120,5 +141,26 @@ def test_interview_score_service_error_503():
             json={"items": [{"question": "Q1", "answer": "a"}]},
         )
         assert resp.status_code == 503
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_partial_feedback_does_not_silently_drop_unrated_answers():
+    payload = {"overall": 4, "results": [{"question": "Q1", "answer": "a", "score": 4, "level": "Fair", "feedback": "ok", "sample_answer": "s"}]}
+    app.dependency_overrides[get_client] = lambda: _Stub(json.dumps(payload))
+    try:
+        response = client.post("/api/interview/score", json={"items": [{"question": "Q1", "answer": "a"}, {"question": "Q2", "answer": "b"}]})
+        assert response.status_code == 502
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_overall_is_the_actual_average_of_returned_question_scores():
+    payload = {"overall": 6, "results": [{"question": "Q1", "answer": "a", "score": 2, "level": "Fair", "feedback": "ok", "sample_answer": "s"}, {"question": "Q2", "answer": "b", "score": 4, "level": "Fair", "feedback": "ok", "sample_answer": "s"}]}
+    app.dependency_overrides[get_client] = lambda: _Stub(json.dumps(payload))
+    try:
+        response = client.post("/api/interview/score", json={"items": [{"question": "Q1", "answer": "a"}, {"question": "Q2", "answer": "b"}]})
+        assert response.status_code == 200
+        assert response.json()["overall"] == 3
     finally:
         app.dependency_overrides.clear()
