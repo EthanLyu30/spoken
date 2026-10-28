@@ -10,6 +10,7 @@ import { getClientId } from "./clientId";
 import { readChatStream } from "./chatStream";
 import { transcribeDirect } from "./directAsr";
 import { withTimeout } from "./requestTimeout";
+import { invalidateProgress } from "./progressCache";
 export { withTimeout } from "./requestTimeout";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -53,6 +54,7 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
     }
     throw new Error(detail || `${init?.method ?? "GET"} ${path} failed: ${res.status}`);
   }
+  if (init?.method && init.method !== "GET" && /^\/api\/(sessions|practice|words)(\/|$)/.test(path)) invalidateProgress();
   return res.json() as Promise<T>;
 }
 
@@ -441,6 +443,31 @@ export interface InterviewScore {
   results: InterviewResult[];
 }
 
+export interface InterviewSetSummary {
+  id: string;
+  topic: string;
+  topic_en: string;
+  intro: string;
+  question_count: number;
+  source_title: string;
+  source_url: string;
+  source_kind: string;
+  reviewed_at: string;
+}
+export interface InterviewDeck extends Omit<InterviewSetSummary, "id" | "question_count"> {
+  set_id: string;
+  questions: string[];
+  hints: string[];
+}
+export function getInterviewSets(signal?: AbortSignal): Promise<InterviewSetSummary[]> {
+  return request<{ sets: InterviewSetSummary[] }>("/api/interview/sets", { signal }).then(r => r.sets);
+}
+export function getInterviewSet(setId?: string, signal?: AbortSignal): Promise<InterviewDeck> {
+  const params = new URLSearchParams({ n: "4", ai: "false" });
+  if (setId) params.set("set_id", setId);
+  return request<InterviewDeck>("/api/interview/questions?" + params.toString(), { signal });
+}
+
 /** Take an Interview questions for the timed four-question drill. */
 export function getInterviewQuestions(n = 4, signal?: AbortSignal): Promise<string[]> {
   return request<{ questions: string[] }>(`/api/interview/questions?n=${n}`, { signal }).then(
@@ -466,6 +493,11 @@ export interface PracticeRecord {
   score: number;
   title: string;
   created_at: string;
+}
+
+export interface PracticeDetail extends PracticeRecord { detail: string; }
+export function getPracticeDetail(id: number, signal?: AbortSignal): Promise<PracticeDetail> {
+  return request<PracticeDetail>(`/api/practice/${id}`, { signal });
 }
 
 export interface Stats {

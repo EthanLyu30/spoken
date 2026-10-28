@@ -1,26 +1,29 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, RotateCcw, Volume2 } from "lucide-react";
 import type { InterviewScore } from "../lib/api";
-import { speakText } from "../lib/speech";
+import { speakText, stopSpeaking } from "../lib/speech";
 import { Buddy } from "./Buddy";
 
 export function InterviewResults({
   result,
   onRestart,
   onExit,
+  exitLabel = "回首页",
 }: {
   result: InterviewScore;
   onRestart: () => void;
   onExit: () => void;
+  exitLabel?: string;
 }) {
   const [selected, setSelected] = useState(0);
+  useEffect(() => () => stopSpeaking(), [selected]);
   const current = result.results[selected];
   return (
     <div className="interview-results">
       <div className="ui-page-head">
         <div>
           <p className="eyebrow">TAKE AN INTERVIEW · YOUR REVIEW</p>
-          <h1>这次的回答，更有条理了</h1>
+          <h1>把这次的表达，变成下次的底气。</h1>
           <p>回看表达，积累下一次能用上的说法。</p>
         </div>
         <button type="button" className="ui-button" onClick={onRestart}>
@@ -58,7 +61,7 @@ export function InterviewResults({
                 </div>
                 <div className="sample-answer">
                   <div>
-                    <h3>高分范例 · Sample</h3>
+                    <h3>参考表达 · Sample</h3>
                     <button
                       type="button"
                       onClick={() => speakText(current.sample_answer)}
@@ -96,7 +99,7 @@ export function InterviewResults({
       </div>
       <div className="interview-bottom">
         <button type="button" className="ui-secondary" onClick={onExit}>
-          回首页
+          {exitLabel}
           <ArrowRight />
         </button>
       </div>

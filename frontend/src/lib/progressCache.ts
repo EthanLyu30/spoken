@@ -1,0 +1,51 @@
+import type {
+  Insights,
+  PracticeRecord,
+  SessionDetail,
+  SessionSummary,
+  Stats,
+} from "./api";
+
+export interface ProgressData {
+  owner: string;
+  status: "loading" | "ready" | "error";
+  sessions: SessionSummary[];
+  practice: PracticeRecord[];
+  stats: Stats | null;
+  insights: Insights | null;
+  latest: SessionDetail | null;
+  errors: string[];
+  practicePending: boolean;
+  statsPending: boolean;
+}
+const cache = new Map<string, { at: number; data: ProgressData }>();
+let generation = 0;
+const listeners = new Set<() => void>();
+export function subscribeProgress(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+export function invalidateProgress(): void {
+  cache.clear();
+  generation++;
+  listeners.forEach((listener) => listener());
+}
+export function progressGeneration(): number {
+  return generation;
+}
+export function readProgressCache(owner: string): ProgressData | undefined {
+  const hit = cache.get(owner);
+  return hit && Date.now() - hit.at < 30_000 ? hit.data : undefined;
+}
+export function writeProgressCache(
+  owner: string,
+  data: ProgressData,
+  expectedGeneration: number,
+): void {
+  if (expectedGeneration !== generation || data.status !== "ready") return;
+  if (!cache.has(owner) && cache.size >= 4)
+    cache.delete(cache.keys().next().value!);
+  cache.set(owner, { at: Date.now(), data });
+}

@@ -9,6 +9,7 @@ import {
 } from "../lib/api";
 import { clearToken, setToken } from "../lib/authToken";
 import { useWords } from "./words";
+import { invalidateProgress } from "../lib/progressCache";
 
 /**
  * Account session. The JWT lives in localStorage (see authToken.ts) so the API
@@ -32,6 +33,7 @@ interface AuthState {
 }
 
 function swapOwner() {
+  invalidateProgress();
   const words = useWords.getState();
   words.reset();
   void words.refresh();

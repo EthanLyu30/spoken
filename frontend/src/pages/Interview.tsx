@@ -1,318 +1,549 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Loader2, Mic, Send, Timer } from "lucide-react";
-import { PlayfulBackground } from "../components/PlayfulBackground";
+import {
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  Check,
+  ChevronRight,
+  ExternalLink,
+  Lightbulb,
+  Loader2,
+  Mic,
+  RefreshCw,
+  RotateCcw,
+  Send,
+  Shuffle,
+  Timer,
+  Volume2,
+} from "lucide-react";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
-import { Button } from "../components/ui/Button";
-import { Ring } from "../components/ui/Ring";
-import {
-  getInterviewQuestions,
-  savePractice,
-  scoreInterview,
-  type InterviewScore,
-} from "../lib/api";
-import { transcribeSpeech } from "../lib/transcribe";
-import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { InterviewResults } from "../components/InterviewResults";
+import { getInterviewSets, type InterviewSetSummary } from "../lib/api";
+import { speakText } from "../lib/speech";
+import { getClientId } from "../lib/clientId";
+import { useAuth } from "../store/auth";
+import {
+  useInterviewSession,
+  type InterviewMode,
+} from "../hooks/useInterviewSession";
 
-const ANSWER_SECONDS = 45;
-
-type Phase = "intro" | "quiz" | "scoring" | "results" | "error";
-type QPhase = "ready" | "recording" | "transcribing";
-
+const stages = ["聊聊经历", "解释选择", "表达观点", "拓展讨论"];
 export default function Interview() {
-  const [phase, setPhase] = useState<Phase>("intro");
-  const [questions, setQuestions] = useState<string[]>([]);
-  const [idx, setIdx] = useState(0);
-  const [answers, setAnswers] = useState<string[]>([]);
-  const [qPhase, setQPhase] = useState<QPhase>("ready");
-  const [left, setLeft] = useState(ANSWER_SECONDS);
-  const [result, setResult] = useState<InterviewScore | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const recRef = useRef<ActiveRecorder | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const finishingRef = useRef(false);
+  const account = useAuth((s) => s.user?.id);
+  const owner = account ? "account:" + account : "device:" + getClientId();
+  const session = useInterviewSession(owner);
+  const [mode, setMode] = useState<InterviewMode>("practice");
+  const [sets, setSets] = useState<InterviewSetSummary[]>([]);
+  const [selected, setSelected] = useState("");
+  const [catalogueError, setCatalogueError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const navigate = useNavigate();
-
   useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      recRef.current?.stop().catch(() => undefined);
-    };
-  }, []);
-
-  async function begin() {
-    setPhase("scoring"); // brief loading reuse
-    setError(null);
-    try {
-      const qs = await getInterviewQuestions(4);
-      setQuestions(qs);
-      setAnswers([]);
-      setIdx(0);
-      setQPhase("ready");
-      setPhase("quiz");
-    } catch {
-      setError("题目生成失败，请确认后端在运行后重试。");
-      setPhase("error");
-    }
-  }
-
-  async function startAnswer() {
-    setError(null);
-    try {
-      recRef.current = await startRecording();
-    } catch {
-      setError("无法使用麦克风，请允许权限后重试。");
-      return;
-    }
-    setQPhase("recording");
-    finishingRef.current = false;
-    setLeft(ANSWER_SECONDS);
-    timerRef.current = setInterval(() => {
-      setLeft((s) => {
-        if (s <= 1) {
-          void finishAnswer();
-          return 0;
-        }
-        return s - 1;
+    const controller = new AbortController();
+    setCatalogueError(false);
+    getInterviewSets(controller.signal)
+      .then(setSets)
+      .catch(() => {
+        if (!controller.signal.aborted) setCatalogueError(true);
       });
-    }, 1000);
-  }
-
-  async function finishAnswer() {
-    if (finishingRef.current) return;
-    finishingRef.current = true;
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    if (qPhase === "transcribing") return;
-    setQPhase("transcribing");
-    const rec = recRef.current;
-    recRef.current = null;
-    let text = "";
-    try {
-      if (rec) text = (await transcribeSpeech(await rec.stop())).trim();
-      if (!text) throw new Error("empty transcription");
-    } catch {
-      finishingRef.current = false;
-      setError("这次没能识别到回答，请重新录一次；本题尚未提交评分。");
-      setQPhase("ready");
-      return;
-    }
-    const nextAnswers = [...answers, text];
-    setAnswers(nextAnswers);
-
-    if (idx + 1 < questions.length) {
-      setIdx(idx + 1);
-      setQPhase("ready");
-    } else {
-      await scoreAll(nextAnswers);
-    }
-  }
-
-  async function scoreAll(allAnswers: string[]) {
-    setPhase("scoring");
-    try {
-      const items = questions.map((q, i) => ({
-        question: q,
-        answer: allAnswers[i] ?? "",
-      }));
-      const res = await scoreInterview(items);
-      setResult(res);
-      savePractice("interview", res.overall, "限时问答").catch(() => undefined);
-      setPhase("results");
-    } catch {
-      setError("评分失败，请确认后端在运行后重试。");
-      setPhase("error");
-    }
-  }
-
-  function restart() {
-    setResult(null);
-    setAnswers([]);
-    setIdx(0);
-    setPhase("intro");
-  }
-
+    return () => controller.abort();
+  }, [attempt]);
+  const selection = sets.find((s) => s.id === selected);
+  const { phase, deck, idx, qPhase, error } = session;
+  const active = phase !== "intro" && phase !== "results";
   return (
-    <div className="min-h-screen pb-24">
-      <PlayfulBackground />
-
-      <main className="mx-auto w-full max-w-2xl px-5 py-6 interview-page">
+    <div className="min-h-screen pb-24 interview-page-v2">
+      <main className="mx-auto">
         {phase === "intro" && (
-          <section className="interview-intro">
-            <div>
-              <p className="eyebrow">TAKE AN INTERVIEW</p>
-              <h1>
-                每个问题，都是一次
-                <br />
-                自然表达的机会。
-              </h1>
-              <p className="intro-description">
-                围绕经历、理由和观点，练习自然、有条理地回应访谈问题。
-              </p>
-              <div className="interview-facts">
-                <span>
-                  <strong>4</strong>道问题
-                </span>
-                <span>
-                  <strong>45</strong>秒 / 题
-                </span>
-                <span>
-                  <strong>6</strong>分制参考
-                </span>
+          <>
+            <header className="interview-heading-v2">
+              <div>
+                <p className="eyebrow">TOEFL iBT 2026 · TAKE AN INTERVIEW</p>
+                <h1>
+                  一个主题，
+                  <br />
+                  聊出你的想法。
+                </h1>
+                <p>从熟悉的经历出发，把理由说清，把观点展开。</p>
               </div>
-              <Button size="lg" onClick={begin}>
-                开始访谈练习
-              </Button>
-              <p className="interview-note">
-                需要麦克风权限 · 建议在安静环境作答
-              </p>
+              <div className="interview-heading-art">
+                <Buddy size={130} />
+                <span>Think it. Say it.</span>
+              </div>
+            </header>
+            <div className="interview-mobile-quickstart">
+              <span>
+                {selection?.topic ?? "随机主题"}
+                <small>同主题四题 · 每题 45 秒</small>
+              </span>
+              <button
+                className="ui-button"
+                disabled={catalogueError || !sets.length}
+                onClick={() => void session.begin(mode, selected || undefined)}
+              >
+                {mode === "practice" ? "开始练习" : "开始模拟"}
+                <ArrowRight size={16} />
+              </button>
             </div>
-            <aside>
-              <Buddy mood="happy" size={170} />
-              <h2>不急着完美，先把想法说出来。</h2>
-              <ol>
-                <li>看到题目，组织一下思路</li>
-                <li>点击开始回答，45 秒内自然表达</li>
-                <li>完成四题，回看建议和参考答案</li>
-              </ol>
-              <p>基于转写内容提供练习反馈，不包含发音评测。</p>
-            </aside>
-          </section>
+            <div className="interview-setup-grid">
+              <section className="interview-topic-panel">
+                <div className="learning-section-title">
+                  <div>
+                    <p className="eyebrow">01 · CHOOSE YOUR TOPIC</p>
+                    <h2>今天，想聊哪一个？</h2>
+                  </div>
+                  <span className="interview-source-chip">题源可追溯</span>
+                </div>
+                <div
+                  className="interview-topic-grid"
+                  role="group"
+                  aria-label="选择访谈主题"
+                >
+                  <button
+                    aria-pressed={!selected}
+                    onClick={() => setSelected("")}
+                  >
+                    <Shuffle />
+                    <strong>随机一组</strong>
+                    <small>让话题带来一点惊喜</small>
+                  </button>
+                  {sets.map((entry, i) => (
+                    <button
+                      key={entry.id}
+                      aria-pressed={selected === entry.id}
+                      onClick={() => setSelected(entry.id)}
+                    >
+                      <span className="interview-topic-number">0{i + 1}</span>
+                      <strong>{entry.topic}</strong>
+                      <small>{entry.topic_en}</small>
+                      <span className="interview-topic-source">
+                        {entry.source_kind === "video_adapted"
+                          ? "Inspire SpeakEasy"
+                          : "ETS 公开样题"}
+                      </span>
+                      {selected === entry.id && (
+                        <Check className="topic-selected" size={15} />
+                      )}
+                    </button>
+                  ))}
+                </div>
+                {catalogueError && (
+                  <p role="status" className="learning-notice">
+                    主题暂时未能加载。
+                    <button onClick={() => setAttempt((n) => n + 1)}>
+                      重新加载
+                    </button>
+                  </p>
+                )}
+                <div className="interview-mode-heading">
+                  <p className="eyebrow">02 · FIND YOUR PACE</p>
+                  <h2>按自己的节奏，或像考试一样。</h2>
+                </div>
+                <div
+                  className="interview-modes"
+                  role="group"
+                  aria-label="访谈模式"
+                >
+                  <button
+                    aria-pressed={mode === "practice"}
+                    onClick={() => setMode("practice")}
+                  >
+                    <BookOpen />
+                    <span>
+                      <strong>
+                        练习模式<small>推荐</small>
+                      </strong>
+                      <p>先理思路 · 可看提示 · 逐题确认与重录</p>
+                    </span>
+                    {mode === "practice" && <Check size={17} />}
+                  </button>
+                  <button
+                    aria-pressed={mode === "simulation"}
+                    onClick={() => setMode("simulation")}
+                  >
+                    <Timer />
+                    <span>
+                      <strong>模拟模式</strong>
+                      <p>无准备时间 · 听题后自动录音 · 连续四题</p>
+                    </span>
+                    {mode === "simulation" && <Check size={17} />}
+                  </button>
+                </div>
+                <details className="interview-source-details">
+                  <summary>这些题目来自哪里？</summary>
+                  <p>
+                    来自已核实的 Inspire SpeakEasy 视频与 ETS
+                    新版公开样题，保留同主题四题结构，并用自己的措辞改编。它们是练习材料，不是已核实的考场原题；不会混入临时
+                    AI 生成题。目前已核实并收录博主 #190
+                    写作主题，其余系列可通过下方链接继续练习。
+                  </p>
+                  {sets.map((s) => (
+                    <a
+                      key={s.id}
+                      href={s.source_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {s.source_title}
+                      <ExternalLink size={12} />
+                    </a>
+                  ))}
+                  <a
+                    href="https://www.youtube.com/watch?v=SCGP0s0UmHE&list=PLfNWEZJODl5iNLcLDJX27jebB_psDCPec"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Inspire SpeakEasy · 完整 Interview 系列
+                    <ExternalLink size={12} />
+                  </a>
+                </details>
+              </section>
+              <aside className="interview-start-panel">
+                <span className="eyebrow">YOUR NEXT CONVERSATION</span>
+                <h2>{selection?.topic ?? "准备好，聊个新话题。"}</h2>
+                <p>
+                  {selection?.topic_en ??
+                    "A little challenge. A better conversation."}
+                </p>
+                <div className="interview-session-facts">
+                  <span>
+                    <strong>4</strong>道同主题问题
+                  </span>
+                  <span>
+                    <strong>
+                      45<small>s</small>
+                    </strong>
+                    每题作答时间
+                  </span>
+                </div>
+                <ol>
+                  {stages.map((stage, i) => (
+                    <li key={stage}>
+                      <span>0{i + 1}</span>
+                      {stage}
+                    </li>
+                  ))}
+                </ol>
+                <button
+                  className="ui-button"
+                  disabled={catalogueError || !sets.length}
+                  onClick={() =>
+                    void session.begin(mode, selected || undefined)
+                  }
+                >
+                  {mode === "practice" ? "开始这组练习" : "开始模拟访谈"}
+                  <ArrowRight size={18} />
+                </button>
+                <p className="interview-mic-note">
+                  <Mic size={14} />
+                  {mode === "practice"
+                    ? "录音时需要麦克风权限"
+                    : "先确认麦克风，再逐题听题作答"}
+                </p>
+                {error && (
+                  <p role="alert" className="interview-error">
+                    {error}
+                  </p>
+                )}
+                <p className="interview-score-note">
+                  完成后获得逐题建议与 /6
+                  练习参考分。反馈基于转写内容，不包含发音评测。
+                </p>
+              </aside>
+            </div>
+          </>
         )}
-
-        {phase === "scoring" && (
-          <section className="card grid place-items-center p-10 text-center">
-            <Buddy mood="talking" size={120} />
-            <h1 className="mt-3 font-display text-xl font-semibold text-ink">
-              {result === null && questions.length === 0
-                ? "正在出题…"
-                : "正在整理访谈反馈…"}
-            </h1>
-            <p className="mt-1 text-sm text-muted">稍等一下，马上好</p>
-          </section>
+        {active && (
+          <header className="interview-run-heading">
+            <button onClick={session.exit} className="ui-secondary">
+              <ArrowLeft size={15} />
+              退出本次
+            </button>
+            <span>
+              {session.mode === "practice" ? "练习模式" : "模拟模式"}
+              <small>TAKE AN INTERVIEW</small>
+            </span>
+          </header>
         )}
-
-        {phase === "error" && (
-          <section className="card grid place-items-center gap-4 p-10 text-center">
-            <Buddy mood="idle" size={110} />
-            <p role="alert" className="font-semibold text-ink">
-              {error}
+        {phase === "loading" && (
+          <section className="interview-loading">
+            <Buddy mood="listening" size={100} />
+            <h2>准备好这一组对话…</h2>
+            <p>
+              {session.mode === "simulation"
+                ? "请先允许麦克风，接下来会听题并自动开始计时。"
+                : "正在准备本次主题，马上开始。"}
             </p>
-            <div className="flex gap-3">
-              <Button variant="soft" onClick={() => setPhase("intro")}>
-                重新开始
-              </Button>
-              <Link to="/">
-                <Button variant="ghost">回首页</Button>
+          </section>
+        )}
+        {phase === "quiz" && deck && (
+          <>
+            <div className="interview-run-title">
+              <div>
+                <p className="eyebrow">{deck.topic_en}</p>
+                <h1>{deck.topic}</h1>
+              </div>
+              <span className="interview-position">
+                QUESTION <strong>0{idx + 1}</strong> / 04
+              </span>
+            </div>
+            <div className="interview-workspace">
+              <section className="interview-speaking-card">
+                <div className="interview-question-meta">
+                  <span>{stages[idx]}</span>
+                  <span>
+                    <Timer size={14} />
+                    45 秒作答
+                  </span>
+                </div>
+                <h2>{deck.questions[idx]}</h2>
+                {session.mode === "practice" && (
+                  <div className="interview-question-tools">
+                    <button onClick={() => speakText(deck.questions[idx])}>
+                      <Volume2 size={16} />
+                      听一听题目
+                    </button>
+                    <details>
+                      <summary>
+                        <Lightbulb size={15} />
+                        一点思路
+                      </summary>
+                      <p>{deck.hints[idx]}</p>
+                    </details>
+                  </div>
+                )}
+                <div className={"interview-recorder-area " + qPhase}>
+                  {qPhase === "recording" ? (
+                    <>
+                      <div
+                        className="interview-countdown"
+                        role="timer"
+                        aria-label={"剩余 " + session.left + " 秒"}
+                      >
+                        <strong>
+                          {String(Math.floor(session.left / 60)).padStart(
+                            2,
+                            "0",
+                          )}
+                          :{String(session.left % 60).padStart(2, "0")}
+                        </strong>
+                        <span>
+                          <i />
+                          正在录音 · 自然说出你的想法
+                        </span>
+                      </div>
+                      <progress
+                        value={session.left}
+                        max={45}
+                        aria-label="作答剩余时间"
+                      />
+                      <button
+                        className="ui-button"
+                        onClick={() => void session.finishAnswer()}
+                      >
+                        <Send size={17} />
+                        {session.mode === "practice"
+                          ? "结束录音，确认回答"
+                          : "提前完成本题"}
+                      </button>
+                    </>
+                  ) : qPhase === "review" ? (
+                    <>
+                      <label htmlFor="interview-transcript">
+                        确认你的回答<span>可修正识别错误</span>
+                      </label>
+                      <textarea
+                        id="interview-transcript"
+                        value={session.draft}
+                        maxLength={4000}
+                        onChange={(e) => session.setDraft(e.target.value)}
+                      />
+                      <div className="interview-answer-actions">
+                        <button
+                          className="ui-secondary"
+                          onClick={() => void session.startAnswer()}
+                        >
+                          <RotateCcw size={15} />
+                          重新录一遍
+                        </button>
+                        <button
+                          className="ui-button"
+                          disabled={!session.draft.trim()}
+                          onClick={() => void session.acceptAnswer()}
+                        >
+                          {idx === 3 ? "完成并查看反馈" : "确认，进入下一题"}
+                          <ArrowRight size={16} />
+                        </button>
+                      </div>
+                    </>
+                  ) : ["listening", "starting", "transcribing"].includes(
+                      qPhase,
+                    ) ? (
+                    <div className="interview-processing">
+                      <Loader2 className="animate-spin" size={25} />
+                      <strong>
+                        {qPhase === "listening"
+                          ? "请听题，随后自动开始作答"
+                          : qPhase === "starting"
+                            ? "正在连接麦克风…"
+                            : "正在识别你的回答…"}
+                      </strong>
+                      <p>
+                        {qPhase === "transcribing"
+                          ? "保留你说过的每一句，马上就好。"
+                          : "不用抢答，计时会在录音开始后启动。"}
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="interview-ready-icon">
+                        <Mic />
+                      </div>
+                      <h3>
+                        {session.mode === "practice"
+                          ? "先想好，再开口。"
+                          : "本题已暂停，请恢复作答。"}
+                      </h3>
+                      <p>
+                        {session.mode === "practice"
+                          ? "准备时间不计时，点击后开始 45 秒录音。"
+                          : "技术问题已暂停模拟，本题不会被当作未作答计分。"}
+                      </p>
+                      <div className="interview-answer-actions">
+                        {session.canRetryRecognition && (
+                          <button
+                            className="ui-secondary"
+                            onClick={() => void session.retryRecognition()}
+                          >
+                            <RefreshCw size={15} />
+                            重新识别录音
+                          </button>
+                        )}
+                        <button
+                          className="ui-button"
+                          onClick={() => void session.startAnswer()}
+                        >
+                          <Mic size={17} />
+                          {session.canRetryRecognition
+                            ? "重新录制"
+                            : "开始回答"}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  {error && (
+                    <p role="alert" className="interview-error">
+                      {error}
+                    </p>
+                  )}
+                </div>
+              </section>
+              <aside className="interview-run-sidebar">
+                <p className="eyebrow">ONE TOPIC · FOUR STEPS</p>
+                <h2>一步步，把想法说完整。</h2>
+                <ol>
+                  {stages.map((stage, i) => (
+                    <li
+                      key={stage}
+                      className={
+                        i === idx ? "active" : i < idx ? "complete" : ""
+                      }
+                    >
+                      <span>
+                        {i < session.answers.length ? (
+                          <Check size={15} />
+                        ) : (
+                          "0" + (i + 1)
+                        )}
+                      </span>
+                      <div>
+                        <strong>{stage}</strong>
+                        <small>
+                          {i < session.answers.length
+                            ? "已完成"
+                            : i === idx
+                              ? "当前问题"
+                              : "稍后解锁"}
+                        </small>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+                <p>
+                  {session.mode === "practice"
+                    ? "回答中带一个具体细节，往往比堆砌观点更有说服力。"
+                    : "听完问题后直接作答，尽量持续表达并给出理由。"}
+                </p>
+                <a href={deck.source_url} target="_blank" rel="noreferrer">
+                  {deck.source_title}
+                  <ExternalLink size={12} />
+                </a>
+              </aside>
+            </div>
+          </>
+        )}
+        {phase === "scoring" && (
+          <section className="interview-loading">
+            <Buddy mood="listening" size={110} />
+            <h2>四个回答，都值得认真回看。</h2>
+            <p>正在整理表达建议与参考答案。你的回答已保留。</p>
+            <Loader2 size={22} className="animate-spin" />
+          </section>
+        )}
+        {phase === "error" && (
+          <section className="interview-loading">
+            <Buddy size={90} />
+            <h2>回答都在，稍后再试一次。</h2>
+            <p role="alert">{error}</p>
+            <button
+              className="ui-button"
+              onClick={() => void session.retryScore()}
+            >
+              <RefreshCw size={17} />
+              重新生成反馈
+            </button>
+          </section>
+        )}
+        {phase === "results" && session.result && (
+          <>
+            {session.saving && (
+              <p role="status" className="learning-notice">
+                反馈已生成，练习记录正在保存。
+              </p>
+            )}
+            <div className="interview-result-source">
+              <span>
+                {deck?.topic} ·{" "}
+                {session.mode === "practice" ? "练习模式" : "模拟模式"}
+              </span>
+              <Link to="/progress">
+                去学习进度
+                <ChevronRight size={15} />
               </Link>
             </div>
-          </section>
-        )}
-
-        {phase === "quiz" && (
-          <div className="interview-quiz-grid">
-            <section className="interview-question card p-6 md:p-8">
-              <div className="mb-4 flex items-center justify-between">
-                <span className="rounded-full bg-surface-2 px-3 py-1 text-xs font-bold text-coral-deep">
-                  第 {idx + 1} / {questions.length} 题
-                </span>
-                {qPhase === "recording" && (
-                  <span className="inline-flex items-center gap-1.5 text-sm font-bold text-[#e6503d]">
-                    <Timer className="h-4 w-4" /> {left}s
-                  </span>
-                )}
-              </div>
-
-              <h2 className="font-display text-xl font-semibold leading-snug text-ink md:text-2xl">
-                {questions[idx]}
-              </h2>
-
-              <div className="mt-6 grid place-items-center gap-4">
-                {qPhase === "recording" ? (
-                  <>
-                    <Ring
-                      pct={(left / ANSWER_SECONDS) * 100}
-                      size={120}
-                      stroke={12}
-                      color="var(--coral)"
-                    >
-                      <div className="text-center">
-                        <div className="font-display text-3xl font-bold tabnum text-ink">
-                          {left}
-                        </div>
-                        <div className="text-[0.6rem] font-bold uppercase text-muted">
-                          秒
-                        </div>
-                      </div>
-                    </Ring>
-                    <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted">
-                      <Mic className="h-4 w-4 animate-pulse text-[#e6503d]" />{" "}
-                      正在录音，开口说英文…
-                    </span>
-                    <Button onClick={() => void finishAnswer()}>
-                      <Send className="h-5 w-5" /> 提交回答
-                    </Button>
-                  </>
-                ) : qPhase === "transcribing" ? (
-                  <span className="inline-flex items-center gap-2 text-muted">
-                    <Loader2 className="h-5 w-5 animate-spin" /> 识别中…
-                  </span>
-                ) : (
-                  <>
-                    <Buddy mood="listening" size={104} />
-                    <p className="text-sm text-muted">
-                      想好思路后点开始，计时 45 秒
-                    </p>
-                    <Button size="lg" onClick={startAnswer}>
-                      <Mic className="h-5 w-5" /> 开始回答（45 秒）
-                    </Button>
-                    {error && (
-                      <p
-                        role="alert"
-                        className="text-xs font-semibold text-[#e6503d]"
-                      >
-                        {error}
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-            </section>
-            <aside className="interview-trail">
-              <h2>本次访谈</h2>
-              {questions.map((q, i) => (
-                <div key={q} className={i === idx ? "active" : ""}>
-                  <span>
-                    第 {i + 1} 题{" "}
-                    {i < answers.length
-                      ? "· 已完成"
-                      : i === idx
-                        ? "· 正在回答"
-                        : "· 待作答"}
-                  </span>
-                  <p>{q}</p>
-                </div>
-              ))}
-              <p>想好思路后再开始，准备时间不计入作答。</p>
-            </aside>
-          </div>
-        )}
-
-        {phase === "results" && result && (
-          <InterviewResults
-            result={result}
-            onRestart={restart}
-            onExit={() => navigate("/")}
-          />
+            {session.saveError && (
+              <p className="learning-notice" role="status">
+                反馈已生成，但记录还没保存。
+                <button
+                  disabled={session.saving}
+                  onClick={() => void session.retrySave()}
+                >
+                  {session.saving ? "保存中…" : "重试保存"}
+                </button>
+              </p>
+            )}
+            <InterviewResults
+              result={session.result}
+              onRestart={session.exit}
+              onExit={() => navigate("/progress")}
+              exitLabel="查看学习进度"
+            />
+          </>
         )}
       </main>
-
-      <BottomNav />
+      {!active && <BottomNav />}
     </div>
   );
 }

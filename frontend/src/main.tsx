@@ -5,6 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import "./index.css";
 import "./ui.css";
+import "./learning.css";
 import { bootstrapLocalSpeechModels } from "./lib/localSpeech/bootstrap";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
