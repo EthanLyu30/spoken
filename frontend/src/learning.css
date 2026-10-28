@@ -454,6 +454,102 @@
   margin-top: 20px;
   white-space: nowrap;
 }
+.interview-collections {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.interview-collections button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fffefa;
+  padding: 9px 13px;
+  font-size: 12px;
+}
+.interview-collections button[aria-pressed="true"] {
+  border-color: #e57a64;
+  background: #fff1e9;
+  color: var(--coral-deep);
+}
+.interview-collections button span {
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.interview-library-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 13px;
+  background: #fffefa;
+  color: var(--muted);
+}
+.interview-library-search:focus-within {
+  border-color: var(--coral-deep);
+  outline: 2px solid #e57a6420;
+}
+.interview-library-search input {
+  flex: 1;
+  width: 0;
+  min-height: 42px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+}
+.interview-library-count {
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.interview-library-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 13px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.interview-library-pagination button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #fffefa;
+  color: var(--ink);
+}
+.interview-library button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.interview-library-empty {
+  padding: 18px 12px;
+  margin-top: 10px;
+  text-align: center;
+  border-radius: 10px;
+  background: #f8f2e9;
+  color: var(--muted);
+  font-size: 12px;
+}
+.interview-library-empty button {
+  margin-top: 8px;
+  min-height: 36px;
+  color: var(--coral-deep);
+  text-decoration: underline;
+}
 .interview-topic-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -493,7 +589,8 @@
     600 14px/1.4 "Segoe UI",
     sans-serif;
   display: block;
-  width: 19px;
+  min-width: 19px;
+  width: fit-content;
   height: 20px;
   margin-bottom: 9px;
 }
@@ -1242,6 +1339,12 @@
   }
   .interview-source-chip {
     font-size: 9px;
+  }
+  .interview-collections button {
+    flex: 1;
+    padding: 9px 8px;
+    gap: 6px;
+    font-size: 11px;
   }
   .interview-topic-grid {
     gap: 9px;

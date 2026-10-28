@@ -65,6 +65,17 @@ it("automatically starts and advances timed questions in simulation mode", async
   expect(result.current.qPhase).toBe("recording");
   expect(mocks.speakText).toHaveBeenCalledWith("Question two?");
 });
+it("draws practice and simulation from the requested source and defaults to Inspire", async () => {
+  const { result } = renderHook(() => useInterviewSession("device-source"));
+  await act(async () => result.current.begin("practice"));
+  expect(mocks.getInterviewSet).toHaveBeenLastCalledWith(undefined, expect.any(AbortSignal), "inspire");
+  act(() => result.current.exit());
+  await act(async () => result.current.begin("practice", "ets-1", "ets"));
+  expect(mocks.getInterviewSet).toHaveBeenLastCalledWith("ets-1", expect.any(AbortSignal), "ets");
+  act(() => result.current.exit());
+  await act(async () => result.current.begin("simulation", undefined, "ets"));
+  expect(mocks.getInterviewSet).toHaveBeenLastCalledWith(undefined, expect.any(AbortSignal), "ets");
+});
 it("stops a late microphone grant after the learner has exited", async () => {
   let resolve!: (value: { stop: ReturnType<typeof vi.fn> }) => void;
   mocks.startRecording.mockReturnValue(

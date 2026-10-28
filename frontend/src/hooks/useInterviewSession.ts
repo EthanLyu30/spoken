@@ -4,6 +4,7 @@ import {
   savePractice,
   scoreInterview,
   type InterviewDeck,
+  type InterviewSource,
   type InterviewScore,
 } from "../lib/api";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
@@ -131,7 +132,11 @@ export function useInterviewSession(owner: string) {
       await record(deck, idx, answers, mode, run);
     }
   }
-  async function begin(mode: InterviewMode, setId?: string) {
+  async function begin(
+    mode: InterviewMode,
+    setId?: string,
+    source: InterviewSource = "inspire",
+  ) {
     if (locked.current || stateRef.current.phase !== "intro") return;
     cleanup();
     const run = version.current;
@@ -144,7 +149,7 @@ export function useInterviewSession(owner: string) {
         await warmup.stop();
         if (!active(run)) return;
       }
-      const deck = await getInterviewSet(setId, controller.current.signal);
+      const deck = await getInterviewSet(setId, controller.current.signal, source);
       if (!active(run)) return;
       if (deck.questions.length !== 4) throw new Error("Incomplete set");
       update({ deck, phase: "quiz" });

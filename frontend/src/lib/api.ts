@@ -443,8 +443,12 @@ export interface InterviewScore {
   results: InterviewResult[];
 }
 
+export type InterviewCollection = "inspire" | "ets";
+export type InterviewSource = InterviewCollection | "all";
 export interface InterviewSetSummary {
   id: string;
+  collection: InterviewCollection;
+  episode: number | null;
   topic: string;
   topic_en: string;
   intro: string;
@@ -462,8 +466,12 @@ export interface InterviewDeck extends Omit<InterviewSetSummary, "id" | "questio
 export function getInterviewSets(signal?: AbortSignal): Promise<InterviewSetSummary[]> {
   return request<{ sets: InterviewSetSummary[] }>("/api/interview/sets", { signal }).then(r => r.sets);
 }
-export function getInterviewSet(setId?: string, signal?: AbortSignal): Promise<InterviewDeck> {
-  const params = new URLSearchParams({ n: "4", ai: "false" });
+export function getInterviewSet(
+  setId?: string,
+  signal?: AbortSignal,
+  source: InterviewSource = "inspire",
+): Promise<InterviewDeck> {
+  const params = new URLSearchParams({ n: "4", ai: "false", source });
   if (setId) params.set("set_id", setId);
   return request<InterviewDeck>("/api/interview/questions?" + params.toString(), { signal });
 }

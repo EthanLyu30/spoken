@@ -13,14 +13,18 @@ import {
   RefreshCw,
   RotateCcw,
   Send,
-  Shuffle,
   Timer,
   Volume2,
 } from "lucide-react";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import { InterviewResults } from "../components/InterviewResults";
-import { getInterviewSets, type InterviewSetSummary } from "../lib/api";
+import { InterviewLibrary } from "../components/InterviewLibrary";
+import {
+  getInterviewSets,
+  type InterviewCollection,
+  type InterviewSetSummary,
+} from "../lib/api";
 import { speakText } from "../lib/speech";
 import { getClientId } from "../lib/clientId";
 import { useAuth } from "../store/auth";
@@ -36,21 +40,31 @@ export default function Interview() {
   const session = useInterviewSession(owner);
   const [mode, setMode] = useState<InterviewMode>("practice");
   const [sets, setSets] = useState<InterviewSetSummary[]>([]);
+  const [source, setSource] = useState<InterviewCollection>("inspire");
   const [selected, setSelected] = useState("");
+  const [catalogueLoading, setCatalogueLoading] = useState(true);
   const [catalogueError, setCatalogueError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const navigate = useNavigate();
   useEffect(() => {
     const controller = new AbortController();
     setCatalogueError(false);
+    setCatalogueLoading(true);
     getInterviewSets(controller.signal)
       .then(setSets)
       .catch(() => {
         if (!controller.signal.aborted) setCatalogueError(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCatalogueLoading(false);
       });
     return () => controller.abort();
   }, [attempt]);
-  const selection = sets.find((s) => s.id === selected);
+  const sourceSets = sets.filter((entry) => entry.collection === source);
+  const selection = sourceSets.find((entry) => entry.id === selected);
+  const canStart = !catalogueLoading && !catalogueError && sourceSets.length > 0;
+  const inspireCount = sets.filter((entry) => entry.collection === "inspire").length;
+  const etsCount = sets.filter((entry) => entry.collection === "ets").length;
   const { phase, deck, idx, qPhase, error } = session;
   const active = phase !== "intro" && phase !== "results";
   return (
@@ -76,12 +90,14 @@ export default function Interview() {
             <div className="interview-mobile-quickstart">
               <span>
                 {selection?.topic ?? "随机主题"}
-                <small>同主题四题 · 每题 45 秒</small>
+                <small>
+                  {source === "inspire" ? "博主系列" : "ETS 公开样题"} · 四题 · 每题 45 秒
+                </small>
               </span>
               <button
                 className="ui-button"
-                disabled={catalogueError || !sets.length}
-                onClick={() => void session.begin(mode, selected || undefined)}
+                disabled={!canStart}
+                onClick={() => void session.begin(mode, selection?.id, source)}
               >
                 {mode === "practice" ? "开始练习" : "开始模拟"}
                 <ArrowRight size={16} />
@@ -96,39 +112,15 @@ export default function Interview() {
                   </div>
                   <span className="interview-source-chip">题源可追溯</span>
                 </div>
-                <div
-                  className="interview-topic-grid"
-                  role="group"
-                  aria-label="选择访谈主题"
-                >
-                  <button
-                    aria-pressed={!selected}
-                    onClick={() => setSelected("")}
-                  >
-                    <Shuffle />
-                    <strong>随机一组</strong>
-                    <small>让话题带来一点惊喜</small>
-                  </button>
-                  {sets.map((entry, i) => (
-                    <button
-                      key={entry.id}
-                      aria-pressed={selected === entry.id}
-                      onClick={() => setSelected(entry.id)}
-                    >
-                      <span className="interview-topic-number">0{i + 1}</span>
-                      <strong>{entry.topic}</strong>
-                      <small>{entry.topic_en}</small>
-                      <span className="interview-topic-source">
-                        {entry.source_kind === "video_adapted"
-                          ? "Inspire SpeakEasy"
-                          : "ETS 公开样题"}
-                      </span>
-                      {selected === entry.id && (
-                        <Check className="topic-selected" size={15} />
-                      )}
-                    </button>
-                  ))}
-                </div>
+                <InterviewLibrary
+                  sets={sets}
+                  source={source}
+                  onSourceChange={setSource}
+                  selected={selection?.id ?? ""}
+                  onSelect={setSelected}
+                  loading={catalogueLoading}
+                  error={catalogueError}
+                />
                 {catalogueError && (
                   <p role="status" className="learning-notice">
                     主题暂时未能加载。
@@ -172,26 +164,27 @@ export default function Interview() {
                   </button>
                 </div>
                 <details className="interview-source-details">
-                  <summary>这些题目来自哪里？</summary>
+                  <summary>系列收录说明</summary>
                   <p>
-                    来自已核实的 Inspire SpeakEasy 视频与 ETS
-                    新版公开样题，保留同主题四题结构，并用自己的措辞改编。它们是练习材料，不是已核实的考场原题；不会混入临时
-                    AI 生成题。目前已核实并收录博主 #190
-                    写作主题，其余系列可通过下方链接继续练习。
+                    {catalogueLoading
+                      ? "正在读取收录数量。"
+                      : catalogueError
+                        ? "收录数量暂时无法读取，请重新加载题库。"
+                        : `博主系列已收录 ${inspireCount} 组，ETS 公开样题 ${etsCount} 组。`}
+                    来自已核实的 Inspire SpeakEasy 视频与 ETS 新版公开样题，按原题意改编，每组保留同主题四题与来源链接。练习和模拟共用所选来源，随机抽取完整题组。它们是练习材料，不是已核实的考场原题；不会混入临时 AI 生成题。
                   </p>
-                  {sets.map((s) => (
+                  {selection && (
                     <a
-                      key={s.id}
-                      href={s.source_url}
+                      href={selection.source_url}
                       target="_blank"
                       rel="noreferrer"
                     >
-                      {s.source_title}
+                      当前主题来源 · {selection.source_title}
                       <ExternalLink size={12} />
                     </a>
-                  ))}
+                  )}
                   <a
-                    href="https://www.youtube.com/watch?v=SCGP0s0UmHE&list=PLfNWEZJODl5iNLcLDJX27jebB_psDCPec"
+                    href="https://www.youtube.com/playlist?list=PLfNWEZJODl5iNLcLDJX27jebB_psDCPec"
                     target="_blank"
                     rel="noreferrer"
                   >
@@ -228,9 +221,9 @@ export default function Interview() {
                 </ol>
                 <button
                   className="ui-button"
-                  disabled={catalogueError || !sets.length}
+                  disabled={!canStart}
                   onClick={() =>
-                    void session.begin(mode, selected || undefined)
+                    void session.begin(mode, selection?.id, source)
                   }
                 >
                   {mode === "practice" ? "开始这组练习" : "开始模拟访谈"}
