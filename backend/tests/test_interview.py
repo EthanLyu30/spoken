@@ -73,6 +73,31 @@ def test_interview_catalogue_and_selected_set_are_consistent():
         assert len(selected["questions"]) == len(selected["hints"]) == 4
 
 
+def test_reviewed_series_and_ets_supplement_are_available():
+    response = client.get("/api/interview/sets")
+    assert response.status_code == 200
+    groups = response.json()["sets"]
+    inspire = [group for group in groups if group["collection"] == "inspire"]
+    ets = [group for group in groups if group["collection"] == "ets"]
+
+    from app.data.interview_questions import INSPIRE_DATA_PATH
+
+    document = json.loads(INSPIRE_DATA_PATH.read_text(encoding="utf-8"))
+    available = {group["episode"] for group in inspire}
+    pending = {entry["episode"] for entry in document["pending_episodes"]}
+    assert len(inspire) == document["verified_count"] == 190
+    assert document["pending_episodes"] == []
+    assert available.isdisjoint(pending)
+    assert available | pending == set(range(1, document["inventory_count"] + 1)) == set(range(1, 191))
+    assert len({group["id"] for group in inspire}) == 190
+    assert len({group["source_url"] for group in inspire}) == 190
+    assert sum(entry["source_method"] == "public_captions" for entry in document["sets"]) == 141
+    assert sum(entry["source_method"] == "audio_asr" for entry in document["sets"]) == 49
+    assert len(ets) == 5
+    assert all(group["episode"] is None for group in ets)
+    assert next(group["id"] for group in inspire if group["episode"] == 190) == "inspire-writing-190"
+
+
 def test_interview_unknown_set_is_not_silently_replaced():
     assert client.get("/api/interview/questions?set_id=missing").status_code == 404
 

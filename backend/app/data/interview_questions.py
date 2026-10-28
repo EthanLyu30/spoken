@@ -1,9 +1,19 @@
-"""Reviewed, topic-coherent practice for the post-January-2026 interview task.
+"""Reviewed, topic-coherent video and ETS interview practice.
 
-Prompts are concise adaptations of linked public ETS samples, not recalled
-live exam questions. Each set preserves the experience-to-opinion progression.
+The versioned Inspire JSON is the only source for the video collection. Invalid
+or missing series data is an error, never a reason to silently serve ETS sets.
 """
+import json
+import re
 from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
+from typing import Literal
+from urllib.parse import parse_qs, urlsplit
+
+INSPIRE_DATA_PATH = Path(__file__).with_name("inspire_interviews.json")
+INSPIRE_PLAYLIST_URL = "https://www.youtube.com/playlist?list=PLfNWEZJODl5iNLcLDJX27jebB_psDCPec"
+
 
 @dataclass(frozen=True)
 class InterviewSet:
@@ -17,25 +27,110 @@ class InterviewSet:
     source_url: str
     source_kind: str = "official_adapted"
     reviewed_at: str = "2026-10-28"
+    collection: Literal["inspire", "ets"] = "ets"
+    episode: int | None = None
+
+
+def _text(value: object, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a nonempty string")
+    return value
+
+
+def _reviewed_date(value: object, field: str) -> str:
+    value = _text(value, field)
+    try:
+        if date.fromisoformat(value).isoformat() != value:
+            raise ValueError("not an ISO date")
+    except ValueError as exc:
+        raise ValueError(f"{field} must be a YYYY-MM-DD date") from exc
+    return value
+
+
+def _youtube_video_url(value: object, field: str) -> str:
+    value = _text(value, field)
+    try:
+        url = urlsplit(value)
+        video_id = ""
+        if url.scheme == "https" and url.netloc in {"youtube.com", "www.youtube.com"} and url.path == "/watch":
+            videos = parse_qs(url.query).get("v", [])
+            if len(videos) == 1:
+                video_id = videos[0]
+        elif url.scheme == "https" and url.netloc == "youtu.be":
+            video_id = url.path.removeprefix("/")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+            raise ValueError("invalid video URL")
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an HTTPS YouTube video URL") from exc
+    return value
+
+
+def load_inspire_sets(path: Path | None = None) -> tuple[InterviewSet, ...]:
+    """Load every reviewed episode, failing clearly on malformed source data."""
+    source = INSPIRE_DATA_PATH if path is None else path
+    document = json.loads(source.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError("Inspire data must be an object")
+    if document.get("playlist_url") != INSPIRE_PLAYLIST_URL:
+        raise ValueError("playlist_url must identify the reviewed Inspire playlist")
+    _reviewed_date(document.get("reviewed_at"), "reviewed_at")
+    rows = document.get("sets")
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("sets must be a nonempty list")
+
+    groups = []
+    ids: set[str] = set()
+    episodes: set[int] = set()
+    for index, row in enumerate(rows):
+        prefix = f"sets[{index}]"
+        if not isinstance(row, dict):
+            raise ValueError(f"{prefix} must be an object")
+        episode = row.get("episode")
+        if type(episode) is not int or episode < 1:
+            raise ValueError(f"{prefix}.episode must be a positive integer")
+        identifier = _text(row.get("id"), f"{prefix}.id")
+        if identifier in ids or episode in episodes:
+            raise ValueError(f"{prefix} contains a duplicate id or episode")
+        expected_id = "inspire-writing-190" if episode == 190 else f"inspire-{episode}"
+        if identifier != expected_id:
+            raise ValueError(f"{prefix}.id must match episode {episode}: {expected_id}")
+
+        text_fields = {
+            name: _text(row.get(name), f"{prefix}.{name}")
+            for name in ("topic", "topic_en", "intro", "source_title")
+        }
+        sequences = {}
+        for name in ("questions", "hints"):
+            values = row.get(name)
+            if not isinstance(values, list) or len(values) != 4:
+                raise ValueError(f"{prefix}.{name} must contain exactly four strings")
+            sequences[name] = tuple(_text(value, f"{prefix}.{name}[{i}]") for i, value in enumerate(values))
+        if len({question.strip() for question in sequences["questions"]}) != 4:
+            raise ValueError(f"{prefix}.questions must contain four distinct questions")
+        if row.get("source_kind") != "video_adapted":
+            raise ValueError(f"{prefix}.source_kind must be video_adapted")
+
+        groups.append(InterviewSet(
+            id=identifier, episode=episode, collection="inspire",
+            **text_fields, **sequences,
+            source_url=_youtube_video_url(row.get("source_url"), f"{prefix}.source_url"),
+            source_kind="video_adapted",
+            reviewed_at=_reviewed_date(row.get("reviewed_at"), f"{prefix}.reviewed_at"),
+        ))
+        ids.add(identifier)
+        episodes.add(episode)
+    return tuple(groups)
+
+
+def get_interview_sets() -> tuple[InterviewSet, ...]:
+    """Read on demand so a missing file never becomes a cached fallback."""
+    return (*load_inspire_sets(), *ETS_INTERVIEW_SETS)
+
 
 def _ets(test: int) -> str:
     return f"https://www.ets.org/content/dam/ets-org/pdfs/toefl/toefl-ibt-teachers-resources-practice-test-{test}.pdf"
 
-INTERVIEW_SETS = [
-    InterviewSet(
-        "inspire-writing-190", "写作与表达", "Writing and expression",
-        "You are taking part in an interview about writing in everyday life and education.",
-        (
-            "What do you usually write in daily life, and what purpose does that writing serve for you?",
-            "Do you find it more helpful to outline a piece before writing, or to start straight away? Explain your preference.",
-            "Should society protect the ability to write longer pieces, or place greater emphasis on brief digital messages? Why?",
-            "Would requiring creative writing in every student's general education be a good idea? Explain your view.",
-        ),
-        ("写什么 → 为什么写 → 帮助你解决了什么。", "选一种方法，再举一个具体写作场景。", "比较两种表达的用途，给出自己的侧重。", "表态后考虑不同专业学生的需要。"),
-        "Inspire SpeakEasy · Interview Practice #190（改编）",
-        "https://www.youtube.com/watch?v=SCGP0s0UmHE",
-        source_kind="video_adapted",
-    ),
+ETS_INTERVIEW_SETS = (
     InterviewSet(
         "work-life-balance", "工作与生活", "Work–life balance",
         "You are taking part in a research interview about balancing work and personal life.",
@@ -97,6 +192,14 @@ INTERVIEW_SETS = [
         "ETS · Updated Test at a Glance（改编）",
         "https://www.ets.org/pdfs/toefl/toefl-ibt-test-at-a-glance.pdf",
     ),
-]
-# Retain the old import for integrations; the API samples a whole set now.
-INDEPENDENT_QUESTIONS = [q for group in INTERVIEW_SETS for q in group.questions]
+)
+
+
+def __getattr__(name: str):
+    # Keep older import users working without loading a not-yet-created file
+    # while importing the app. Both names always resolve the full validated bank.
+    if name == "INTERVIEW_SETS":
+        return list(get_interview_sets())
+    if name == "INDEPENDENT_QUESTIONS":
+        return [question for group in get_interview_sets() for question in group.questions]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

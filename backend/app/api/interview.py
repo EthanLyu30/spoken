@@ -6,12 +6,13 @@ ASR, then sends the transcripts here for an ETS-style rating and sample answers.
 
 import json
 import random
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import ValidationError
 
 from app.api.chat import get_client
-from app.data.interview_questions import INTERVIEW_SETS
+from app.data.interview_questions import get_interview_sets
 from app.schemas.interview import (
     InterviewQuestions,
     InterviewResult,
@@ -44,29 +45,37 @@ def interview_sets() -> dict:
         {"id": s.id, "topic": s.topic, "topic_en": s.topic_en, "intro": s.intro,
          "question_count": len(s.questions), "source_title": s.source_title,
          "source_url": s.source_url, "source_kind": s.source_kind,
-         "reviewed_at": s.reviewed_at}
-        for s in INTERVIEW_SETS
+         "reviewed_at": s.reviewed_at, "collection": s.collection,
+         "episode": s.episode}
+        for s in get_interview_sets()
     ]}
 
 
 @router.get("/interview/questions", response_model=InterviewQuestions)
 async def interview_questions(
     n: int = 4, ai: bool = False, set_id: str | None = None,
+    source: Literal["inspire", "ets", "all"] = "inspire",
 ) -> InterviewQuestions:
     """Select one reviewed topic set. Legacy n/ai parameters remain accepted.
 
-    ai no longer mixes unrelated generated questions into a sourced interview.
+    The legacy n/ai parameters never truncate or generate part of a sourced set.
+    An explicit set_id takes precedence over source for older ETS callers.
     """
-    group = next((s for s in INTERVIEW_SETS if s.id == set_id), None) if set_id else random.choice(INTERVIEW_SETS)
+    sets = get_interview_sets()
+    if set_id:
+        group = next((s for s in sets if s.id == set_id), None)
+    else:
+        pool = [s for s in sets if source == "all" or s.collection == source]
+        group = random.choice(pool)
     if group is None:
         raise HTTPException(status_code=404, detail="Interview set not found")
-    count = max(1, min(n, 4))
     return InterviewQuestions(
-        questions=list(group.questions[:count]), set_id=group.id,
+        questions=list(group.questions), set_id=group.id,
         topic=group.topic, topic_en=group.topic_en, intro=group.intro,
-        hints=list(group.hints[:count]), source_title=group.source_title,
+        hints=list(group.hints), source_title=group.source_title,
         source_url=group.source_url, source_kind=group.source_kind,
-        reviewed_at=group.reviewed_at,
+        reviewed_at=group.reviewed_at, collection=group.collection,
+        episode=group.episode,
     )
 
 

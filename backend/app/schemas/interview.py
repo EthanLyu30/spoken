@@ -1,5 +1,7 @@
 """Schemas for the timed Q&A (TOEFL-style speaking) module."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -14,6 +16,8 @@ class InterviewQuestions(BaseModel):
     source_url: str = ""
     source_kind: str = "official_adapted"
     reviewed_at: str = ""
+    collection: Literal["inspire", "ets"] = "ets"
+    episode: int | None = None
 
 
 class InterviewItem(BaseModel):
