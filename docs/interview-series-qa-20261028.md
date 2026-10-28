@@ -27,6 +27,7 @@
 - 随机从当前来源抽取完整四题组，不跨视频拼题，不调用临时 AI 出题。
 - 切换来源、搜索或翻页后，不保留隐藏的旧选择；旧 ETS `set_id` 调用仍兼容。
 - 保留准备、提示、重录、识别重试、评分重试、保存与历史回顾；模拟只呈现当前问题。
+- 完成练习后的 `sample_answer` 由 DeepSeek 根据题目和学习者回答生成，目前没有将视频中的参考范文作为生成依据。视频来源标注对应题目，不代表生成答案来自视频。
 
 ## 本地自动验收
 
@@ -53,5 +54,5 @@
 - 已停止本轮 Vite、隔离数据库后端、字幕/音轨采集和识别进程；独立浏览器均已关闭。
 - 已核对精确路径，将 `.codex-series-import-20261028`（原始字幕、音轨、临时转写、辅助脚本、测试数据库、采集依赖和缓存）及 `frontend/dist` 移至回收站。
 - 本轮系统临时目录 `pytest-45`、`pytest-46`、`pytest-47` 已核实为本题库测试夹具，并移至回收站。
-- 剩余一个指向已清理目录的空符号链接：`C:\Users\Administrator\AppData\Local\Temp\pytest-of-Administrator\pytest-current`。删除该链接的非递归命令被自动审批拒绝，仅返回 `blocked by policy`，未提供更具体原因，因此保留并记录。
+- 指向已清理目录的空符号链接 `C:\Users\Administrator\AppData\Local\Temp\pytest-of-Administrator\pytest-current`，现已通过可恢复的回收站方式清理，并确认原路径不存在。
 - 用户原有 9 个部署/运维文件未纳入提交；内容哈希与本轮开始时一致。
