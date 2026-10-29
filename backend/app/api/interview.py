@@ -28,14 +28,15 @@ from app.services.deepseek import DeepSeekClient, DeepSeekError
 router = APIRouter(tags=["interview"])
 _SCORE_BUDGET_SECONDS = 55.0
 
-_SAMPLE_STYLE_GUIDANCE = """Sample-answer guidance (for examples, not learner scoring):
+_SAMPLE_STYLE_GUIDANCE = """Expression-upgrade guidance (for sample answers, not learner scoring):
 - Keep the learner's stated position and supplied details. Even a briefly supported preference is valid: improve its support without switching sides to match a video or your own opinion.
-- Write for a 45-second response with thinking pauses. Target 55–75 words, never exceeding 75; prefer 55–65. Shorter complete answers are fine. Never pad to reach a word count.
-- Aim for three short sentences: a direct answer with one reason, one concrete illustration, and its immediate result. Use a fourth sentence only to cover a necessary additional part of the question. Give a complete spoken answer even with an empty transcript, not an outline.
-- Make the illustration an object or task plus an observable action and effect: for instance, "move two related paragraphs together". Replace vague wording with this detail; do not append a longer story, a second example, or unnecessary names, dates, numbers, and background. For opinion or policy questions, a plausible situation or practical consequence is enough.
+- The original video is presented separately. This version should model a better-developed answer with natural, reusable phrasing, rather than merely shorten the learner's wording or reconstruct the video's original text.
+- Write for a 45-second response with thinking pauses. Target 55–75 words, never exceeding 75; usually aim for 60–70 when useful development fits. A naturally shorter complete answer is fine, but do not strip useful detail just to minimize word count, and never pad to reach a target.
+- Use a flexible 3–5 spoken sentences: a clear answer, one developed reason, and one compact illustration with its immediate result. Cover every necessary question part. Do not force a fixed sentence template. Give a complete spoken answer even with an empty transcript, not an outline.
+- Make the illustration an object or task plus an observable action and effect. Explain briefly how the action supports the reason. Replace vague wording with this detail; avoid a longer backstory, multiple examples, or unnecessary names, dates and numbers. For opinion or policy questions, a plausible situation or practical consequence is enough.
 - Stop on the example's result. No separate wrap-up sentence, repeated preference, repeated reason, or generic claim that the approach is better.
 - Reuse given experiences. Added details must be possible illustrations ("I can", "a student could"), never invented past events, friends' experiences, or claims about past performance.
-- Use common words and light transitions, with no stock openings or ornate vocabulary.
+- Enrich expression with precise everyday verbs, natural collocations and some sentence variety, such as a useful when, because, if or relative clause. Keep it easy to say under pressure; avoid rare idioms, ornate vocabulary, stock openings and stacked complex clauses.
 Before returning, silently revise each sample once: replace a vague activity label with one useful action or detail, delete a closing sentence that repeats an earlier point, and remove invented memories. Check that all required question parts remain and the sample is at most 75 words. Put only the revised answer in sample_answer."""
 
 _SCORE_SYSTEM = """You are an English speaking coach providing practice feedback for Take an Interview. You receive interview questions and the learner's answer transcript, so ignore minor transcription noise and missing punctuation.
@@ -48,7 +49,7 @@ For EACH item return an object with:
 - "score": integer 0-6 (practice reference score; 6 = excellent, 0 = no/irrelevant answer).
 - "level": one of "Good", "Fair", "Limited", "Weak".
 - "feedback": 2-3 sentences in Chinese covering language, coherence, and idea development, ending with one concrete, actionable tip. Keep the advice realistic for 45 seconds: suggest replacing vague wording with a useful detail rather than automatically adding another sentence.
-- "sample_answer": a complete English response following the sample-answer guidance below.
+- "sample_answer": the DeepSeek expression-upgrade version, a complete English response following the guidance below. It is AI-authored, never the video's verbatim original answer.
 
 """ + _SAMPLE_STYLE_GUIDANCE + """
 

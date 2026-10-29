@@ -1530,3 +1530,107 @@
   display: grid;
   place-items: center;
 }
+.interview-results .answer-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.sample-answer {
+  min-width: 0;
+}
+.sample-answer-heading {
+  min-height: 36px;
+}
+.sample-answer-heading > button {
+  border-radius: 50%;
+  color: var(--coral-deep);
+  background: #fffaf5;
+}
+.sample-answer .sample-version-switch {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 3px;
+  padding: 3px;
+  margin: 12px 0 16px;
+  border: 1px solid #e8daca;
+  border-radius: 10px;
+  background: #f4e9dc;
+}
+.sample-answer .sample-version-switch > button {
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 6px;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.sample-version-switch > button[aria-pressed="true"] {
+  background: #fffdfa;
+  color: var(--coral-deep);
+  font-weight: 700;
+  box-shadow: 0 1px 4px #563a1f0d;
+}
+.sample-version-switch > button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.sample-version-switch > button:focus-visible,
+.sample-answer-heading > button:focus-visible,
+.sample-video-link:focus-visible {
+  outline: 2px solid var(--coral-deep);
+  outline-offset: 3px;
+}
+.sample-video-player {
+  display: block;
+  width: 100%;
+  min-height: 200px;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-radius: 9px;
+  background: #2d241e;
+  margin: 12px 0;
+}
+.sample-video .sample-video-position,
+.sample-video .sample-video-note,
+.sample-answer .sample-video-unavailable {
+  font-size: 11px;
+  line-height: 1.8;
+}
+.sample-video .sample-video-position {
+  margin-top: 0;
+}
+.sample-video-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  color: var(--coral-deep);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.sample-video-link > svg {
+  width: 13px;
+  height: 13px;
+}
+.sample-video .sample-video-note {
+  margin-top: 3px;
+}
+.sample-answer .sample-video-unavailable {
+  padding-top: 12px;
+  border-top: 1px solid #e8daca;
+  margin-top: 14px;
+}
+@media (min-width: 901px) and (max-width: 1050px) {
+  .interview-results .answer-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 900px) {
+  .sample-answer {
+    padding: 17px;
+  }
+  .sample-answer .sample-version-switch > button {
+    min-height: 44px;
+  }
+}

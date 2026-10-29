@@ -59,6 +59,11 @@ it("scores the returned deck identity and preserves reference metadata in saved 
     await act(async () => result.current.startAnswer());
     await act(async () => result.current.finishAnswer());
     await act(async () => result.current.acceptAnswer());
+    if (i < 3) {
+      expect(mocks.scoreInterview).not.toHaveBeenCalled();
+      expect(result.current.phase).toBe("quiz");
+      expect(result.current.result).toBeNull();
+    }
   }
   expect(mocks.scoreInterview).toHaveBeenCalledWith(
     deck.questions.map((question) => ({ question, answer: "I enjoy running in the park." })),
@@ -89,6 +94,23 @@ it("automatically starts and advances timed questions in simulation mode", async
   expect(result.current.idx).toBe(1);
   expect(result.current.qPhase).toBe("recording");
   expect(mocks.speakText).toHaveBeenCalledWith("Question two?");
+});
+it("only requests the score and reference answers after all four simulation answers", async () => {
+  vi.useFakeTimers();
+  mocks.scoreInterview.mockResolvedValue({ overall: 4, results: [] });
+  const { result } = renderHook(() => useInterviewSession("device-simulation-review"));
+  await act(async () => result.current.begin("simulation", "exercise"));
+  for (let i = 0; i < 4; i++) {
+    await act(async () => vi.advanceTimersByTimeAsync(45_000));
+    if (i < 3) {
+      expect(mocks.scoreInterview).not.toHaveBeenCalled();
+      expect(result.current.phase).toBe("quiz");
+      expect(result.current.result).toBeNull();
+    }
+  }
+  expect(mocks.scoreInterview).toHaveBeenCalledTimes(1);
+  expect(result.current.answers).toHaveLength(4);
+  expect(result.current.phase).toBe("results");
 });
 it("draws practice and simulation from the requested source and defaults to Inspire", async () => {
   const { result } = renderHook(() => useInterviewSession("device-source"));
