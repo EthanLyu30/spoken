@@ -28,6 +28,16 @@ from app.services.deepseek import DeepSeekClient, DeepSeekError
 router = APIRouter(tags=["interview"])
 _SCORE_BUDGET_SECONDS = 55.0
 
+_SAMPLE_STYLE_GUIDANCE = """Sample-answer guidance (for examples, not learner scoring):
+- Keep the learner's stated position and supplied details. Even a briefly supported preference is valid: improve its support without switching sides to match a video or your own opinion.
+- Write for a 45-second response with thinking pauses. Target 55–75 words, never exceeding 75; prefer 55–65. Shorter complete answers are fine. Never pad to reach a word count.
+- Aim for three short sentences: a direct answer with one reason, one concrete illustration, and its immediate result. Use a fourth sentence only to cover a necessary additional part of the question. Give a complete spoken answer even with an empty transcript, not an outline.
+- Make the illustration an object or task plus an observable action and effect: for instance, "move two related paragraphs together". Replace vague wording with this detail; do not append a longer story, a second example, or unnecessary names, dates, numbers, and background. For opinion or policy questions, a plausible situation or practical consequence is enough.
+- Stop on the example's result. No separate wrap-up sentence, repeated preference, repeated reason, or generic claim that the approach is better.
+- Reuse given experiences. Added details must be possible illustrations ("I can", "a student could"), never invented past events, friends' experiences, or claims about past performance.
+- Use common words and light transitions, with no stock openings or ornate vocabulary.
+Before returning, silently revise each sample once: replace a vague activity label with one useful action or detail, delete a closing sentence that repeats an earlier point, and remove invented memories. Check that all required question parts remain and the sample is at most 75 words. Put only the revised answer in sample_answer."""
+
 _SCORE_SYSTEM = """You are an English speaking coach providing practice feedback for Take an Interview. You receive interview questions and the learner's answer transcript, so ignore minor transcription noise and missing punctuation.
 
 Assess relevance, language use, coherence, and development of ideas. You have no audio: do not claim to assess pronunciation, actual speaking speed, pauses, or intonation. These are practice reference scores, not official ETS scores.
@@ -37,14 +47,20 @@ For EACH item return an object with:
 - "answer": echo the transcript (may be empty).
 - "score": integer 0-6 (practice reference score; 6 = excellent, 0 = no/irrelevant answer).
 - "level": one of "Good", "Fair", "Limited", "Weak".
-- "feedback": 2-3 sentences in Chinese covering language, coherence, and idea development, ending with one concrete, actionable tip.
-- "sample_answer": a natural spoken English example for a 45-second response, targeting 55–75 words, never exceeding 75. Aim around 65 words, with 60–70 preferred. Usually use 3–5 short sentences: answer directly, explain one clear reason, and develop it with a brief concrete everyday example or detail when useful. Give a complete spoken response rather than a generic outline, including when the learner recorded no answer. Address every necessary branch of the question. Use common words and light transitions; avoid stock openings, ornate vocabulary and too many arguments. Do not pad the word count with additional points or a redundant ending. Prefer the learner's reasonable position and specific examples. Never present an invented sample experience as a known fact about the learner.
+- "feedback": 2-3 sentences in Chinese covering language, coherence, and idea development, ending with one concrete, actionable tip. Keep the advice realistic for 45 seconds: suggest replacing vague wording with a useful detail rather than automatically adding another sentence.
+- "sample_answer": a complete English response following the sample-answer guidance below.
+
+""" + _SAMPLE_STYLE_GUIDANCE + """
 
 Any supplied video answer ideas are optional perspectives, not a scoring standard. A reasonable different position must not lower a score. Use video ideas only to improve the sample, preserving the learner's reasonable position and examples first. Assess only the learner's transcript; the sample does not replace their answer.
 
 Return ONLY JSON: {"overall": <number 0-6, the average of the scores>, "results": [ ... in the same order as the input ]}."""
 
-_REPAIR_SYSTEM = """Shorten only the supplied sample_answer values for a 45-second English speaking response. Target 55–75 words; never exceed 75. Aim around 65 words, with 60–70 preferred. Preserve the learner's reasonable position and concrete examples and every necessary branch of the question. Use common spoken words and usually 3–5 short sentences, developing one clear reason with a brief concrete everyday example or detail when useful. Keep a complete spoken response, not a generic outline, even when the learner recorded no answer. Avoid stock openings and ornate vocabulary; do not pad the word count with additional points or a redundant ending. Invented sample experiences are examples, not known facts about the learner. Video ideas are optional, not a scoring standard; reasonable different positions are valid. Return ONLY JSON: {"results": [{"question_index": <original one-based index>, "sample_answer": <complete revised English answer>}]}. Return exactly the requested indices. Do not grade, modify feedback, or return other fields."""
+_REPAIR_SYSTEM = """Shorten only the supplied sample_answer values, retaining the learner's reasonable position, concrete examples, and every necessary branch of the question. Preserve the useful action or detail when compressing; remove repeated claims and generic wrap-up before cutting the example.
+
+""" + _SAMPLE_STYLE_GUIDANCE + """
+
+Video ideas are optional, not a scoring standard; reasonable different positions are valid. Return ONLY JSON: {"results": [{"question_index": <original one-based index>, "sample_answer": <complete revised English answer>}]}. Return exactly the requested indices. Do not grade, modify feedback, or return other fields."""
 
 
 def _word_count(sample: str) -> int:
