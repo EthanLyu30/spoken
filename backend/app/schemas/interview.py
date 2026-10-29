@@ -27,6 +27,7 @@ class InterviewItem(BaseModel):
 
 class InterviewScoreRequest(BaseModel):
     items: list[InterviewItem] = Field(min_length=1, max_length=6)
+    set_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class InterviewResult(BaseModel):
@@ -36,6 +37,10 @@ class InterviewResult(BaseModel):
     level: str
     feedback: str
     sample_answer: str
+    sample_source: Literal["video_reference", "ai_generated"] = "ai_generated"
+    sample_source_url: str | None = None
+    sample_word_count: int = Field(default=0, ge=0)
+    sample_estimated_seconds: int = Field(default=0, ge=0)
 
 
 class InterviewScoreResponse(BaseModel):

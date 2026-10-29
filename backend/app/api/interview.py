@@ -6,13 +6,17 @@ ASR, then sends the transcripts here for an ETS-style rating and sample answers.
 
 import json
 import random
+import re
+from asyncio import timeout
 from typing import Literal
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import ValidationError
 
 from app.api.chat import get_client
 from app.data.interview_questions import get_interview_sets
+from app.data.interview_answer_references import load_answer_references
 from app.schemas.interview import (
     InterviewQuestions,
     InterviewResult,
@@ -22,6 +26,7 @@ from app.schemas.interview import (
 from app.services.deepseek import DeepSeekClient, DeepSeekError
 
 router = APIRouter(tags=["interview"])
+_SCORE_BUDGET_SECONDS = 55.0
 
 _SCORE_SYSTEM = """You are an English speaking coach providing practice feedback for Take an Interview. You receive interview questions and the learner's answer transcript, so ignore minor transcription noise and missing punctuation.
 
@@ -33,9 +38,57 @@ For EACH item return an object with:
 - "score": integer 0-6 (practice reference score; 6 = excellent, 0 = no/irrelevant answer).
 - "level": one of "Good", "Fair", "Limited", "Weak".
 - "feedback": 2-3 sentences in Chinese covering language, coherence, and idea development, ending with one concrete, actionable tip.
-- "sample_answer": a natural, well-developed sample answer in English, about 70-100 words, directly answering the interview question.
+- "sample_answer": a natural spoken English example for a 45-second response, targeting 55–75 words, never exceeding 75. Aim around 65 words, with 60–70 preferred. Usually use 3–5 short sentences: answer directly, explain one clear reason, and develop it with a brief concrete everyday example or detail when useful. Give a complete spoken response rather than a generic outline, including when the learner recorded no answer. Address every necessary branch of the question. Use common words and light transitions; avoid stock openings, ornate vocabulary and too many arguments. Do not pad the word count with additional points or a redundant ending. Prefer the learner's reasonable position and specific examples. Never present an invented sample experience as a known fact about the learner.
+
+Any supplied video answer ideas are optional perspectives, not a scoring standard. A reasonable different position must not lower a score. Use video ideas only to improve the sample, preserving the learner's reasonable position and examples first. Assess only the learner's transcript; the sample does not replace their answer.
 
 Return ONLY JSON: {"overall": <number 0-6, the average of the scores>, "results": [ ... in the same order as the input ]}."""
+
+_REPAIR_SYSTEM = """Shorten only the supplied sample_answer values for a 45-second English speaking response. Target 55–75 words; never exceed 75. Aim around 65 words, with 60–70 preferred. Preserve the learner's reasonable position and concrete examples and every necessary branch of the question. Use common spoken words and usually 3–5 short sentences, developing one clear reason with a brief concrete everyday example or detail when useful. Keep a complete spoken response, not a generic outline, even when the learner recorded no answer. Avoid stock openings and ornate vocabulary; do not pad the word count with additional points or a redundant ending. Invented sample experiences are examples, not known facts about the learner. Video ideas are optional, not a scoring standard; reasonable different positions are valid. Return ONLY JSON: {"results": [{"question_index": <original one-based index>, "sample_answer": <complete revised English answer>}]}. Return exactly the requested indices. Do not grade, modify feedback, or return other fields."""
+
+
+def _word_count(sample: str) -> int:
+    return len(re.findall(r"[a-zA-Z0-9]+(?:['’][a-zA-Z0-9]+)*", sample))
+
+
+def _reference_url(source_url: str, timestamp: str) -> str:
+    seconds = 0
+    for part in timestamp.split(":"):
+        seconds = seconds * 60 + int(part)
+    url = urlsplit(source_url)
+    query = [(key, value) for key, value in parse_qsl(url.query) if key != "t"]
+    query.append(("t", str(seconds)))
+    return urlunsplit((url.scheme, url.netloc, url.path, urlencode(query), url.fragment))
+
+
+async def _repair_samples(client: DeepSeekClient, results: list[InterviewResult], req: InterviewScoreRequest, reference) -> None:
+    long_indices = [index for index, result in enumerate(results) if _word_count(result.sample_answer) > 75]
+    if not long_indices:
+        return
+    items = [
+        {"question_index": index + 1, "question": req.items[index].question,
+         "learner_answer": req.items[index].answer, "sample_answer": results[index].sample_answer,
+         "optional_video_ideas": reference.answers[index].notes if reference is not None else None}
+        for index in long_indices
+    ]
+    # One bounded call repairs every long sample without asking for new grades.
+    raw = await client.chat(
+        [{"role": "system", "content": _REPAIR_SYSTEM}, {"role": "user", "content": json.dumps({"items": items}, ensure_ascii=False)}],
+        temperature=0.3, max_tokens=1800, response_format={"type": "json_object"},
+    )
+    data = json.loads(raw)
+    repaired = data.get("results") if isinstance(data, dict) else None
+    if not isinstance(repaired, list) or len(repaired) != len(long_indices):
+        raise ValueError("incomplete sample repair")
+    remaining = {index + 1 for index in long_indices}
+    for item in repaired:
+        if not isinstance(item, dict) or type(item.get("question_index")) is not int or item["question_index"] not in remaining:
+            raise ValueError("misaligned sample repair")
+        sample = item.get("sample_answer")
+        if not isinstance(sample, str) or not 1 <= _word_count(sample) <= 75:
+            raise ValueError("invalid repaired sample")
+        remaining.remove(item["question_index"])
+        results[item["question_index"] - 1].sample_answer = sample
 
 
 @router.get("/interview/sets")
@@ -84,6 +137,33 @@ async def interview_score(
     req: InterviewScoreRequest,
     client: DeepSeekClient = Depends(get_client),
 ) -> InterviewScoreResponse:
+    # Both network calls share one budget below the client's 60-second timeout.
+    # Expiry cancels an in-flight call rather than leaving model work running.
+    try:
+        async with timeout(_SCORE_BUDGET_SECONDS):
+            return await _score_interview(req, client)
+    except TimeoutError as exc:
+        raise HTTPException(status_code=503, detail="Interview scoring timed out; please retry") from exc
+
+
+async def _score_interview(req: InterviewScoreRequest, client: DeepSeekClient) -> InterviewScoreResponse:
+    sets = get_interview_sets()
+    questions = tuple(item.question for item in req.items)
+    if req.set_id is not None:
+        group = next((group for group in sets if group.id == req.set_id), None)
+        if group is None or questions != group.questions:
+            raise HTTPException(status_code=422, detail="Interview set must match all questions in their original order")
+    else:
+        matches = [group for group in sets if group.questions == questions]
+        group = matches[0] if len(matches) == 1 else None
+    reference = None
+    if group is not None and group.collection == "inspire":
+        try:
+            candidate = load_answer_references(sets=sets)[group.id]
+        except (OSError, ValueError, TypeError) as exc:
+            raise HTTPException(status_code=503, detail="Interview answer references are unavailable") from exc
+        if candidate.status == "reviewed":
+            reference = candidate
     body = "\n\n".join(
         f"Question {i}: {it.question}\nAnswer {i}: {it.answer or '(no answer recorded)'}"
         for i, it in enumerate(req.items, 1)
@@ -92,6 +172,9 @@ async def interview_score(
         {"role": "system", "content": _SCORE_SYSTEM},
         {"role": "user", "content": f"{body}\n\nNow rate each answer and return the JSON."},
     ]
+    if reference is not None:
+        context = "\n".join(f"Question {idea.question_index} ({idea.timestamp}): {idea.notes}" for idea in reference.answers)
+        messages.insert(1, {"role": "system", "content": f"Reviewed video answer ideas (optional, not a scoring standard):\n{context}"})
     try:
         raw = await client.chat(
             messages, temperature=0.3, max_tokens=2200, response_format={"type": "json_object"}
@@ -100,15 +183,28 @@ async def interview_score(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
         data = json.loads(raw)
-        results = [InterviewResult(**r) for r in data.get("results", []) if isinstance(r, dict)]
+        if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+            raise ValueError("invalid results")
+        # Model-supplied provenance and timing are never trusted, even if invalid.
+        trusted_fields = {"question", "answer", "score", "level", "feedback", "sample_answer"}
+        results = [InterviewResult(**{k: v for k, v in r.items() if k in trusted_fields}) for r in data.get("results", []) if isinstance(r, dict)]
         if not results or len(results) != len(req.items):
             raise ValueError("incomplete results")
+        await _repair_samples(client, results, req, reference)
         # Keep original transcripts and calculate the average deterministically.
-        for result, item in zip(results, req.items):
+        for index, (result, item) in enumerate(zip(results, req.items)):
             result.question = item.question
             result.answer = item.answer
+            result.sample_source = "video_reference" if reference is not None else "ai_generated"
+            result.sample_source_url = _reference_url(reference.source_url, reference.answers[index].timestamp) if reference is not None else None
+            result.sample_word_count = _word_count(result.sample_answer)
+            if result.sample_word_count < 1:
+                raise ValueError("empty sample answer")
+            result.sample_estimated_seconds = round(result.sample_word_count / 110 * 60 + 4)
         overall = sum(r.score for r in results) / len(results)
         overall = round(max(0.0, min(6.0, float(overall))), 1)
         return InterviewScoreResponse(overall=overall, results=results)
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (json.JSONDecodeError, ValidationError, ValueError, TypeError) as exc:
         raise HTTPException(status_code=502, detail="Could not score answers") from exc
