@@ -47,3 +47,21 @@
 - 最终定向组件/会话43项测试及最终生产构建再次通过；完整套件为前端169、后端329项。
 - 已停止专属5181开发服务器，浏览器上下文关闭。精确核对工作区内任务缓存和frontend/dist路径后，将脚本、原始模型输出、截图、pytest目录、浏览器配置及构建输出回收，原路径均不存在。任务分支已删除，主分支保留最终提交。
 - 用户原有部署/运维9个文件哈希逐一核对未变，仍由用户保留在工作区，未纳入此次提交。
+
+## 继续排障：实际服务配置与反馈入口
+
+2026-10-29本轮通过原生Codex服务的只读接口继续核查，并非重复评分POST：
+
+- 实际运行的app-server和exec-server与先前规则检查使用同一份可执行文件；app-server版本为0.165.0-alpha.1.2。
+- `app-server --print-startup-config`与`configRequirements/read`均成功返回`requirements: null`，未发现管理策略约束；`config/read`未提供额外approval_policy、approvals_reviewer、sandbox、auto_review或hooks设置。这里读取的是服务的配置来源，实际回合Never/DangerFullAccess仍以前述日志为准。
+- 项目没有.codex配置层；用户managed_config.toml/requirements.toml及常见系统配置文件不存在。原生配置查询的来源元数据列出用户/系统默认路径，不代表相应文件实际存在。
+- 当前服务schema暴露Guardian审阅完成通知，但没有回溯审阅理由的读取方法。只读检查本机guardian_review_feedback表，本会话记录数为0，无法从中恢复此次拒绝的理由。
+- 已找到原生`feedback/upload`接口，可将诊断摘要提交给OpenAI；这涉及对外通信，需用户明确授权。拟发送内容仅含版本、错误、失败调用ID/时间和以上排除项，`includeLogs=false`、不附文件、不附会话正文或凭据。当前未发送。
+
+本轮继续缩小了配置来源范围，但仍未找到执行服务的具体命中规则，不能宣称解除或修复。为避免绕过限制，没有再次执行被拒绝的评分命令、修改规则或调整安全配置。
+
+用户随后明确授权发送上述脱敏报告。先使用原生feedback/save在本地试打包核验：归档仅有report.json和空manifest.json，诊断正文逐字匹配，无日志或文件附件；原生反馈自动附账户关联标识，未在文档中保存这些标识值。
+
+已通过原生feedback/upload成功提交，includeLogs=false、extraLogFiles=[]、threadId=null，RPC无错误，返回关联编号`no-active-thread-01a18810-4fcf-7e10-88ce-e38cb96629af`、promptHash=null。这是反馈关联编号，不是已修复的证明，也不是有人受理的工单状态。报告请求执行服务提供命中规则、决策来源或失败关闭信息，并在正常策略流程内纠正问题。
+
+本轮原生服务只读查询和本地试打包进程均已退出；诊断schema、请求草稿和试打包归档为临时文件，核验反馈回执后清理。项目业务代码和权限设置未改，具体拒绝仍需平台侧继续定位。
