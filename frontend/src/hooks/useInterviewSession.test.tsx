@@ -42,6 +42,31 @@ beforeEach(() => {
   mocks.savePractice.mockResolvedValue({ id: 1 });
 });
 afterEach(() => vi.useRealTimers());
+it("scores the returned deck identity and preserves reference metadata in saved results", async () => {
+  const scored = {
+    overall: 4,
+    results: [{
+      question: "Question one?", answer: "I enjoy running in the park.", score: 4,
+      level: "Good", feedback: "Clear reason.", sample_answer: "I like running.",
+      sample_source: "video_reference", sample_source_url: "https://www.youtube.com/watch?v=abcdefghijk",
+      sample_word_count: 3, sample_estimated_seconds: 6,
+    }],
+  };
+  mocks.scoreInterview.mockResolvedValue(scored);
+  const { result } = renderHook(() => useInterviewSession("device-reference"));
+  await act(async () => result.current.begin("practice"));
+  for (let i = 0; i < 4; i++) {
+    await act(async () => result.current.startAnswer());
+    await act(async () => result.current.finishAnswer());
+    await act(async () => result.current.acceptAnswer());
+  }
+  expect(mocks.scoreInterview).toHaveBeenCalledWith(
+    deck.questions.map((question) => ({ question, answer: "I enjoy running in the park." })),
+    expect.any(AbortSignal), "exercise",
+  );
+  expect(result.current.phase).toBe("results");
+  expect(JSON.parse(mocks.savePractice.mock.calls[0][3]).results).toEqual(scored.results);
+});
 it("leaves preparation and transcript confirmation under the learner's control in practice mode", async () => {
   const { result } = renderHook(() => useInterviewSession("device-a"));
   await act(async () => result.current.begin("practice", "exercise"));

@@ -4,6 +4,22 @@ import type { InterviewScore } from "../lib/api";
 import { speakText, stopSpeaking } from "../lib/speech";
 import { Buddy } from "./Buddy";
 
+function videoReferenceUrl(source?: string | null): string | null {
+  if (!source) return null;
+  try {
+    const url = new URL(source);
+    if (url.protocol !== "https:" || url.username || url.password || url.port) return null;
+    const videoId = "[A-Za-z0-9_-]{11}";
+    if (url.hostname === "youtu.be" && new RegExp(`^/${videoId}/?$`).test(url.pathname)) return source;
+    if (!["youtube.com", "www.youtube.com", "m.youtube.com"].includes(url.hostname)) return null;
+    if (url.pathname === "/watch" && new RegExp(`^${videoId}$`).test(url.searchParams.get("v") ?? "")) return source;
+    if (new RegExp(`^/(shorts|embed)/${videoId}/?$`).test(url.pathname)) return source;
+  } catch {
+    // Old saved records may contain an invalid source URL.
+  }
+  return null;
+}
+
 export function InterviewResults({
   result,
   onRestart,
@@ -18,6 +34,9 @@ export function InterviewResults({
   const [selected, setSelected] = useState(0);
   useEffect(() => () => stopSpeaking(), [selected]);
   const current = result.results[selected];
+  const wordCount = current?.sample_word_count ?? (current?.sample_answer.match(/[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)*/g)?.length ?? 0);
+  const estimatedSeconds = current?.sample_estimated_seconds ?? Math.round(wordCount / 110 * 60 + 4);
+  const sourceUrl = current?.sample_source === "video_reference" ? videoReferenceUrl(current.sample_source_url) : null;
   return (
     <div className="interview-results">
       <div className="ui-page-head">
@@ -70,7 +89,14 @@ export function InterviewResults({
                       <Volume2 />
                     </button>
                   </div>
+                  <p className="sample-answer-meta">{wordCount} 词 · 约 {estimatedSeconds} 秒</p>
+                  <p className="sample-answer-source">
+                    {sourceUrl ? (
+                      <a href={sourceUrl} target="_blank" rel="noopener noreferrer">参考视频思路 · AI 改写</a>
+                    ) : "AI 口语示例"}
+                  </p>
                   <p>{current.sample_answer}</p>
+                  <p className="sample-answer-estimate">按约 110 词/分钟，加 4 秒停顿估算；实际用时因人而异。</p>
                 </div>
               </div>
             </section>

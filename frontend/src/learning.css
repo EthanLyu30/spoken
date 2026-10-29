@@ -1497,3 +1497,36 @@
     align-items: stretch;
   }
 }
+.interview-results .ui-page-head h1 {
+  text-wrap: balance;
+}
+.sample-answer .sample-answer-meta {
+  color: var(--coral-deep);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
+  margin-top: 10px;
+}
+.sample-answer .sample-answer-source,
+.sample-answer .sample-answer-estimate {
+  font-size: 11px;
+  line-height: 1.7;
+  margin-top: 6px;
+}
+.sample-answer-source a {
+  color: var(--coral-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.sample-answer-source a:focus-visible {
+  outline: 2px solid var(--coral-deep);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+.sample-answer > div > button {
+  flex-shrink: 0;
+  min-width: 36px;
+  min-height: 36px;
+  display: grid;
+  place-items: center;
+}

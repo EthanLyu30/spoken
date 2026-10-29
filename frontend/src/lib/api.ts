@@ -436,6 +436,10 @@ export interface InterviewResult {
   level: string;
   feedback: string;
   sample_answer: string;
+  sample_source?: "video_reference" | "ai_generated";
+  sample_source_url?: string | null;
+  sample_word_count?: number;
+  sample_estimated_seconds?: number;
 }
 
 export interface InterviewScore {
@@ -487,10 +491,11 @@ export function getInterviewQuestions(n = 4, signal?: AbortSignal): Promise<stri
 export function scoreInterview(
   items: { question: string; answer: string }[],
   signal?: AbortSignal,
+  setId?: string,
 ): Promise<InterviewScore> {
   return request<InterviewScore>("/api/interview/score", {
     method: "POST",
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({ items, set_id: setId }),
     signal,
   });
 }

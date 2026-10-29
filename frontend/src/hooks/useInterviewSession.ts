@@ -335,6 +335,7 @@ export function useInterviewSession(owner: string) {
           answer: answers[i] ?? "",
         })),
         controller.current?.signal,
+        deck.set_id,
       );
       if (!active(run)) return;
       locked.current = false;
