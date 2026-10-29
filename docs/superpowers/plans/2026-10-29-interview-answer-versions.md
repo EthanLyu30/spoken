@@ -41,4 +41,6 @@ Files: backend/app/api/interview.py；现有backend/tests/test_interview_answers
 Files: 最终验收记录；诊断辅助文件仅限.codex-answer-versions-qa-20261029。
 - [x] 只读核对有效策略、命令解析和本地规则，记录具体结论或不可见边界。
 - [x] 桌面/414px浏览器验收，记录第三方播放器可用性实测。
-- [ ] 以EthanLyu30提交、合并推送main并确认部署，清理本轮缓存和构建产物。
+- [x] 以EthanLyu30提交、合并推送main并确认部署，清理本轮缓存和构建产物。
+
+产品功能提交ab0d2c0，前后端部署及CI成功；正式站资源核对通过，测试缓存/截图/浏览器配置/构建产物已清理。执行工具的拒绝尚未解除，需要执行服务提供策略命中记录，详见[验收及排障记录](../../interview-answer-versions-qa-20261029.md)。
