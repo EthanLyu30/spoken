@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 import websockets
 
 from app.core.config import Settings, get_settings
+from app.core.observability import traced_stream
 from app.services.xf_auth import build_auth_url
 
 _HOST = "tts-api.xfyun.cn"
@@ -116,6 +117,7 @@ class XfTtsClient:
     ) -> bytes:
         return b"".join([chunk async for chunk in self.synthesize_stream(text, **kwargs)])
 
+    @traced_stream("tts.synthesize", provider="xfyun")
     async def synthesize_stream(
         self,
         text: str,

@@ -10,6 +10,7 @@
 import { flatten, floatToPcm16, resampleTo16k } from "./recorder";
 import { openAsrStream, type AsrStream } from "./asrStream";
 import { createCaptureProcessor, type CaptureProcessor } from "./audioCapture";
+import { bindInteraction, newInteractionId, reportTiming } from "./telemetry";
 
 export type CallPhase = "listening" | "thinking" | "speaking";
 
@@ -173,10 +174,16 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   };
 
   const handle = async (pcm: ArrayBuffer, useLocalAsr: boolean) => {
+    const startedAt = performance.now();
+    const interactionId = newInteractionId();
+    let outcome: "ok" | "error" | "cancelled" = "ok";
+    let firstAudio = false;
     const generation = ++turnGeneration;
     const controller = new AbortController();
     turnController = controller;
     const { signal } = controller;
+    bindInteraction(signal, interactionId);
+    if (asr) bindInteraction(asr, interactionId);
     busy = true;
     bargeFrames = [];
     try {
@@ -205,14 +212,20 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
         // when we arm barge-in so the user can talk over Pip.
         await cb.reply(text, pcm, () => {
           if (ended || signal.aborted || generation !== turnGeneration) return;
+          if (!firstAudio) {
+            firstAudio = true;
+            reportTiming("voice.first_audio", performance.now() - startedAt, { interactionId });
+          }
           speaking = true;
           bargeMs = 0;
           cb.onPhase("speaking");
         }, signal);
-      }
+      } else outcome = signal.aborted || ended ? "cancelled" : "error";
     } catch {
+      outcome = signal.aborted || ended ? "cancelled" : "error";
       if (!ended && !signal.aborted) cb.onError("这一句没接上，继续说就好～");
     } finally {
+      reportTiming("voice.complete", performance.now() - startedAt, { interactionId, outcome: signal.aborted ? "cancelled" : outcome });
       if (generation === turnGeneration) {
         busy = false;
         speaking = false;

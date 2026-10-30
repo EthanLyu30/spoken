@@ -31,8 +31,15 @@ describe("cloud ASR routing", () => {
   });
 
   it("selects the direct streaming connection when it is available", async () => {
-    const stream = { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn() };
+    const stream = { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn().mockResolvedValue("direct transcript") };
     direct.open.mockResolvedValue(stream);
-    expect(await openAsrStream({ onPartial: vi.fn() })).toBe(stream);
+    const selected = await openAsrStream({ onPartial: vi.fn() });
+    const pcm = new ArrayBuffer(16);
+    selected.send(pcm);
+    expect(await selected.finishUtterance()).toBe("direct transcript");
+    selected.close();
+    expect(stream.send).toHaveBeenCalledWith(pcm);
+    expect(stream.close).toHaveBeenCalledOnce();
+    expect(stream.finishUtterance).toHaveBeenCalledOnce();
   });
 });

@@ -11,6 +11,7 @@ import { readChatStream } from "./chatStream";
 import { transcribeDirect } from "./directAsr";
 import { withTimeout } from "./requestTimeout";
 import { invalidateProgress } from "./progressCache";
+import { traceHeaders } from "./telemetry";
 export { withTimeout } from "./requestTimeout";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -38,6 +39,7 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
       "Content-Type": "application/json",
       "X-Client-Id": getClientId(),
       ...authHeader(),
+      ...traceHeaders(init?.signal),
       ...(init?.headers as Record<string, string> | undefined),
     },
     signal: withTimeout(init?.signal, timeoutMs),
@@ -193,7 +195,7 @@ export async function streamChat(
 ): Promise<string> {
   const res = await fetch(`${BASE_URL}/api/chat/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Accept": "text/event-stream", "X-Client-Id": getClientId(), ...authHeader() },
+    headers: { "Content-Type": "application/json", "Accept": "text/event-stream", "X-Client-Id": getClientId(), ...authHeader(), ...traceHeaders(signal) },
     body: JSON.stringify({ scenario_id: scenarioId, messages: messages.slice(-40), custom }),
     signal: withTimeout(signal, 60_000),
   });
@@ -313,7 +315,7 @@ export async function fetchTtsUrl(
   if (pitch != null) body.pitch = pitch;
   const res = await fetch(`${BASE_URL}/api/tts`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...traceHeaders(signal) },
     body: JSON.stringify(body),
     signal: withTimeout(signal, 30_000),
   });
@@ -331,7 +333,7 @@ export async function fetchTtsStream(
   const voice = useVoice.getState();
   return fetch(`${BASE_URL}/api/tts/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeader() },
+    headers: { "Content-Type": "application/json", ...authHeader(), ...traceHeaders(signal) },
     body: JSON.stringify({
       text, scenario_id: scenarioId,
       vcn: overrides?.vcn ?? voice.vcn ?? undefined,
@@ -352,7 +354,7 @@ export async function postAsr(pcm: ArrayBuffer, signal?: AbortSignal): Promise<s
   }
   const res = await fetch(`${BASE_URL}/api/asr`, {
     method: "POST",
-    headers: { "Content-Type": "application/octet-stream" },
+    headers: { "Content-Type": "application/octet-stream", ...traceHeaders(signal) },
     body: pcm,
     signal: withTimeout(signal, 45_000),
   });
@@ -653,6 +655,7 @@ export interface AuthUser {
   display_name: string;
   avatar_url: string;
   created_at: string;
+  is_admin?: boolean;
 }
 
 export interface AuthResponse {

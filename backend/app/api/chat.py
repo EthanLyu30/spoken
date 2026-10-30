@@ -17,6 +17,7 @@ from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.deepseek import DeepSeekClient, DeepSeekError
 from app.services.dialogue import build_messages
 from app.services.speaking_scope import dialogue_redirect
+from app.core.observability import trace_error
 
 router = APIRouter(tags=["chat"])
 
@@ -91,7 +92,8 @@ async def chat_stream(
         try:
             async for delta in client.chat_stream(messages, temperature=0.85):
                 yield frame("delta", {"text": delta}) if events else delta.encode("utf-8")
-        except DeepSeekError:
+        except DeepSeekError as exc:
+            trace_error(exc)
             if events:
                 yield frame("error", {"message": "回复中断，请重试这一回合。"})
             return

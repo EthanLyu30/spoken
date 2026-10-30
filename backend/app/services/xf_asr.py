@@ -14,6 +14,7 @@ from typing import Awaitable, Callable
 import websockets
 
 from app.core.config import Settings, get_settings
+from app.core.observability import span, traced
 from app.services.xf_auth import build_auth_url
 
 _HOST = "iat-api.xfyun.cn"
@@ -39,10 +40,11 @@ async def _connect(settings: Settings):
     for attempt in range(2):
         url = build_auth_url(_HOST, _PATH, settings.xf_api_key, settings.xf_api_secret)
         try:
-            return await websockets.connect(
-                url, max_size=None, open_timeout=_OPEN_TIMEOUT,
-                close_timeout=_CLOSE_TIMEOUT,
-            )
+            with span("asr.connect", provider="xfyun", attempt=attempt + 1):
+                return await websockets.connect(
+                    url, max_size=None, open_timeout=_OPEN_TIMEOUT,
+                    close_timeout=_CLOSE_TIMEOUT,
+                )
         except (TimeoutError, OSError) as exc:
             if attempt == 1:
                 raise XfAsrError("语音识别连接暂时不稳定，请重试。") from exc
@@ -52,6 +54,7 @@ class XfAsrClient:
     def __init__(self, settings: Settings | None = None) -> None:
         self._s = settings or get_settings()
 
+    @traced("asr.transcribe", provider="xfyun")
     async def transcribe(self, pcm: bytes, *, language: str = "en_us") -> str:
         s = self._s
         if not (s.xf_app_id and s.xf_api_key and s.xf_api_secret):
@@ -174,6 +177,7 @@ class XfAsrStream:
         self._error: XfAsrError | None = None
         self._closed = False
 
+    @traced("asr.open", provider="xfyun")
     async def open(self) -> None:
         s = self._s
         if not (s.xf_app_id and s.xf_api_key and s.xf_api_secret):
@@ -215,6 +219,7 @@ class XfAsrStream:
                 self._first = False
             await self._ws.send(json.dumps(frame))
 
+    @traced("asr.finalize", provider="xfyun")
     async def finish(self) -> str:
         """Signal end-of-utterance, wait for the final result, return it."""
         if self._ws is None:

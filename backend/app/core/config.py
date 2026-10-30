@@ -8,7 +8,7 @@ validate that their required keys are present when they are actually used.
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,6 +32,13 @@ class Settings(BaseSettings):
 
     # Persistence
     database_url: str = "sqlite:///./spoken.db"
+
+    # Content-free private operational telemetry; independent of learning data.
+    telemetry_enabled: bool = True
+    telemetry_retention_days: int = Field(default=14, ge=1, le=90)
+    telemetry_max_records: int = Field(default=20_000, ge=100, le=100_000)
+    # Optional one-shot owner binding for hosts without a server shell.
+    admin_bootstrap_email: str = ""
 
     # iFlytek (科大讯飞)
     xf_app_id: str = ""

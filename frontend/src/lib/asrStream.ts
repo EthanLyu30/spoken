@@ -12,6 +12,7 @@
  */
 
 import { openDirectAsrStream } from "./directAsr";
+import { measureAsrStream } from "./telemetry";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -47,8 +48,8 @@ const FINAL_TIMEOUT_MS = 8000;
  * which is the signal to fall back to the buffered endpoint.
  */
 export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us"): Promise<AsrStream> {
-  try { return await openDirectAsrStream(cb, language); }
-  catch { return openRelayAsrStream(cb, language); }
+  try { return measureAsrStream(await openDirectAsrStream(cb, language), "direct"); }
+  catch { return measureAsrStream(await openRelayAsrStream(cb, language), "relay"); }
 }
 
 export function openRelayAsrStream(

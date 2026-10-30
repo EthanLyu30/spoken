@@ -20,6 +20,7 @@ const Daily = lazy(() => import("./pages/Daily"));
 const CustomScenePage = lazy(() => import("./pages/CustomScene"));
 const Interview = lazy(() => import("./pages/Interview"));
 const SessionView = lazy(() => import("./pages/SessionView"));
+const Admin = lazy(() => import("./pages/Admin"));
 
 export default function App() {
   const location = useLocation();
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="/words" element={<WordBag />} />
             <Route path="/me" element={<Profile />} />
             <Route path="/daily" element={<Daily />} />
+            <Route path="/admin" element={<Admin />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

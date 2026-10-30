@@ -5,6 +5,7 @@ import path from "node:path";
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  define: { "import.meta.env.VITE_RELEASE": JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA ?? "development") },
   test: {
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",

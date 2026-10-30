@@ -13,6 +13,7 @@ import {
 } from "./voiceResolver";
 import { float32ToWavBlob } from "./localSpeech/audio";
 import { isLocalSpeechModelReady } from "./localSpeech/runtime";
+import { bindInteraction, reportTiming } from "./telemetry";
 
 export interface Speaking {
   /** Resolves when playback finishes (or is stopped / errors). */
@@ -106,8 +107,10 @@ function speakBuffered(
   scenarioId?: string,
   overrides?: TtsOverrides,
   onStarted?: () => void,
+  interactionId?: string,
 ): Speaking {
   const controller = new AbortController();
+  bindInteraction(controller.signal, interactionId);
   let audio: HTMLAudioElement | null = null;
   let url: string | null = null;
   let stopped = false;
@@ -148,9 +151,10 @@ function canStreamAudio(): boolean {
   return typeof window.AudioContext === "function";
 }
 
-function speakIflytek(text: string, scenarioId?: string, overrides?: TtsOverrides, onStarted?: () => void, prepared?: Response): Speaking {
-  if (!canStreamAudio()) return speakBuffered(text, scenarioId, overrides, onStarted);
+function speakIflytek(text: string, scenarioId?: string, overrides?: TtsOverrides, onStarted?: () => void, prepared?: Response, interactionId?: string): Speaking {
+  if (!canStreamAudio()) return speakBuffered(text, scenarioId, overrides, onStarted, interactionId);
   const controller = new AbortController();
+  bindInteraction(controller.signal, interactionId);
   let stopped = false;
   let playback: PcmPlayback | null = null;
   let fallback: Speaking | null = null;
@@ -162,7 +166,7 @@ function speakIflytek(text: string, scenarioId?: string, overrides?: TtsOverride
     if (stopped) { await response.body?.cancel().catch(() => undefined); return; }
     if (response.status === 404 || response.status === 405) {
       await response.body?.cancel().catch(() => undefined);
-      fallback = speakBuffered(text, scenarioId, overrides, onStarted);
+      fallback = speakBuffered(text, scenarioId, overrides, onStarted, interactionId);
       await fallback.done;
       return;
     }
@@ -318,7 +322,10 @@ export interface SpeechQueue {
  * sentence's audio is prefetched while the current one plays, to keep the gap
  * between sentences small.
  */
-export function createSpeechQueue(scenarioId?: string): SpeechQueue {
+export function createSpeechQueue(scenarioId?: string, interactionId?: string): SpeechQueue {
+  const queueAt = performance.now();
+  let playbackEngine: "local" | "xfyun" | "browser" | "unknown" = "unknown";
+  let firstAudio = false;
   current?.stop();
   current = null;
   const voiceAtStart = useVoice.getState();
@@ -338,11 +345,18 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
   });
   let playing: Speaking | null = null;
   const controller = new AbortController();
+  bindInteraction(controller.signal, interactionId);
   let cancel: () => void = () => {};
   const cancelled = new Promise<void>((resolve) => { cancel = resolve; });
   let onPending: (() => void) | null = null;
   let abortPrefetch = () => {};
-  const didStart = () => { markStarted?.(); markStarted = undefined; };
+  const didStart = () => {
+    if (!firstAudio) {
+      firstAudio = true;
+      reportTiming("speech.first_audio", performance.now() - queueAt, { engine: playbackEngine, interactionId });
+    }
+    markStarted?.(); markStarted = undefined;
+  };
 
   const wakeUp = () => {
     const w = wake;
@@ -398,6 +412,7 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
         const text = await take();
         if (text == null) break;
         if (mode.kind === "browser") {
+          playbackEngine = "browser";
           playing = speakBrowser(text, didStart);
           await playing.done;
           continue;
@@ -413,6 +428,7 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
           abandonStream();
           if (!prefetchLocal) abandonPrefetch();
           let localUrl: string;
+          playbackEngine = "local";
           try {
             localUrl = prefetchText === text && prefetchUrl ? await prefetchUrl : await fetchKokoroUrl(text);
             prefetchText = null;
@@ -420,6 +436,7 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
             if (!localUrl) throw new Error("Local synthesis failed");
           } catch {
             if (stopped) break;
+            playbackEngine = "xfyun";
             try {
               localUrl = await fetchTtsUrl(
                 text,
@@ -449,6 +466,7 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
         }
 
         if (canStreamAudio()) {
+          playbackEngine = "xfyun";
           abandonPrefetch();
           const prepared = streamText === text ? await (streamResponse as Promise<Response | null> | null) : null;
           streamResponse = null;
@@ -458,15 +476,17 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
             if (stopped || streamResponse || !pending.length) return;
             streamText = pending[0];
             streamController = new AbortController();
+            bindInteraction(streamController.signal, interactionId);
             streamResponse = fetchTtsStream(streamText, scenarioId, streamController.signal, overrides).catch(() => null);
           };
-          playing = speakIflytek(text, scenarioId, overrides, () => { didStart(); onPending?.(); }, prepared ?? undefined);
+          playing = speakIflytek(text, scenarioId, overrides, () => { didStart(); onPending?.(); }, prepared ?? undefined, interactionId);
           await playing.done;
           onPending = null;
           continue;
         }
 
         let url: string;
+        playbackEngine = "xfyun";
         try {
           url =
             prefetchText === text && prefetchUrl
@@ -503,6 +523,9 @@ export function createSpeechQueue(scenarioId?: string): SpeechQueue {
     } finally {
       abandonPrefetch();
       abandonStream();
+      if (spokenUpto > 0) reportTiming("speech.complete", performance.now() - queueAt, {
+        engine: playbackEngine, interactionId, outcome: stopped ? "cancelled" : firstAudio ? "ok" : "error",
+      });
     }
   })();
   void consumer.catch(() => undefined); // end() observes failures after generation

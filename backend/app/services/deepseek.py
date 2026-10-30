@@ -12,6 +12,16 @@ from collections.abc import AsyncIterator
 import httpx
 
 from app.core.config import Settings, get_settings
+from app.core.observability import traced, traced_stream, trace_attribute
+
+
+def _usage(data):
+    usage = data.get("usage") if isinstance(data, dict) else None
+    if isinstance(usage, dict):
+        for source, target in (("prompt_tokens", "input_tokens"), ("completion_tokens", "output_tokens")):
+            value = usage.get(source)
+            if type(value) is int and 0 <= value <= 10_000_000:
+                trace_attribute(target, value)
 
 
 class DeepSeekError(RuntimeError):
@@ -28,6 +38,7 @@ class DeepSeekClient:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
 
+    @traced("deepseek.chat", provider="deepseek")
     async def chat(
         self,
         messages: list[dict[str, str]],
@@ -37,6 +48,7 @@ class DeepSeekClient:
         response_format: dict | None = None,
     ) -> str:
         settings = self._settings
+        trace_attribute("model", settings.deepseek_model)
         if not settings.deepseek_api_key:
             raise DeepSeekError("DEEPSEEK_API_KEY is not configured")
 
@@ -64,6 +76,7 @@ class DeepSeekClient:
                 resp = await client.post(url, json=payload, headers=headers)
                 resp.raise_for_status()
                 data = resp.json()
+                _usage(data)
         except httpx.HTTPStatusError as exc:
             raise DeepSeekError(
                 f"DeepSeek returned HTTP {exc.response.status_code}"
@@ -80,6 +93,7 @@ class DeepSeekClient:
             raise DeepSeekError("DeepSeek returned an empty reply")
         return content.strip()
 
+    @traced_stream("deepseek.stream", provider="deepseek")
     async def chat_stream(
         self,
         messages: list[dict[str, str]],
@@ -89,6 +103,7 @@ class DeepSeekClient:
     ) -> AsyncIterator[str]:
         """Yield reply content deltas as they arrive (Server-Sent Events)."""
         settings = self._settings
+        trace_attribute("model", settings.deepseek_model)
         if not settings.deepseek_api_key:
             raise DeepSeekError("DEEPSEEK_API_KEY is not configured")
 
@@ -122,6 +137,7 @@ class DeepSeekClient:
                             break
                         try:
                             packet = json.loads(data)
+                            _usage(packet)
                             if isinstance(packet, dict) and packet.get("error"):
                                 raise DeepSeekError("DeepSeek reported a streaming error")
                             delta = packet["choices"][0]["delta"].get("content")

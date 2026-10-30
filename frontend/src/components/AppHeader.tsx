@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import {
   BookOpen,
+  Activity,
   BriefcaseBusiness,
   ChartNoAxesCombined,
   ChevronDown,
@@ -88,6 +89,7 @@ export function AppHeader() {
             <ChartNoAxesCombined />
             学习进度
           </NavLink>
+          {user?.is_admin && <NavLink to="/admin"><Activity />运行后台</NavLink>}
         </nav>
         <Link to="/me" className="account-entry" aria-label="个人中心">
           {user?.avatar_url ? (

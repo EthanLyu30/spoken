@@ -52,6 +52,7 @@ class UserOut(BaseModel):
     display_name: str = ""
     avatar_url: str = ""
     created_at: datetime
+    is_admin: bool = False
 
 
 class AuthResponse(BaseModel):

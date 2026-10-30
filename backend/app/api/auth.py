@@ -15,8 +15,13 @@ from app.db import get_db
 from app.models.user import User
 from app.schemas.auth import AuthResponse, LoginRequest, ProfileUpdate, RegisterRequest, UserOut
 from app.services import users as repo
+from app.services.telemetry import is_admin
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _user_out(user: User, db: Session) -> UserOut:
+    return UserOut.model_validate(user).model_copy(update={"is_admin": is_admin(db, user.id)})
 
 
 @router.post("/register", response_model=AuthResponse, status_code=201)
@@ -34,7 +39,7 @@ def register(
     )
     # Bind the progress collected anonymously on this device to the new account.
     repo.claim_device_data(db, device_id, f"u:{user.id}")
-    return AuthResponse(token=create_token(user.id), user=UserOut.model_validate(user))
+    return AuthResponse(token=create_token(user.id), user=_user_out(user, db))
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -42,12 +47,12 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
     user = repo.get_by_email(db, payload.email)
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="邮箱或密码不正确")
-    return AuthResponse(token=create_token(user.id), user=UserOut.model_validate(user))
+    return AuthResponse(token=create_token(user.id), user=_user_out(user, db))
 
 
 @router.get("/me", response_model=UserOut)
-def me(user: User = Depends(get_current_user)) -> UserOut:
-    return UserOut.model_validate(user)
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> UserOut:
+    return _user_out(user, db)
 
 
 @router.patch("/me", response_model=UserOut)
@@ -63,4 +68,4 @@ def update_me(
         user.avatar_url = payload.avatar_url
     db.commit()
     db.refresh(user)
-    return UserOut.model_validate(user)
+    return _user_out(user, db)

@@ -4,10 +4,15 @@ Run locally with:
     uvicorn app.main:app --reload
 """
 
+from contextlib import asynccontextmanager
+import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.middleware import SelectiveGZipMiddleware
+from app.core.observability import TelemetryMiddleware
+from app.services.telemetry import TelemetrySink, configured_bootstrap_admin
+from app.api import admin, telemetry
 from app.api import (
     asr,
     auth,
@@ -32,10 +37,24 @@ from app.db import init_db
 
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(application):
+    await asyncio.to_thread(configured_bootstrap_admin)
+    sink = TelemetrySink() if get_settings().telemetry_enabled else None
+    application.state.telemetry_sink = sink
+    try:
+        yield
+    finally:
+        if sink:
+            await sink.close()
+        application.state.telemetry_sink = None
+
 app = FastAPI(
     title=f"{settings.app_name} API",
     description="Backend for the Spoken AI English speaking-practice tool.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Compress JSON API payloads (Render serves them uncompressed). Added before
@@ -47,6 +66,7 @@ app.add_middleware(
     exclude_prefixes=("/api/chat/stream", "/api/tts"),
     minimum_size=500,
 )
+app.add_middleware(TelemetryMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,6 +74,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Trace-Id"],
 )
 
 # API routes are mounted under /api
@@ -74,6 +95,8 @@ app.include_router(daily.router, prefix="/api")
 app.include_router(custom.router, prefix="/api")
 app.include_router(interview.router, prefix="/api")
 app.include_router(practice.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
+app.include_router(telemetry.router, prefix="/api")
 
 # Create database tables (idempotent).
 init_db()

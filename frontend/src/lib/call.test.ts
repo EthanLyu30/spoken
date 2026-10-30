@@ -9,6 +9,7 @@ vi.mock("./asrStream", () => ({
 }));
 
 import { startVoiceCall } from "./call";
+import { getInteraction } from "./telemetry";
 
 interface FakeProcessor {
   onaudioprocess: ((event: AudioProcessingEvent) => void) | null;
@@ -85,6 +86,24 @@ describe("voice call ASR engine boundaries", () => {
       expect(mocks.openAsrStream).not.toHaveBeenCalled();
       pushFrame(0.1);
       expect(mocks.openAsrStream).toHaveBeenCalledOnce();
+    } finally { call.end(); }
+  });
+
+  it("measures end-of-utterance to first playback and correlates the complete turn without content", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetcher);
+    let turnId: string | undefined;
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => true,
+      transcribe: async (_pcm, _engine, signal) => { turnId = getInteraction(signal); return "private utterance"; },
+      reply: async (_text, _pcm, speaking) => { speaking(); }, onError: vi.fn() });
+    try {
+      pushFrame(0.1); pushFrame(0.1);
+      for (let i = 0; i < 4; i++) pushFrame(0);
+      await vi.waitFor(() => expect(fetcher.mock.calls.map(([, options]) => JSON.parse(options.body).operation)).toContain("voice.complete"));
+      const events = fetcher.mock.calls.map(([, options]) => JSON.parse(options.body));
+      expect(turnId).toMatch(/^[a-f0-9]{32}$/);
+      expect(events.find(event => event.operation === "voice.first_audio").interaction_id).toBe(turnId);
+      expect(JSON.stringify(events)).not.toContain("private utterance");
     } finally { call.end(); }
   });
 

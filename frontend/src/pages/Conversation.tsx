@@ -44,6 +44,7 @@ import { useCustomScene } from "../store/custom";
 import { useVoice, type VoiceEngine } from "../store/voice";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { startVoiceCall, type CallPhase, type VoiceCall } from "../lib/call";
+import { getInteraction } from "../lib/telemetry";
 import {
   isMoonshineTranscriptionReady,
   transcribeSpeech,
@@ -451,7 +452,7 @@ export default function Conversation() {
           // Speak the reply sentence-by-sentence as it streams, so the first
           // sentence plays while the rest is still being generated. The text
           // bubble fills in token-by-token at the same time.
-          const queue = createSpeechQueue(id);
+          const queue = createSpeechQueue(id, getInteraction(signal));
           callQueueRef.current = queue;
           void queue.started.then(() => {
             if (!signal.aborted) onSpeaking();
@@ -489,7 +490,7 @@ export default function Conversation() {
                 ...m,
                 { role: "assistant", content: r.reply },
               ]);
-            const fallback = createSpeechQueue(id);
+            const fallback = createSpeechQueue(id, getInteraction(signal));
             callQueueRef.current = fallback;
             const cancelFallback = () => fallback.stop();
             signal.addEventListener("abort", cancelFallback, { once: true });

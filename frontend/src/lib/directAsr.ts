@@ -2,6 +2,7 @@ import type { AsrStream, AsrStreamCallbacks } from "./asrStream";
 import { getToken } from "./authToken";
 import { getClientId } from "./clientId";
 import { withTimeout } from "./requestTimeout";
+import { bindInteraction, getInteraction, measureAsrStream, traceHeaders } from "./telemetry";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const FRAME = 1280;
@@ -14,7 +15,7 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
   try {
     const token = getToken();
     const response = await fetch(`${BASE_URL}/api/asr/session`, {
-      method: "POST", headers: { "X-Client-Id": getClientId(), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      method: "POST", headers: { "X-Client-Id": getClientId(), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...traceHeaders(signal) },
       signal: withTimeout(signal, 3_000), cache: "no-store",
     });
     if (!response.ok) throw new Error("ASR authorization unavailable");
@@ -124,7 +125,8 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
 /** Upload a retained complete clip directly; callers retain their relay fallback. */
 export async function transcribeDirect(pcm: ArrayBuffer, signal?: AbortSignal): Promise<string> {
   let disconnected = false;
-  const stream = await openDirectAsrStream({ onPartial: () => undefined, onClose: () => { disconnected = true; } }, "en_us", signal);
+  const stream = measureAsrStream(await openDirectAsrStream({ onPartial: () => undefined, onClose: () => { disconnected = true; } }, "en_us", signal), "direct");
+  bindInteraction(stream, getInteraction(signal));
   try {
     for (let offset = 0; offset < pcm.byteLength; offset += FRAME) {
       signal?.throwIfAborted();
