@@ -89,3 +89,10 @@ python scripts/calibrate_interview.py --env-file .env --fixtures tests/fixtures/
 本报告确认本地真实评分、固定样本稳定性、接口及组件回归。没有声称与官方考官等价，没有真实麦克风/听感或线上四题完整点击流程的新增证据；先前生产评分执行拒绝与浏览器控制限制没有被本次改动解除。
 
 交付仅保留源码、可复跑测试/夹具/校准脚本及本文档。原始模型输出、专属辅助脚本、构建与隔离工作目录在交付核验后清理。
+
+## 发布与清理回执
+
+- 功能提交`f787b0d`与历史修复/校准报告提交`f025d48`已合并、推送main，作者EthanLyu30。[CI前后端检查成功](https://github.com/EthanLyu30/spoken/actions/runs/41055632630)，[Vercel生产部署成功](https://vercel.com/ethanlyu30s-projects/spoken/55sMHLUbQDL3Ucf1SP7VSNzxqHsm)。
+- 正式站/interview返回200，实际入口`index-D197QP5t.js`加载`InterviewResults-zwDHZyka.js`，含0–5评分说明、旧版标记、视频原版及DeepSeek升级版。后端/openapi.json实际返回单题maximum=5、overall maximum=5、score_max default=5。这些是版本发布证据，不代替一次线上实际评分请求。
+- 6个专属模型原始输出/辅助文件、2个构建/依赖目录及9个Python缓存目录已精确核对路径后回收。原工作区9个用户部署/运维文件SHA256逐一未变，未纳入提交；任务分支已删除。
+- 隔离检出`C:\Users\Administrator\.codex\worktrees\interview-rubric\spoken`被应用标记为本任务主检出，原生archive_worktree拒绝移除；原工作区D:\personal_space\spoken并非托管worktree，不能通过attach切回。没有强制删除主检出或绕过此保护，暂留其已提交源码（detached HEAD）；可清理的临时输出均已回收。
