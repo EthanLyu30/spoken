@@ -33,7 +33,7 @@ class InterviewScoreRequest(BaseModel):
 class InterviewResult(BaseModel):
     question: str
     answer: str
-    score: int = Field(ge=0, le=6)  # TOEFL-style per-question band, 0-6
+    score: int = Field(strict=True, ge=0, le=5)  # Text-only reference; not an official section band.
     level: str
     feedback: str
     sample_answer: str
@@ -44,5 +44,8 @@ class InterviewResult(BaseModel):
 
 
 class InterviewScoreResponse(BaseModel):
-    overall: float = Field(ge=0, le=6)
+    overall: float = Field(ge=0, le=5)
     results: list[InterviewResult]
+    score_max: Literal[5] = 5
+    scoring_version: Literal["ets-interview-text-v1"] = "ets-interview-text-v1"
+    scoring_basis: Literal["transcript"] = "transcript"

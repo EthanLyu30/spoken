@@ -29,6 +29,23 @@ it("shows trusted sample length, estimated time and a safe video reference link"
   expect(screen.queryByTitle(/视频原版/)).not.toBeInTheDocument();
 });
 
+it("shows the new five-point content rubric without claiming audio or official bands", async () => {
+  render(<InterviewResults result={{ overall: 4, results: [savedAnswer], score_max: 5, scoring_version: "ets-interview-text-v1", scoring_basis: "transcript" }} onRestart={vi.fn()} onExit={vi.fn()} />);
+  expect(screen.getByRole("heading", { name: "内容参考分" })).toBeVisible();
+  expect(screen.getAllByText("/ 5")).toHaveLength(2);
+  await userEvent.setup().click(screen.getByText("查看 0–5 分评分标准"));
+  for (let score = 0; score <= 5; score++) expect(screen.getByText(`${score} 分`)).toBeVisible();
+  expect(screen.getByText(/未评估发音、停顿和流利度/)).toBeVisible();
+  expect(screen.getByRole("link", { name: "ETS 官方评分标准" })).toHaveAttribute("href", "https://www.ets.org/content/dam/ets-org/pdfs/toefl/speaking-rubrics.pdf");
+});
+
+it("labels old saved scores with their original six-point scale", () => {
+  showAnswer({ ...savedAnswer, score: 6 });
+  expect(screen.getByRole("heading", { name: "旧版练习参考分" })).toBeVisible();
+  expect(screen.getAllByText("/ 6")).toHaveLength(2);
+  expect(screen.queryByText("查看 0–5 分评分标准")).not.toBeInTheDocument();
+});
+
 it.each([
   "javascript:alert(1)", "http://www.youtube.com/watch?v=abcdefghijk",
   "https://www.youtube.com.evil.test/watch?v=abcdefghijk", "https://youtube.com@evil.test/watch?v=abcdefghijk",

@@ -445,6 +445,9 @@ export interface InterviewResult {
 export interface InterviewScore {
   overall: number;
   results: InterviewResult[];
+  score_max?: 5 | 6;
+  scoring_version?: string;
+  scoring_basis?: "transcript";
 }
 
 export type InterviewCollection = "inspire" | "ets";
@@ -504,6 +507,7 @@ export interface PracticeRecord {
   id: number;
   kind: string;
   score: number;
+  score_max?: number;
   title: string;
   created_at: string;
 }

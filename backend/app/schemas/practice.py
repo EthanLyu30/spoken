@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class PracticeCreate(BaseModel):
     kind: str = Field(min_length=1, max_length=24)  # pronunciation | interview
-    score: float = Field(ge=0, le=100)  # native scale (pronunciation 0-100, interview 0-6)
+    score: float = Field(ge=0, le=100)  # Native scale: pronunciation 100; interview 5, legacy 6.
     title: str = Field(default="", max_length=200)
     detail: str = Field(default="", max_length=48000)
 
@@ -20,6 +20,7 @@ class PracticeRecordOut(BaseModel):
     score: float
     title: str
     created_at: datetime
+    score_max: int
 
 
 class PracticeDetailOut(PracticeRecordOut):

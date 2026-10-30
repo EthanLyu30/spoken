@@ -23,6 +23,7 @@ import { getClientId } from "../lib/clientId";
 import { getPracticeDetail, type InterviewScore } from "../lib/api";
 import { getScenario } from "../data/scenarios";
 import { tokens } from "../lib/tokens";
+import { interviewProgressSummary } from "../lib/interviewScoring";
 
 const EChart = lazy(() =>
   import("../components/EChart").then((module) => ({ default: module.EChart })),
@@ -68,7 +69,7 @@ export default function Progress() {
   const [reviewLoading, setReviewLoading] = useState<number | null>(null);
   const interview = practice.filter((p) => p.kind === "interview");
   const average = mean(sessions.map((s) => s.overall));
-  const interviewAverage = mean(interview.map((p) => p.score));
+  const interviewSummary = interviewProgressSummary(interview);
   const total = stats ? stats.total_sessions + stats.total_practice : null;
   const goal = stats?.today_goal ?? 3;
   const today = stats?.today_count;
@@ -151,7 +152,7 @@ export default function Progress() {
       title:
         p.title || (p.kind === "interview" ? "Take an Interview" : "跟读练习"),
       score: p.score,
-      scale: p.kind === "interview" ? 6 : 100,
+      scale: p.kind === "interview" ? (p.score_max === 5 ? 5 : 6) : 100,
       at: p.created_at,
     })),
   ]
@@ -225,12 +226,14 @@ export default function Progress() {
           />
           <Metric
             icon={<Headphones />}
-            label="近期访谈均分"
-            value={interviewAverage}
-            suffix="/ 6"
+            label={interviewSummary.scale === 5 ? "近期访谈内容均分" : "旧版访谈均分"}
+            value={interviewSummary.average}
+            suffix={"/ " + interviewSummary.scale}
             note={
-              interview.length
-                ? "最近 " + interview.length + " 次 Interview"
+              interviewSummary.count
+                ? interviewSummary.scale === 5
+                  ? "新版 " + interviewSummary.count + " 次 · 内容参考分" + (interviewSummary.legacyCount ? "；旧版 " + interviewSummary.legacyCount + " 次未混入" : "")
+                  : "旧版 " + interviewSummary.count + " 次 · 保留原分制"
                 : "从一组主题访谈开始"
             }
           />

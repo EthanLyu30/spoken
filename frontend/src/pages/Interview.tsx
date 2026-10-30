@@ -241,8 +241,8 @@ export default function Interview() {
                   </p>
                 )}
                 <p className="interview-score-note">
-                  完成后获得逐题建议与 /6
-                  练习参考分。反馈基于转写内容，不包含发音评测。
+                  完成后获得逐题建议与 0–5
+                  内容参考分。按 ETS Interview 文本适用标准评估，不包含发音和流利度评测，不等同官方成绩。
                 </p>
               </aside>
             </div>

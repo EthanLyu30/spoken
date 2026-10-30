@@ -1500,6 +1500,14 @@
 .interview-results .ui-page-head h1 {
   text-wrap: balance;
 }
+.interview-rubric { margin: 0 0 24px; padding: 16px 20px; border: 1px solid var(--border); border-radius: 16px; color: var(--muted); font-size: 14px; }
+.interview-rubric summary { color: var(--ink); font-weight: 700; cursor: pointer; }
+.interview-rubric p { margin: 12px 0; line-height: 1.7; }
+.interview-rubric dl { display: grid; gap: 12px; margin: 16px 0; }
+.interview-rubric dl > div { display: flex; align-items: baseline; gap: 14px; }
+.interview-rubric dt { flex: 0 0 32px; color: var(--ink); font-weight: 700; }
+.interview-rubric dd { margin: 0; line-height: 1.7; min-width: 0; }
+.interview-rubric a { display: inline-flex; align-items: center; gap: 6px; color: var(--coral-deep); }
 .sample-answer .sample-answer-meta {
   color: var(--coral-deep);
   font-size: 12px;

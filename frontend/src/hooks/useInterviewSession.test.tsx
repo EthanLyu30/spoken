@@ -45,6 +45,7 @@ afterEach(() => vi.useRealTimers());
 it("scores the returned deck identity and preserves reference metadata in saved results", async () => {
   const scored = {
     overall: 4,
+    score_max: 5, scoring_version: "ets-interview-text-v1", scoring_basis: "transcript",
     results: [{
       question: "Question one?", answer: "I enjoy running in the park.", score: 4,
       level: "Good", feedback: "Clear reason.", sample_answer: "I like running.",
@@ -71,6 +72,7 @@ it("scores the returned deck identity and preserves reference metadata in saved 
   );
   expect(result.current.phase).toBe("results");
   expect(JSON.parse(mocks.savePractice.mock.calls[0][3]).results).toEqual(scored.results);
+  expect(JSON.parse(mocks.savePractice.mock.calls[0][3])).toMatchObject({ score_max: 5, scoring_version: "ets-interview-text-v1", scoring_basis: "transcript" });
 });
 it("leaves preparation and transcript confirmation under the learner's control in practice mode", async () => {
   const { result } = renderHook(() => useInterviewSession("device-a"));

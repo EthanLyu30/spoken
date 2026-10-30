@@ -1,3 +1,6 @@
+import json
+
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -63,3 +66,24 @@ def test_stats_shape_and_activity():
     assert s["streak_days"] >= 1
     assert s["level"] >= 1
     assert s["today_goal"] == 3
+
+
+@pytest.mark.parametrize("kind,detail,maximum", [
+    ("interview", {"score_max": 5, "scoring_version": "ets-interview-text-v1"}, 5),
+    ("interview", {"overall": 5}, 6),
+    ("interview", {"score_max": 5}, 6),
+    ("interview", {"score_max": 5, "scoring_version": "unknown"}, 6),
+    ("interview", "malformed-json", 6),
+    ("interview", [], 6),
+    ("pronunciation", {"score_max": 5, "scoring_version": "ets-interview-text-v1"}, 100),
+])
+def test_practice_preserves_original_scores_and_exposes_versioned_scale(kind, detail, maximum):
+    encoded = detail if isinstance(detail, str) else json.dumps(detail)
+    saved = client.post("/api/practice", json={"kind": kind, "score": 4.5, "detail": encoded}).json()
+    assert saved["score"] == 4.5
+    assert saved["score_max"] == maximum
+    listed = next(row for row in client.get("/api/practice").json() if row["id"] == saved["id"])
+    assert listed["score_max"] == maximum
+    full = client.get(f"/api/practice/{saved['id']}").json()
+    assert full["detail"] == encoded
+    assert full["score_max"] == maximum

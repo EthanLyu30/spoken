@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from app.api.chat import get_client
 from app.data.interview_questions import get_interview_sets
 from app.data.interview_answer_references import load_answer_references
+from app.data.interview_rubric import SCORE_LEVELS, TEXT_RUBRIC, is_nonresponse
 from app.schemas.interview import (
     InterviewQuestions,
     InterviewResult,
@@ -41,21 +42,23 @@ Before returning, silently revise each sample once: replace a vague activity lab
 
 _SCORE_SYSTEM = """You are an English speaking coach providing practice feedback for Take an Interview. You receive interview questions and the learner's answer transcript, so ignore minor transcription noise and missing punctuation.
 
-Assess relevance, language use, coherence, and development of ideas. You have no audio: do not claim to assess pronunciation, actual speaking speed, pauses, or intonation. These are practice reference scores, not official ETS scores.
+Assess relevance, language use, coherence, and development of ideas. You have no audio: do not claim to assess pronunciation, actual speaking speed, pauses, or intonation. These are text-only practice reference scores, not official ETS scores or predictions of the 1-6 section band.
+
+""" + TEXT_RUBRIC + """
 
 For EACH item return an object with:
 - "question": echo the question.
 - "answer": echo the transcript (may be empty).
-- "score": integer 0-6 (practice reference score; 6 = excellent, 0 = no/irrelevant answer).
+- "score": integer 0-5, using the anchors above.
 - "level": one of "Good", "Fair", "Limited", "Weak".
-- "feedback": 2-3 sentences in Chinese covering language, coherence, and idea development, ending with one concrete, actionable tip. Keep the advice realistic for 45 seconds: suggest replacing vague wording with a useful detail rather than automatically adding another sentence.
+- "feedback": 2-3 sentences in Chinese explaining the band with evidence from THIS learner's words, covering language, coherence and idea development, ending with one concrete, actionable tip. Keep the advice realistic for 45 seconds: suggest replacing vague wording with a useful detail rather than automatically adding another sentence. Do not describe the upgraded sample as if the learner said it.
 - "sample_answer": the DeepSeek expression-upgrade version, a complete English response following the guidance below. It is AI-authored, never the video's verbatim original answer.
 
 """ + _SAMPLE_STYLE_GUIDANCE + """
 
 Any supplied video answer ideas are optional perspectives, not a scoring standard. A reasonable different position must not lower a score. Use video ideas only to improve the sample, preserving the learner's reasonable position and examples first. Assess only the learner's transcript; the sample does not replace their answer.
 
-Return ONLY JSON: {"overall": <number 0-6, the average of the scores>, "results": [ ... in the same order as the input ]}."""
+Return ONLY JSON: {"overall": <number 0-5, the average of the scores>, "results": [ ... in the same order as the input ]}."""
 
 _REPAIR_SYSTEM = """Shorten only the supplied sample_answer values, retaining the learner's reasonable position, concrete examples, and every necessary branch of the question. Preserve the useful action or detail when compressing; remove repeated claims and generic wrap-up before cutting the example.
 
@@ -181,10 +184,7 @@ async def _score_interview(req: InterviewScoreRequest, client: DeepSeekClient) -
             raise HTTPException(status_code=503, detail="Interview answer references are unavailable") from exc
         if candidate.status == "reviewed":
             reference = candidate
-    body = "\n\n".join(
-        f"Question {i}: {it.question}\nAnswer {i}: {it.answer or '(no answer recorded)'}"
-        for i, it in enumerate(req.items, 1)
-    )
+    body = json.dumps({"items": [item.model_dump() for item in req.items]}, ensure_ascii=False)
     messages = [
         {"role": "system", "content": _SCORE_SYSTEM},
         {"role": "user", "content": f"{body}\n\nNow rate each answer and return the JSON."},
@@ -194,7 +194,7 @@ async def _score_interview(req: InterviewScoreRequest, client: DeepSeekClient) -
         messages.insert(1, {"role": "system", "content": f"Reviewed video answer ideas (optional, not a scoring standard):\n{context}"})
     try:
         raw = await client.chat(
-            messages, temperature=0.3, max_tokens=2200, response_format={"type": "json_object"}
+            messages, temperature=0, max_tokens=2200, response_format={"type": "json_object"}
         )
     except DeepSeekError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -212,6 +212,10 @@ async def _score_interview(req: InterviewScoreRequest, client: DeepSeekClient) -
         for index, (result, item) in enumerate(zip(results, req.items)):
             result.question = item.question
             result.answer = item.answer
+            if is_nonresponse(item.answer):
+                result.score = 0
+                result.feedback = "没有可评分的英语回答，本题内容参考分为0。先直接回答问题，再用一个具体理由或小例子展开。"
+            result.level = SCORE_LEVELS[result.score]
             result.sample_source = "video_reference" if reference is not None else "ai_generated"
             result.sample_source_url = _reference_url(reference.source_url, reference.answers[index].timestamp) if reference is not None else None
             result.sample_word_count = _word_count(result.sample_answer)
@@ -219,7 +223,7 @@ async def _score_interview(req: InterviewScoreRequest, client: DeepSeekClient) -
                 raise ValueError("empty sample answer")
             result.sample_estimated_seconds = round(result.sample_word_count / 110 * 60 + 4)
         overall = sum(r.score for r in results) / len(results)
-        overall = round(max(0.0, min(6.0, float(overall))), 1)
+        overall = round(overall, 1)
         return InterviewScoreResponse(overall=overall, results=results)
     except DeepSeekError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

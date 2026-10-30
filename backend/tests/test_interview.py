@@ -138,7 +138,7 @@ def test_interview_score_computes_overall_when_missing():
         {
             "results": [
                 {"question": "Q1", "answer": "a", "score": 4, "level": "Fair", "feedback": "ok", "sample_answer": "s"},
-                {"question": "Q2", "answer": "b", "score": 6, "level": "Good", "feedback": "ok", "sample_answer": "s"},
+                {"question": "Q2", "answer": "b", "score": 5, "level": "Good", "feedback": "ok", "sample_answer": "s"},
             ]
         }
     )
@@ -149,7 +149,7 @@ def test_interview_score_computes_overall_when_missing():
             json={"items": [{"question": "Q1", "answer": "a"}, {"question": "Q2", "answer": "b"}]},
         )
         assert resp.status_code == 200
-        assert resp.json()["overall"] == 5
+        assert resp.json()["overall"] == 4.5
     finally:
         app.dependency_overrides.clear()
 

@@ -3,6 +3,7 @@ import { ArrowRight, ExternalLink, RotateCcw, Volume2 } from "lucide-react";
 import type { InterviewScore } from "../lib/api";
 import { speakText, stopSpeaking } from "../lib/speech";
 import { Buddy } from "./Buddy";
+import { interviewRubric, interviewRubricUrl, interviewScoreMax } from "../lib/interviewScoring";
 
 interface VideoReference {
   sourceUrl: string;
@@ -81,6 +82,7 @@ export function InterviewResults({
   const [version, setVersion] = useState<"upgrade" | "original">("upgrade");
   useEffect(() => () => stopSpeaking(), [selected, version]);
   const current = result.results[selected];
+  const scoreMax = interviewScoreMax(result);
   const wordCount = current?.sample_word_count ?? (current?.sample_answer.match(/[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)*/g)?.length ?? 0);
   const estimatedSeconds = current?.sample_estimated_seconds ?? Math.round(wordCount / 110 * 60 + 4);
   const reference = current?.sample_source === "video_reference" ? videoReference(current.sample_source_url) : null;
@@ -100,14 +102,21 @@ export function InterviewResults({
       <section className="interview-overall">
         <Buddy size={65} />
         <div>
-          <h2>练习参考分</h2>
-          <p>基于转写内容评估语言与内容组织；不包含发音评测。</p>
+          <h2>{scoreMax === 5 ? "内容参考分" : "旧版练习参考分"}</h2>
+          <p>{scoreMax === 5 ? "按 ETS Interview 文本适用标准评估；未评估发音、停顿和流利度，不等同官方成绩。" : "此记录基于转写内容，保留旧版 0–6 分制，未重新评分；不与新版均分混算。"}</p>
         </div>
         <strong>
           {result.overall}
-          <small> / 6</small>
+          <small> / {scoreMax}</small>
         </strong>
       </section>
+      {scoreMax === 5 && <details className="interview-rubric">
+        <summary>查看 0–5 分评分标准</summary>
+        <p>以下为官方标准中可从文本观察的部分的中文释义；每题取整数分，上方显示四题均分。</p>
+        <dl>{interviewRubric.map((band) => <div key={band.score}><dt>{band.score} 分</dt><dd>{band.description}</dd></div>)}</dl>
+        <p>不以固定词数、复杂词汇数量或与视频相同的立场评分。短而完整可以得高分。</p>
+        <a href={interviewRubricUrl} target="_blank" rel="noopener noreferrer">ETS 官方评分标准 <ExternalLink size={13} /></a>
+      </details>}
       <div className="interview-review-grid">
         <div>
           {current && (
@@ -183,7 +192,7 @@ export function InterviewResults({
               </span>
               <strong>
                 {r.score}
-                <small> / 6</small>
+                <small> / {scoreMax}</small>
               </strong>
             </button>
           ))}
