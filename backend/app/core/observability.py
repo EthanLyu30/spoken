@@ -11,6 +11,7 @@ import json
 import secrets
 import re
 from time import perf_counter
+from starlette.requests import ClientDisconnect
 
 from app.core.config import get_settings
 
@@ -29,7 +30,7 @@ def _attributes(values):
 
 
 def _outcome(exc):
-    if isinstance(exc, (asyncio.CancelledError, GeneratorExit)):
+    if isinstance(exc, (asyncio.CancelledError, GeneratorExit, ClientDisconnect)):
         return "cancelled"
     if "timeout" in type(exc).__name__.lower() or "timeout" in type(exc.__cause__).__name__.lower():
         return "timeout"
@@ -45,9 +46,11 @@ class TraceContext:
         self.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
         self.start = perf_counter()
         self.duration_ms = None
+        self.end_at = None
         self.outcome = "ok"
         self.http_status = None
         self.spans = []
+        self.active_spans = {}
 
     def __enter__(self):
         self._token = _current.set(self)
@@ -57,24 +60,35 @@ class TraceContext:
     def __exit__(self, kind, exc, tb):
         if exc is not None:
             self.outcome = _outcome(exc)
-        self.duration_ms = max(0, (perf_counter() - self.start) * 1000)
+        self.duration_ms = max(0, ((self.end_at if self.end_at is not None else perf_counter()) - self.start) * 1000)
         _parent.reset(self._parent_token)
         _current.reset(self._token)
 
     def record(self):
-        models = [s["attributes"] for s in self.spans if s["name"].startswith("deepseek.")]
+        elapsed = self.duration_ms if self.duration_ms is not None else (perf_counter()-self.start)*1000
+        snapshots = []
+        for node in self.spans:
+            active = self.active_spans.get(node["id"])
+            snapshot = {**node, "attributes": _attributes(active if active is not None else node["attributes"])}
+            if active is not None:
+                # ASGI 2.4 can leave the body iterator paused at disconnect.
+                # Freeze a truthful view now, independent of later aclose()/GC.
+                snapshot["duration_ms"] = max(0, elapsed - node["offset_ms"])
+                snapshot["outcome"] = self.outcome if self.outcome != "ok" else "incomplete"
+            snapshots.append(snapshot)
+        models = [s["attributes"] for s in snapshots if s["name"].startswith("deepseek.")]
         complete = bool(models) and all(type(m.get("input_tokens")) is int and type(m.get("output_tokens")) is int for m in models)
         first = [m["ttft_ms"] for m in models if isinstance(m.get("ttft_ms"), (float, int))]
         return {"trace_id": self.trace_id, "interaction_id": self.interaction_id, "started_at": self.started_at,
                 "operation": self.operation[:120], "source": self.source,
                 "outcome": self.outcome, "http_status": self.http_status,
-                "duration_ms": self.duration_ms if self.duration_ms is not None else (perf_counter()-self.start)*1000,
+                "duration_ms": elapsed,
                 "ttft_ms": min(first) if first else None,
                 "input_tokens": sum(m["input_tokens"] for m in models) if complete else None,
                 "output_tokens": sum(m["output_tokens"] for m in models) if complete else None,
                 "model": models[0].get("model") if models else None,
                 "release": os.environ.get("RENDER_GIT_COMMIT", "unknown")[:80],
-                "spans_json": json.dumps(self.spans, ensure_ascii=True)}
+                "spans_json": json.dumps(snapshots, ensure_ascii=True)}
 
 
 @contextmanager
@@ -93,6 +107,7 @@ def span(name: str, **attributes):
             "offset_ms": max(0, (start-trace.start)*1000), "duration_ms": 0, "outcome": "ok", "attributes": {}}
     # Reserve before awaiting, so concurrent/long-lived children respect the cap.
     trace.spans.append(node)
+    trace.active_spans[node["id"]] = data
     token = _parent.set(node["id"])
     data_token = _span_data.set(data)
     try:
@@ -104,6 +119,7 @@ def span(name: str, **attributes):
     finally:
         node["duration_ms"] = max(0, (perf_counter()-start)*1000)
         node["attributes"] = _attributes(data)
+        trace.active_spans.pop(node["id"], None)
         _parent.reset(token)
         _span_data.reset(data_token)
 
@@ -152,6 +168,7 @@ def traced_stream(name: str, **attributes):
                     "offset_ms": max(0, (start-trace.start)*1000), "duration_ms": 0,
                     "outcome": "ok", "attributes": {}}
             trace.spans.append(node)
+            trace.active_spans[node["id"]] = data
             first = True
             try:
                 while True:
@@ -178,6 +195,7 @@ def traced_stream(name: str, **attributes):
                 finally:
                     node["duration_ms"] = max(0, (perf_counter()-start)*1000)
                     node["attributes"] = _attributes(data)
+                    trace.active_spans.pop(node["id"], None)
         return wrapped
     return decorate
 
@@ -196,19 +214,39 @@ class TelemetryMiddleware:
         interaction = next((value for key, value in scope.get("headers", []) if key.lower() == b"x-interaction-id"), b"")
         interaction_id = interaction.decode("ascii") if re.fullmatch(b"[a-f0-9]{32}", interaction) else None
         trace = TraceContext(operation="unmatched", interaction_id=interaction_id)
+        disconnected = False
+        transport_failed = False
+        response_complete = False
+
+        async def observe_receive():
+            nonlocal disconnected
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                disconnected = True
+            return message
 
         async def observe(message):
+            nonlocal transport_failed, response_complete
             if message["type"] == "http.response.start":
                 trace.http_status = message["status"]
                 message = {**message, "headers": [*message.get("headers", []), (b"x-trace-id", trace.trace_id.encode())]}
-            await send(message)
+            try:
+                await send(message)
+            except OSError:
+                transport_failed = True
+                raise
+            if message["type"] == "http.response.body" and not message.get("more_body", False):
+                response_complete = True
+                trace.end_at = perf_counter()
 
         try:
             with trace:
-                await self.app(scope, receive, observe)
+                await self.app(scope, observe_receive, observe)
                 if trace.http_status and trace.http_status >= 400 and trace.outcome == "ok":
                     trace.outcome = "timeout" if any(s["outcome"] == "timeout" for s in trace.spans) else "error"
         finally:
+            if transport_failed or (disconnected and not response_complete and trace.outcome == "ok"):
+                trace.outcome = "cancelled"
             route = scope.get("route")
             canonical = getattr(route, "path", "/api/unmatched")
             if not canonical.startswith("/api/"):

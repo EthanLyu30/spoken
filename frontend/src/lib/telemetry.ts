@@ -37,19 +37,21 @@ export function reportTiming(operation: Operation, durationMs: number, options: 
   } catch { clearTimeout(timer); /* instrumentation must not affect recording or playback */ }
 }
 
-export function measureAsrStream(stream: AsrStream, transport: "direct" | "relay"): AsrStream {
+export function measureAsrStream(stream: AsrStream, transport: "direct" | "relay", signal?: AbortSignal): AsrStream {
+  let closed = false;
   const measured: AsrStream = {
-    send: (pcm) => stream.send(pcm), close: () => stream.close(),
+    send: (pcm) => stream.send(pcm), close: () => { closed = true; stream.close(); },
     finishUtterance: async () => {
       const start = performance.now();
       const interactionId = getInteraction(measured);
       try {
         const text = await stream.finishUtterance();
-        reportTiming("asr.finalize", performance.now() - start, { engine: "xfyun", transport, interactionId, outcome: text.trim() ? "ok" : "error" });
+        reportTiming("asr.finalize", performance.now() - start, { engine: "xfyun", transport, interactionId,
+          outcome: closed || signal?.aborted ? "cancelled" : text.trim() ? "ok" : "error" });
         return text;
       } catch (error) {
         reportTiming("asr.finalize", performance.now() - start, { engine: "xfyun", transport, interactionId,
-          outcome: error instanceof DOMException && error.name === "AbortError" ? "cancelled" : "error" });
+          outcome: closed || signal?.aborted || (error instanceof DOMException && error.name === "AbortError") ? "cancelled" : "error" });
         throw error;
       }
     },

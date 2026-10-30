@@ -40,3 +40,26 @@ it("keeps concurrent turn identities scoped to their own cancellation signals", 
   expect(traceHeaders(second.signal)).toEqual({ "X-Interaction-Id": "b".repeat(32) });
   expect(traceHeaders(new AbortController().signal)).toEqual({});
 });
+
+it("reports an explicitly closed pending ASR finalization as cancelled without changing its empty result", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+  vi.stubGlobal("fetch", fetcher);
+  let settle: (text: string) => void = () => {};
+  const measured = measureAsrStream({ send() {}, close: () => settle(""), finishUtterance: () => new Promise(resolve => { settle = resolve; }) }, "relay");
+  const pending = measured.finishUtterance();
+  measured.close();
+  expect(await pending).toBe("");
+  expect(JSON.parse(fetcher.mock.calls[0][1].body).outcome).toBe("cancelled");
+});
+
+it("recognizes direct-provider signal cancellation even when the raw stream resolves empty", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+  vi.stubGlobal("fetch", fetcher);
+  const controller = new AbortController();
+  let settle: (text: string) => void = () => {};
+  const measured = measureAsrStream({ send() {}, close() {}, finishUtterance: () => new Promise(resolve => { settle = resolve; }) }, "direct", controller.signal);
+  controller.signal.addEventListener("abort", () => settle(""));
+  const pending = measured.finishUtterance(); controller.abort();
+  expect(await pending).toBe("");
+  expect(JSON.parse(fetcher.mock.calls[0][1].body).outcome).toBe("cancelled");
+});

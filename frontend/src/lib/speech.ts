@@ -16,6 +16,8 @@ import { isLocalSpeechModelReady } from "./localSpeech/runtime";
 import { bindInteraction, reportTiming } from "./telemetry";
 
 export interface Speaking {
+  /** Observed playback error; cancellation keeps its existing settlement contract. */
+  readonly failed?: boolean;
   /** Resolves when playback finishes (or is stopped / errors). */
   done: Promise<void>;
   stop: () => void;
@@ -80,6 +82,7 @@ function pickBrowserVoice(preferredURI: string | null): SpeechSynthesisVoice | n
 }
 
 function speakBrowser(text: string, onStarted?: () => void): Speaking {
+  let failed = false;
   const synth = window.speechSynthesis;
   synth.cancel();
   const { speed, pitch, browserVoiceURI } = useVoice.getState();
@@ -96,10 +99,10 @@ function speakBrowser(text: string, onStarted?: () => void): Speaking {
   let settle: () => void = () => {};
   const done = new Promise<void>((r) => (settle = r));
   u.onend = () => settle();
-  u.onerror = () => settle();
+  u.onerror = () => { failed = true; settle(); };
   u.onstart = () => onStarted?.();
   synth.speak(u);
-  return { done, stop: () => { synth.cancel(); settle(); } };
+  return { done, get failed() { return failed; }, stop: () => { synth.cancel(); settle(); } };
 }
 
 function speakBuffered(
@@ -112,6 +115,7 @@ function speakBuffered(
   const controller = new AbortController();
   bindInteraction(controller.signal, interactionId);
   let audio: HTMLAudioElement | null = null;
+  let failed = false;
   let url: string | null = null;
   let stopped = false;
   let settle: () => void = () => {};
@@ -131,13 +135,14 @@ function speakBuffered(
       url = nextUrl;
       audio = new Audio(nextUrl);
       audio.onended = cleanup;
-      audio.onerror = cleanup;
+      audio.onerror = () => { failed = true; cleanup(); };
       audio.onplaying = () => onStarted?.();
-      void audio.play().catch(cleanup);
+      void audio.play().catch(() => { failed = true; cleanup(); });
     })
-    .catch(() => settle());
+    .catch(() => { failed = true; settle(); });
   return {
     done,
+    get failed() { return failed; },
     stop: () => {
       stopped = true;
       controller.abort();
@@ -190,6 +195,7 @@ function speakIflytek(text: string, scenarioId?: string, overrides?: TtsOverride
   })();
   return {
     done: Promise.race([run, cancelled]),
+    get failed() { return fallback?.failed ?? false; },
     stop: () => {
       stopped = true;
       controller.abort();
@@ -281,6 +287,7 @@ export function stopSpeaking(): void {
 /** Play an already-fetched object URL; resolves when it ends, errors, or stops. */
 function playUrl(url: string, onStarted?: () => void): Speaking {
   const audio = new Audio(url);
+  let failed = false;
   let settle: () => void = () => {};
   const done = new Promise<void>((r) => (settle = r));
   let finished = false;
@@ -291,11 +298,12 @@ function playUrl(url: string, onStarted?: () => void): Speaking {
     settle();
   };
   audio.onended = cleanup;
-  audio.onerror = cleanup;
+  audio.onerror = () => { failed = true; cleanup(); };
   audio.onplaying = () => onStarted?.();
-  void audio.play().catch(cleanup);
+  void audio.play().catch(() => { failed = true; cleanup(); });
   return {
     done,
+    get failed() { return failed; },
     stop: () => {
       audio.pause();
       cleanup();
@@ -407,6 +415,8 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
       }
     };
     abortPrefetch = () => { abandonPrefetch(); abandonStream(); };
+    let completedNormally = false;
+    let hadFailure = false;
     try {
       while (!stopped) {
         const text = await take();
@@ -415,6 +425,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
           playbackEngine = "browser";
           playing = speakBrowser(text, didStart);
           await playing.done;
+          hadFailure ||= Boolean(playing.failed);
           continue;
         }
 
@@ -445,6 +456,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
                 overrides,
               );
             } catch {
+              hadFailure = true;
               continue;
             }
           }
@@ -461,6 +473,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
           playing = playUrl(localUrl, didStart);
           onPending();
           await playing.done;
+          hadFailure ||= Boolean(playing.failed);
           onPending = null;
           continue;
         }
@@ -481,6 +494,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
           };
           playing = speakIflytek(text, scenarioId, overrides, () => { didStart(); onPending?.(); }, prepared ?? undefined, interactionId);
           await playing.done;
+          hadFailure ||= Boolean(playing.failed);
           onPending = null;
           continue;
         }
@@ -498,6 +512,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
                   overrides,
                 );
         } catch {
+          hadFailure = true;
           prefetchText = null;
           prefetchUrl = null;
           continue; // skip a sentence we couldn't synthesise; keep going
@@ -513,18 +528,21 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
         if (stopped || !url) {
           if (url) URL.revokeObjectURL(url);
           if (stopped) break;
+          hadFailure = true;
           continue;
         }
         playing = playUrl(url, didStart);
         onPending();
         await playing.done;
+        hadFailure ||= Boolean(playing.failed);
         onPending = null;
       }
+      completedNormally = true;
     } finally {
       abandonPrefetch();
       abandonStream();
       if (spokenUpto > 0) reportTiming("speech.complete", performance.now() - queueAt, {
-        engine: playbackEngine, interactionId, outcome: stopped ? "cancelled" : firstAudio ? "ok" : "error",
+        engine: playbackEngine, interactionId, outcome: stopped ? "cancelled" : completedNormally && firstAudio && !hadFailure ? "ok" : "error",
       });
     }
   })();

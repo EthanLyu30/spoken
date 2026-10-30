@@ -50,6 +50,7 @@ import { createSpeechQueue, speakText, stopSpeaking } from "./speech";
 const audioInstances: FakeAudio[] = [];
 
 class FakeAudio {
+  onplaying: (() => void) | null = null;
   onended: (() => void) | null = null;
   onerror: (() => void) | null = null;
 
@@ -65,6 +66,19 @@ class FakeAudio {
 }
 
 describe("cloud speech queue cleanup", () => {
+  it("marks buffered playback errors after start without changing the resolved playback contract", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetcher);
+    mocks.fetchTtsUrl.mockResolvedValue("blob:qa-audio");
+    const queue = createSpeechQueue("cafe");
+    const finished = queue.end("Hello there.");
+    await vi.waitFor(() => expect(audioInstances).toHaveLength(1));
+    audioInstances[0].onplaying?.();
+    audioInstances[0].onerror?.();
+    await finished;
+    const event = fetcher.mock.calls.map(([, options]) => JSON.parse(options.body)).find(item => item.operation === "speech.complete");
+    expect(event.outcome).toBe("error");
+  });
   beforeEach(() => {
     mocks.fetchTtsUrl.mockReset();
     mocks.revokeObjectUrl.mockReset();

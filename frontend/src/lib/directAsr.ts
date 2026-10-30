@@ -125,7 +125,7 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
 /** Upload a retained complete clip directly; callers retain their relay fallback. */
 export async function transcribeDirect(pcm: ArrayBuffer, signal?: AbortSignal): Promise<string> {
   let disconnected = false;
-  const stream = measureAsrStream(await openDirectAsrStream({ onPartial: () => undefined, onClose: () => { disconnected = true; } }, "en_us", signal), "direct");
+  const stream = measureAsrStream(await openDirectAsrStream({ onPartial: () => undefined, onClose: () => { disconnected = true; } }, "en_us", signal), "direct", signal);
   bindInteraction(stream, getInteraction(signal));
   try {
     for (let offset = 0; offset < pcm.byteLength; offset += FRAME) {

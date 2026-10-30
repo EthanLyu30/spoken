@@ -55,3 +55,21 @@ it("cancels an outstanding cloud synthesis when the queue is stopped", async () 
   await queue.end("Hello there. ");
   expect(signal?.aborted).toBe(true);
 });
+
+it("reports a failure after first playback as failure rather than successful completion", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+  vi.stubGlobal("fetch", fetcher);
+  let controller: ReadableStreamDefaultController<Uint8Array>;
+  mocks.fetchTtsStream.mockResolvedValue(new Response(new ReadableStream({ start(c) { controller = c; } })));
+  const queue = createSpeechQueue("cafe");
+  queue.feed("Hello there. ");
+  const finished = queue.end("Hello there. ");
+  void finished.catch(() => undefined);
+  await vi.waitFor(() => expect(mocks.fetchTtsStream).toHaveBeenCalledOnce());
+  controller!.enqueue(new Uint8Array([0, 64, 0, 64]));
+  await queue.started;
+  controller!.error(new Error("PCM stream interrupted"));
+  await expect(finished).rejects.toThrow("PCM stream interrupted");
+  const event = fetcher.mock.calls.map(([, options]) => JSON.parse(options.body)).find(item => item.operation === "speech.complete");
+  expect(event.outcome).toBe("error");
+});

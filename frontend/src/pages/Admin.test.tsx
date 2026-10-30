@@ -61,3 +61,26 @@ it("aborts in-flight reads and hides private results on logout", async () => {
   expect(screen.getByText(/仅管理员/)).toBeVisible();
   expect(signals.every(signal => signal.aborted)).toBe(true);
 });
+
+it("looks up a known Trace ID even when it is not in the current table", async () => {
+  show(); await screen.findByText(/暂无调用记录/);
+  fireEvent.change(screen.getByLabelText("Trace ID"), { target: { value: trace.trace_id } });
+  fireEvent.click(screen.getByRole("button", { name: "查找调用" }));
+  expect(await screen.findByRole("complementary", { name: "调用详情" })).toBeVisible();
+});
+
+it("rejects malformed Trace IDs before requesting a private detail", async () => {
+  show(); await screen.findByText(/暂无调用记录/); fetcher.mockClear();
+  fireEvent.change(screen.getByLabelText("Trace ID"), { target: { value: "not-a-trace-id" } });
+  fireEvent.click(screen.getByRole("button", { name: "查找调用" }));
+  expect(screen.getByRole("alert")).toHaveTextContent(/32 位/);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it.each([[404, /未找到该调用/], [403, /权限已失效/]] as const)("handles Trace ID lookup status %s explicitly", async (status, message) => {
+  show(); await screen.findByText(/暂无调用记录/);
+  fetcher.mockResolvedValue(new Response("{}", { status }));
+  fireEvent.change(screen.getByLabelText("Trace ID"), { target: { value: trace.trace_id } });
+  fireEvent.click(screen.getByRole("button", { name: "查找调用" }));
+  expect(await screen.findByText(message)).toBeVisible();
+});

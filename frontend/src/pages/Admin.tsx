@@ -8,6 +8,7 @@ import "../admin.css";
 
 const defaults: AdminFilters = { hours: 24, source: "server", operation: "POST /api/chat/stream", model: "", release: "", outcome: "" };
 const labels: Record<string, string> = { ok: "成功", error: "失败", timeout: "超时", cancelled: "已取消" };
+const spanLabels: Record<string, string> = { ...labels, incomplete: "未完成" };
 const names: Record<string, string> = {
   "POST /api/chat/stream": "场景对话 · 流式回复", "POST /api/chat": "场景对话 · 普通回复",
   "POST /api/interview/score": "Interview · 四题评分", "POST /api/asr": "录音识别",
@@ -35,6 +36,8 @@ export default function Admin() {
   const [error, setError] = useState("");
   const [denied, setDenied] = useState(false);
   const [detail, setDetail] = useState<AdminTrace | null>(null);
+  const [traceLookup, setTraceLookup] = useState("");
+  const [detailLoading, setDetailLoading] = useState(false);
   const detailController = useRef<AbortController | null>(null);
   const canRead = Boolean(user?.is_admin);
   const userId = user?.id;
@@ -42,7 +45,7 @@ export default function Admin() {
   useEffect(() => {
     const controller = new AbortController();
     let live = true;
-    setData(null); setRows([]); setTotal(0); setDetail(null); setError(""); setDenied(false);
+    setData(null); setRows([]); setTotal(0); setDetail(null); setDetailLoading(false); setError(""); setDenied(false);
     detailController.current?.abort();
     if (canRead) {
       setLoading(true);
@@ -74,7 +77,7 @@ export default function Admin() {
   async function inspect(id: string) {
     detailController.current?.abort();
     const controller = new AbortController(); detailController.current = controller;
-    setDetail(null);
+    setDetail(null); setDetailLoading(true); setError("");
     try {
       const next = await getAdminTrace(id, controller.signal);
       if (!controller.signal.aborted) setDetail(next);
@@ -82,7 +85,9 @@ export default function Admin() {
       if (controller.signal.aborted) return;
       if (err instanceof AdminApiError && (err.status === 401 || err.status === 403)) {
         setDenied(true); setData(null); setRows([]);
-      } else setError("调用详情无法加载，可能已超过保留期。");
+      } else setError(err instanceof AdminApiError && err.status === 404 ? "未找到该调用，可能已超过保留期。" : "调用详情无法加载，请稍后重试。");
+    } finally {
+      if (!controller.signal.aborted) setDetailLoading(false);
     }
   }
 
@@ -104,6 +109,15 @@ export default function Admin() {
       <label>{filters.source === "server" ? "模型" : "引擎 / 传输"}<select aria-label="模型或引擎" value={filters.model} onChange={e => update({ model: e.target.value })}><option value="">全部</option>{(data?.facets?.models ?? []).map(m => <option key={m}>{m}</option>)}</select></label>
       <label>发布版本<select value={filters.release} onChange={e => update({ release: e.target.value })}><option value="">全部</option>{(data?.facets?.releases ?? []).map(r => <option key={r} value={r}>{r === "unknown" ? "未提供版本" : r.slice(0, 10)}</option>)}</select></label>
     </div>
+    <form className="admin-trace-lookup" onSubmit={event => {
+      event.preventDefault();
+      const id = traceLookup.trim().toLowerCase();
+      if (!/^[a-f0-9]{32}$/.test(id)) { setError("请输入 32 位十六进制 Trace ID。"); return; }
+      void inspect(id);
+    }}><label htmlFor="admin-trace-id">Trace ID</label>
+      <input id="admin-trace-id" value={traceLookup} onChange={event => setTraceLookup(event.target.value)} maxLength={64} autoComplete="off" spellCheck={false} placeholder="粘贴 32 位调用编号" />
+      <button disabled={detailLoading} type="submit">{detailLoading ? "查找中…" : "查找调用"}</button><span>可直接查找响应头中的 X-Trace-Id</span>
+    </form>
     {error && <p className="admin-notice" role="alert">{error}</p>}
     {loading && <p className="admin-loading" role="status">正在读取运行数据…</p>}
     {data && <>
@@ -145,7 +159,7 @@ export default function Admin() {
       {!!detail.related?.length && <section className="admin-related"><h3>同一轮交互</h3><p>按匿名交互编号关联。各端时钟独立，分别查看，不跨端累加。</p>{detail.related.map(row => <button key={row.trace_id} onClick={() => void inspect(row.trace_id)}><span>{names[row.operation] ?? row.operation}<small>{row.source === "browser" ? "浏览器上报" : "后端请求"}</small></span><b>{ms(row.duration_ms)}</b></button>)}</section>}
       <div className="admin-trace-root"><strong>总耗时 {ms(detail.duration_ms)}</strong><span>{detail.model ?? "无模型计量"}</span></div>
       <p className="admin-waterfall-note">以下阶段共享该端的单调时钟，重叠阶段不累加为总耗时。</p>
-      <div className="admin-waterfall">{detail.spans?.length ? detail.spans.map(span => <article key={span.id}><div><strong>{span.name}</strong><span>{ms(span.duration_ms)} · {labels[span.outcome] ?? span.outcome}</span></div>
+      <div className="admin-waterfall">{detail.spans?.length ? detail.spans.map(span => <article key={span.id}><div><strong>{span.name}</strong><span>{ms(span.duration_ms)} · {spanLabels[span.outcome] ?? span.outcome}</span></div>
         <div className="admin-span-track"><i className={span.outcome} style={{ marginLeft: `${Math.min(99, span.offset_ms / Math.max(1, detail.duration_ms) * 100)}%`, width: `${Math.max(0.5, Math.min(100, span.duration_ms / Math.max(1, detail.duration_ms) * 100))}%` }} /></div>
         <dl>{Object.entries(span.attributes).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl>
       </article>) : <p>此请求没有已采集的子阶段。</p>}</div>
