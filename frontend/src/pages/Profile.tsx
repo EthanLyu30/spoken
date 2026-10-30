@@ -599,6 +599,10 @@ function lineOption(
 function PracticeHistory({ records }: { records: PracticeRecord[] }) {
   const pron = records.filter((r) => r.kind === "pronunciation");
   const intv = records.filter((r) => r.kind === "interview");
+  const interviewGroups = [
+    { records: intv.filter((r) => r.score_max === 5), max: 5, label: "访谈内容参考分" },
+    { records: intv.filter((r) => r.score_max !== 5), max: 6, label: "旧版访谈参考分" },
+  ];
 
   return (
     <section id="practice-history" className="card mt-5 p-6">
@@ -622,18 +626,18 @@ function PracticeHistory({ records }: { records: PracticeRecord[] }) {
               />
             </div>
           )}
-          {intv.length > 0 && (
-            <div>
+          {interviewGroups.filter((group) => group.records.length > 0).map((group) => (
+            <div key={group.max}>
               <p className="text-sm font-semibold text-ink">
-                Take an Interview · /6（最近 {intv.length} 次）
+                {group.label} · /{group.max}（最近 {group.records.length} 次）
               </p>
               <EChart
-                option={lineOption(intv, 6, "#2bb3a3")}
+                option={lineOption(group.records, group.max, "#2bb3a3")}
                 height={190}
                 className="mt-1"
               />
             </div>
-          )}
+          ))}
         </div>
       )}
     </section>
