@@ -77,6 +77,24 @@ it("labels retained overview results after refresh fails, and clears them on a n
   await waitFor(() => expect(screen.queryByText("42")).not.toBeInTheDocument());
 });
 
+it.each(["sort", "status"])("finishes a pending overview refresh after a table %s change", async action => {
+  const pending: ((response: Response) => void)[] = [];
+  let overviewReads = 0;
+  fetcher.mockImplementation((url: string) => {
+    if (!url.includes("/overview")) return Promise.resolve(new Response('{"items":[],"total":0}'));
+    overviewReads += 1;
+    return overviewReads === 1 ? Promise.resolve(new Response(JSON.stringify({ ...overview, count: 4 })))
+      : new Promise<Response>(resolve => pending.push(resolve));
+  });
+  show(); await screen.findByText("4");
+  await waitFor(() => expect(screen.getByRole("button", { name: "刷新数据" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "刷新数据" }));
+  if (action === "sort") fireEvent.click(screen.getByLabelText("优先查看慢请求"));
+  else fireEvent.change(screen.getByLabelText("调用状态"), { target: { value: "error" } });
+  await act(async () => { pending.forEach(resolve => resolve(new Response(JSON.stringify({ ...overview, count: 42 })))); });
+  expect(await screen.findByText("42")).toBeVisible();
+});
+
 it.each([undefined, null, "OperationalError"])("shows honest diagnostics for old/new failure metadata (%s)", async errorType => {
   const failure = { ...trace, outcome: "error", http_status: null, spans: [], error_type: errorType, error_cause_type: errorType ? "AdminShutdown" : null };
   fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes("/overview")

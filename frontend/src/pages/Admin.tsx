@@ -64,7 +64,7 @@ export default function Admin() {
     const keepOverview = previousScope.current === scope && hasOverview.current;
     const keepList = previousList.current === listScope && hasList.current;
     const readOverview = !keepOverview || previousRevision.current !== revision;
-    previousScope.current = scope; previousList.current = listScope; previousRevision.current = revision;
+    previousScope.current = scope; previousList.current = listScope;
     if (!keepOverview || !canRead) { setData(null); setUpdatedAt(null); setOverviewError(""); hasOverview.current = false; }
     if (!keepList || !canRead) { setRows([]); setTotal(0); setListError(""); hasList.current = false; }
     setDetail(null); setDetailLoading(false); setError(""); setDenied(false);
@@ -79,6 +79,9 @@ export default function Admin() {
       if (readOverview) void getAdminOverview({ ...filters, outcome: "" }, controller.signal)
         .then(overview => {
           if (!live || blocked || controller.signal.aborted) return;
+          // A table action may abort this effect. Keep its refresh pending until
+          // success so the next effect cannot silently keep stale metrics.
+          previousRevision.current = revision;
           setData(overview); setOverviewError(""); hasOverview.current = true; setUpdatedAt(new Date().toISOString());
         }).catch((err: unknown) => {
           if (!live || controller.signal.aborted) return;
