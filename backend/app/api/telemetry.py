@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 from app.schemas.telemetry import BrowserTiming
-from app.core.deps import get_client_id
+from app.core.deps import get_optional_client_id
 from app.db import get_db
 from app.services.monitoring import record_visit
 
@@ -20,7 +20,7 @@ _rates = OrderedDict()
 
 
 @router.post('/visit', status_code=204)
-async def site_visit(request: Request, client_id: str = Depends(get_client_id), db: Session = Depends(get_db)):
+async def site_visit(request: Request, client_id: str = Depends(get_optional_client_id), db: Session = Depends(get_db)):
     host = request.client.host if request.client else 'unknown'
     key = ('visit', host, int(monotonic() // 60))
     if _rates.get(key, 0) >= 60:

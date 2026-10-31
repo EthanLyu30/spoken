@@ -5,27 +5,35 @@
  * cycle (auth store -> api -> auth store).
  */
 const KEY = "spoken-token";
+let currentToken: string | null = null;
+let memoryOverride = false;
 
 export function getToken(): string | null {
+  if (memoryOverride) return currentToken;
   try {
-    return localStorage.getItem(KEY);
+    return currentToken = localStorage.getItem(KEY);
   } catch {
-    return null;
+    return currentToken;
   }
 }
 
 export function setToken(token: string): void {
+  currentToken = token;
   try {
     localStorage.setItem(KEY, token);
+    memoryOverride = false;
   } catch {
-    /* ignore (private mode / storage disabled) */
+    memoryOverride = true;
   }
 }
 
 export function clearToken(): void {
+  currentToken = null;
   try {
     localStorage.removeItem(KEY);
+    memoryOverride = false;
   } catch {
-    /* ignore */
+    // A readable stale token must not resurrect after a failed removal.
+    memoryOverride = true;
   }
 }

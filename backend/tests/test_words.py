@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from app.api.chat import get_client
 from app.main import app
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-Client-Id": "test-word-device"})
 
 
 class _StubDefine:

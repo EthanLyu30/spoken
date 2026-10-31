@@ -9,7 +9,7 @@ other changes.
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_client_id, get_current_user
+from app.core.deps import get_optional_client_id, get_current_user
 from app.core.security import create_token, hash_password, verify_password
 from app.db import get_db
 from app.models.user import User
@@ -28,7 +28,7 @@ def _user_out(user: User, db: Session) -> UserOut:
 def register(
     payload: RegisterRequest,
     db: Session = Depends(get_db),
-    device_id: str = Depends(get_client_id),
+    device_id: str = Depends(get_optional_client_id),
 ) -> AuthResponse:
     if repo.get_by_email(db, payload.email) is not None:
         raise HTTPException(status_code=409, detail="该邮箱已注册，去登录吧")

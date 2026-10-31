@@ -14,7 +14,7 @@ def _bearer(authorization: str | None) -> str | None:
     return None
 
 
-def get_client_id(
+def get_optional_client_id(
     x_client_id: str | None = Header(default=None, alias="X-Client-Id"),
     authorization: str | None = Header(default=None),
 ) -> str:
@@ -33,7 +33,18 @@ def get_client_id(
     cid = (x_client_id or "").strip()
     if len(cid) > 64 or cid.lower().startswith("u:"):
         raise HTTPException(status_code=400, detail="Invalid device identifier")
-    return cid or "anon"
+    return "" if cid.lower() == "anon" else cid
+
+
+def get_client_id(
+    x_client_id: str | None = Header(default=None, alias="X-Client-Id"),
+    authorization: str | None = Header(default=None),
+) -> str:
+    """Private stored data requires an account or an unambiguous guest owner."""
+    owner = get_optional_client_id(x_client_id, authorization)
+    if not owner:
+        raise HTTPException(status_code=400, detail="A device identifier or login is required")
+    return owner
 
 
 def get_current_user(

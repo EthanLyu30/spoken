@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-Client-Id": "test-practice-device"})
 
 
 def test_save_and_list_practice():
@@ -37,7 +37,7 @@ def test_prune_records_keeps_only_newest():
         client.post("/api/practice", json={"kind": "pronunciation", "score": 60})
     db = SessionLocal()
     try:
-        repo.prune_records(db, "anon", keep=3)
+        repo.prune_records(db, "test-practice-device", keep=3)
     finally:
         db.close()
     # Pruning retains exactly the newest `keep` records for this client.

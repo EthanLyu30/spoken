@@ -49,7 +49,7 @@ def prune_visits(db, now):
 
 def record_visit(db, client_id, *, at=None):
     settings = get_settings()
-    if not settings.telemetry_enabled or not settings.jwt_secret or client_id == 'anon':
+    if not settings.telemetry_enabled or not settings.jwt_secret or not client_id or client_id == 'anon':
         return
     if client_id.startswith('u:'):
         uid = int(client_id[2:])

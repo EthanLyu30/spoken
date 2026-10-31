@@ -6,6 +6,7 @@ import {
   registerUser,
   updateProfile as updateProfileApi,
   type AuthUser,
+  ApiError,
 } from "../lib/api";
 import { clearToken, setToken } from "../lib/authToken";
 import { useWords } from "./words";
@@ -69,8 +70,8 @@ export const useAuth = create<AuthState>()(
         try {
           const user = await getMe();
           if (get().user === expectedOwner) set({ user });
-        } catch {
-          if (get().user !== expectedOwner) return;
+        } catch (error) {
+          if (get().user !== expectedOwner || !(error instanceof ApiError) || error.status !== 401) return;
           clearToken();
           set({ user: null });
           swapOwner();

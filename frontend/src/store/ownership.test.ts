@@ -10,6 +10,8 @@ const api = vi.hoisted(() => ({
 vi.mock("../lib/api", async (load) => ({ ...(await load<object>()), ...api }));
 import { useWords } from "./words";
 import { useAuth } from "./auth";
+import { setToken, getToken } from "../lib/authToken";
+import { ApiError } from "../lib/api";
 import type { Word } from "../lib/api";
 const word = (id: number): Word => ({
   id,
@@ -85,11 +87,20 @@ it("invalidating an expired account also replaces its cached words", async () =>
     },
   });
   useWords.setState({ words: [word(1)] });
-  api.getMe.mockRejectedValue(new Error("expired"));
+  api.getMe.mockRejectedValue(new ApiError("expired",401));
   await useAuth.getState().refresh();
   await Promise.resolve();
   expect(useAuth.getState().user).toBeNull();
   expect(useWords.getState().words).toEqual([]);
+});
+
+it("does not log out a valid account or clear its words after a transient refresh failure",async()=>{
+  const account={id:7,email:"test@example.test",display_name:"",avatar_url:"",created_at:""};
+  useAuth.setState({user:account});setToken("valid-session");useWords.setState({words:[word(7)]});
+  api.getMe.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  await useAuth.getState().refresh();
+  expect(useAuth.getState().user).toEqual(account);
+  expect(getToken()).toBe("valid-session");expect(useWords.getState().words).toEqual([word(7)]);
 });
 
 it("does not restore an account if its refresh returns after logout", async () => {

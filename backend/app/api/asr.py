@@ -13,7 +13,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 
 from app.core.config import Settings, get_settings
-from app.core.deps import get_client_id
+from app.core.deps import get_optional_client_id
 from app.services.xf_auth import build_auth_url
 from app.services.xf_asr import XfAsrClient, XfAsrError, XfAsrStream
 
@@ -23,7 +23,7 @@ router = APIRouter(tags=["asr"])
 @router.post("/asr/session")
 def asr_session(
     settings: Settings = Depends(get_settings),
-    _client_id: str = Depends(get_client_id),
+    _client_id: str = Depends(get_optional_client_id),
 ) -> JSONResponse:
     """Issue a timestamp-signed provider handshake; audio stays in the browser."""
     if not (settings.xf_app_id and settings.xf_api_key and settings.xf_api_secret):

@@ -17,6 +17,13 @@ export { withTimeout } from "./requestTimeout";
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const DEFAULT_TIMEOUT = 60_000; // generous: DeepSeek replies can be slow
 
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 /** Bearer header when logged in; empty when browsing anonymously. */
 function authHeader(): Record<string, string> {
   const token = getToken();
@@ -54,7 +61,7 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
     } catch {
       /* non-JSON error body */
     }
-    throw new Error(detail || `${init?.method ?? "GET"} ${path} failed: ${res.status}`);
+    throw new ApiError(detail || `${init?.method ?? "GET"} ${path} failed: ${res.status}`, res.status);
   }
   if (init?.method && init.method !== "GET" && /^\/api\/(sessions|practice|words)(\/|$)/.test(path)) invalidateProgress();
   return res.json() as Promise<T>;
