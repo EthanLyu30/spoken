@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import {
   Award,
@@ -26,11 +26,13 @@ import {
   listBrowserVoices,
   primeBrowserVoices,
   speakText,
+  type Speaking,
 } from "../lib/speech";
 import { useVoice, VOICE_OPTIONS, type VoiceEngine } from "../store/voice";
 import { useWords } from "../store/words";
 import { useAuth } from "../store/auth";
 import { ProfileHero } from "../components/ProfileHero";
+import { SpeechPlaybackStatus } from "../components/SpeechPlaybackStatus";
 import { resetOnboarding } from "../lib/onboarding";
 import { tokens } from "../lib/tokens";
 import { cn } from "../lib/utils";
@@ -358,6 +360,8 @@ function VoiceSettings() {
     reset,
   } = useVoice();
   const [previewing, setPreviewing] = useState(false);
+  const previewRef = useRef<Speaking | null>(null);
+  useEffect(() => () => previewRef.current?.stop(), []);
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>(
     [],
   );
@@ -375,11 +379,12 @@ function VoiceSettings() {
     (pitch ?? 50) <= 44 ? "低沉" : (pitch ?? 50) >= 58 ? "偏高" : "适中";
 
   function preview() {
-    if (previewing) return;
+    if (previewing) { previewRef.current?.stop(); return; }
     setPreviewing(true);
     const s = speakText(
       "Hi! I'm Pip. Let's practice English together — you've got this!",
     );
+    previewRef.current = s;
     s.done.finally(() => setPreviewing(false));
   }
 
@@ -441,7 +446,7 @@ function VoiceSettings() {
           onChange={(e) => setBrowserVoiceURI(e.target.value || null)}
           className="mb-5 w-full rounded-2xl border border-border bg-surface-2 px-4 py-2.5 text-ink outline-none focus:border-coral"
         >
-          <option value="">自动（优先设备音色）</option>
+          <option value="">自动（优先自然音色）</option>
           {browserVoices.map((v) => (
             <option key={v.voiceURI} value={v.voiceURI}>
               {v.name}
@@ -507,7 +512,6 @@ function VoiceSettings() {
       <button
         type="button"
         onClick={preview}
-        disabled={previewing}
         className="inline-flex items-center gap-1.5 rounded-full bg-coral px-5 py-2.5 text-sm font-bold text-primary-fg shadow-pop transition-transform active:translate-y-0.5 disabled:opacity-60"
       >
         {previewing ? (
@@ -515,8 +519,9 @@ function VoiceSettings() {
         ) : (
           <Volume2 className="h-4 w-4" />
         )}
-        {previewing ? "播放中…" : "试听"}
+        {previewing ? "停止试听" : "试听"}
       </button>
+      <SpeechPlaybackStatus />
     </section>
   );
 }

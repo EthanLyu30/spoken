@@ -1,17 +1,20 @@
 /** Whole-reply speech: one native utterance or one complete audio file. */
 import { fetchTtsUrl } from "./api";
-import { useVoice } from "../store/voice";
+import { useVoice, VOICE_OPTIONS } from "../store/voice";
+import { beginSpeechPlayback, type SpeechPlayback } from "../store/speechPlayback";
 import { autoCloudOverrides, resolveVoiceMode } from "./voiceResolver";
 import { float32ToWavBlob } from "./localSpeech/audio";
 import { isLocalSpeechModelReady } from "./localSpeech/runtime";
 import { bindInteraction, reportTiming } from "./telemetry";
 
 export interface Speaking {
+  readonly status?: SpeechPlayback;
   readonly failed?: boolean;
   done: Promise<void>;
   stop: () => void;
 }
 export interface SpeechQueue {
+  readonly status?: SpeechPlayback;
   /** Cache cumulative text; audio starts only when end supplies final text. */
   feed: (full: string) => void;
   end: (full: string) => Promise<void>;
@@ -51,8 +54,7 @@ function pickBrowserVoice(uri: string | null): SpeechSynthesisVoice | null {
   const selected = uri ? voices.find(v => v.voiceURI === uri) : undefined;
   if (selected) return selected;
   const score = (voice: SpeechSynthesisVoice) =>
-    (voice.localService ? 100 : 0) +
-    (/(natural|neural)/i.test(voice.name) ? 20 : 0) +
+    (/(natural|neural|google|enhanced|premium)/i.test(voice.name) ? 100 : 0) +
     (voice.lang.toLowerCase() === "en-us" ? 10 : 0);
   return [...voices].sort((a, b) => score(b) - score(a))[0] ?? null;
 }
@@ -132,6 +134,9 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
   current?.stop();
   const requestedAt = performance.now();
   const settings = useVoice.getState();
+  const playback = beginSpeechPlayback(settings.engine);
+  const cloudVoiceName = (vcn?: string | null) =>
+    VOICE_OPTIONS.find(v => v.id === vcn)?.label.split(" · ")[0] ?? "场景音色";
   let buffered = "", noMore = false, stopped = false, settled = false, failed = false;
   let firstAt: number | undefined;
   let engine: "browser" | "xfyun" | "local" | "unknown" = "unknown";
@@ -148,6 +153,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
   const didStart = () => {
     if (stopped || firstAt !== undefined) return;
     firstAt = performance.now();
+    playback.update({phase:"speaking"});
     reportTiming("speech.first_audio", firstAt - requestedAt, {engine, transport, interactionId});
     markStarted();
   };
@@ -156,31 +162,43 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
     try {
       const text = (await finalText).trim();
       if (stopped || !text) return;
+      playback.update({phase:"preparing"});
       const mode = await resolveVoiceMode(settings.engine, voiceSource());
       if (stopped) return;
       if (mode.kind === "browser") {
         engine = "browser";
+        playback.update({effectiveEngine:"browser",voice:pickBrowserVoice(settings.browserVoiceURI)?.name ?? "英文音色"});
         active = speakBrowser(text, settings, didStart);
         await active.done;
         // A listed voice may still be unavailable. Retry the complete reply
         // only before any native sound starts, so partial speech never repeats.
         if (!stopped && active.failed && firstAt === undefined) {
           engine = "xfyun"; transport = "buffered";
-          const url = await fetchTtsUrl(text, scenarioId, controller.signal, autoCloudOverrides(settings));
+          const overrides = autoCloudOverrides(settings);
+          playback.update({effectiveEngine:"xfyun",voice:cloudVoiceName(overrides.vcn),fallbackReason:"browser-unavailable"});
+          const url = await fetchTtsUrl(text, scenarioId, controller.signal, overrides);
           if (stopped) { URL.revokeObjectURL(url); return; }
           active = playUrl(url, didStart);
         }
       } else {
         let url: string | undefined;
         if (settings.engine === "local" && isLocalSpeechModelReady("kokoro")) {
-          try { engine = "local"; transport = "local"; url = await fetchKokoroUrl(text, settings.speed); }
+          try {
+            engine = "local"; transport = "local";
+            playback.update({effectiveEngine:"local",voice:"Kokoro · Heart"});
+            url = await fetchKokoroUrl(text, settings.speed);
+          }
           catch { if (stopped) return; }
         }
         if (!url) {
           if (stopped) return;
           engine = "xfyun"; transport = "buffered";
-          url = await fetchTtsUrl(text, scenarioId, controller.signal,
-            mode.automaticFallback ? autoCloudOverrides(settings) : undefined);
+          const overrides = mode.automaticFallback ? autoCloudOverrides(settings) : {
+            vcn:settings.vcn ?? undefined,speed:settings.speed ?? undefined,pitch:settings.pitch ?? undefined,
+          };
+          playback.update({effectiveEngine:"xfyun",voice:cloudVoiceName(overrides.vcn),
+            fallbackReason:settings.engine === "browser" ? "browser-unavailable" : settings.engine === "local" ? "local-unavailable" : null});
+          url = await fetchTtsUrl(text, scenarioId, controller.signal, overrides);
         }
         if (stopped) { URL.revokeObjectURL(url); return; }
         active = playUrl(url, didStart);
@@ -193,6 +211,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
       if (!stopped) throw error;
     } finally {
       settled = true;
+      playback.update({phase:stopped ? "cancelled" : failed || (buffered.trim() && firstAt === undefined) ? "error" : "completed"});
       if (buffered.trim()) {
         const finishedAt = performance.now();
         const outcome = stopped ? "cancelled" : completed && firstAt !== undefined && !failed ? "ok" : "error";
@@ -205,6 +224,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
   const done = Promise.race([consumer, cancelled]);
   void done.catch(() => undefined);
   const queue: SpeechQueue = {
+    get status() { return playback.status; },
     feed: full => { if (!stopped && !noMore) buffered = full; },
     end: full => {
       if (!stopped && !noMore) { noMore = true; buffered = full; provideText(full); }
@@ -215,6 +235,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
     stop: () => {
       if (stopped || settled) return;
       stopped = true; controller.abort();
+      playback.update({phase:"cancelled"});
       try { active?.stop(); } catch { /* cancellation must always settle */ }
       provideText(""); cancel();
     },
@@ -224,7 +245,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
 }
 export function speakText(text: string, scenarioId?: string): Speaking {
   const queue = createSpeechQueue(scenarioId);
-  return {done: queue.end(text).catch(() => undefined), stop: queue.stop, get failed() { return queue.failed; }};
+  return {done: queue.end(text).catch(() => undefined), stop: queue.stop, get failed() { return queue.failed; }, get status() { return queue.status; }};
 }
 export function stopSpeaking(): void {
   current?.stop();

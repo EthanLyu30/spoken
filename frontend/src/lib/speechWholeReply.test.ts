@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ fetchTtsUrl: vi.fn(), fetchTtsStream: vi.fn(), synthesize: vi.fn(), localReady: false,
-  settings: { engine: "iflytek", vcn: null, speed: null, pitch: null, browserVoiceURI: null } }));
+  settings: { engine: "iflytek", vcn: null, speed: null, pitch: null, browserVoiceURI: null as string | null } }));
 vi.mock("./api", () => ({ fetchTtsUrl: mocks.fetchTtsUrl, fetchTtsStream: mocks.fetchTtsStream }));
-vi.mock("../store/voice", () => ({ useVoice: { getState: () => mocks.settings } }));
+vi.mock("../store/voice", async actual => ({ ...await actual<object>(), useVoice: { getState: () => mocks.settings } }));
 vi.mock("./localSpeech/runtime", () => ({ isLocalSpeechModelReady: () => mocks.localReady }));
 vi.mock("./localSpeech/kokoro", () => ({ synthesizeWithKokoro: mocks.synthesize }));
 import { createSpeechQueue, speakText, stopSpeaking } from "./speech";
@@ -16,6 +16,7 @@ class AudioDouble {
   constructor(public src: string) { audios.push(this); }
 }
 class UtteranceDouble {
+  voice: SpeechSynthesisVoice | null = null;
   onstart: (() => void) | null = null;
   onend: (() => void) | null = null;
   onerror: (() => void) | null = null;
@@ -28,7 +29,7 @@ const revoke = vi.fn();
 let samples: Record<string, unknown>[] = [];
 beforeEach(() => {
   audios.length = 0; utterances.length = 0; samples = [];
-  mocks.settings.engine = "iflytek"; mocks.localReady = false;
+  mocks.settings.engine = "iflytek"; mocks.settings.browserVoiceURI = null; mocks.localReady = false;
   mocks.fetchTtsUrl.mockReset().mockResolvedValue("blob:whole");
   mocks.fetchTtsStream.mockReset(); mocks.synthesize.mockReset(); nativeCancel.mockClear(); revoke.mockClear();
   vi.stubGlobal("AudioContext", undefined); vi.stubGlobal("Audio", AudioDouble);
@@ -64,6 +65,44 @@ it("uses one native utterance for the final multi-sentence reply and preserves s
   expect(samples).toContainEqual(expect.objectContaining({operation:"speech.playback",duration_ms:2300,outcome:"ok",interaction_id:"a".repeat(32)}));
   expect(samples).toContainEqual(expect.objectContaining({operation:"speech.complete",duration_ms:2700}));
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
+});
+
+it("prefers Chrome's natural Google English voice over a traditional local system voice", async () => {
+  mocks.settings.engine="browser";
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([
+    {name:"Microsoft David Desktop",voiceURI:"desktop",lang:"en-US",localService:true},
+    {name:"Google US English",voiceURI:"google",lang:"en-US",localService:false},
+  ] as SpeechSynthesisVoice[]);
+  const q=createSpeechQueue(); const done=q.end("A natural whole reply.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  expect(utterances[0].voice?.voiceURI).toBe("google");
+  utterances[0].onstart?.(); utterances[0].onend?.(); await done;
+});
+
+it("respects an explicit system voice even when natural English voices are available", async () => {
+  mocks.settings.engine="browser"; mocks.settings.browserVoiceURI="desktop";
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([
+    {name:"Google US English",voiceURI:"google",lang:"en-US",localService:false},
+    {name:"Microsoft David Desktop",voiceURI:"desktop",lang:"en-US",localService:true},
+  ] as SpeechSynthesisVoice[]);
+  const q=createSpeechQueue(); const done=q.end("My chosen voice.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  expect(utterances[0].voice?.voiceURI).toBe("desktop");
+  utterances[0].onstart?.(); utterances[0].onend?.(); await done;
+});
+
+it("reports the actual cloud fallback voice and phase instead of pretending the selected browser voice played", async () => {
+  mocks.settings.engine="browser";
+  const q=createSpeechQueue(); const done=q.end("One complete reply.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1)); utterances[0].onend?.();
+  await vi.waitFor(()=>expect(audios).toHaveLength(1));
+  expect(q).toHaveProperty("status.effectiveEngine","xfyun");
+  expect(q).toHaveProperty("status.fallbackReason","browser-unavailable");
+  expect(q).toHaveProperty("status.voice","Lindsey");
+  audios[0].onplaying?.();
+  expect(q).toHaveProperty("status.phase","speaking");
+  audios[0].onended?.(); await done;
+  expect(q).toHaveProperty("status.phase","completed");
 });
 
 it("does not synthesize or play when stopped before final text", async () => {

@@ -12,7 +12,8 @@ vi.mock("./api", () => ({
   fetchTtsUrl: mocks.fetchTtsUrl,
 }));
 
-vi.mock("../store/voice", () => ({
+vi.mock("../store/voice", async actual => ({
+  ...await actual<object>(),
   useVoice: {
     getState: () => ({
       engine: "local",

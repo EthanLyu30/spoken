@@ -41,6 +41,7 @@ import {
 import { useSession } from "../store/session";
 import { useCustomScene } from "../store/custom";
 import { useVoice, type VoiceEngine } from "../store/voice";
+import { SpeechPlaybackStatus } from "../components/SpeechPlaybackStatus";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { startVoiceCall, type CallPhase, type VoiceCall } from "../lib/call";
 import { getInteraction } from "../lib/telemetry";
@@ -672,6 +673,7 @@ export default function Conversation() {
             >
               {stageStatus}
             </p>
+              <SpeechPlaybackStatus />
             {showVoiceSettings && (
               <div className="mt-3 w-full rounded-2xl border border-border bg-surface p-3 text-left shadow-soft">
                 <label

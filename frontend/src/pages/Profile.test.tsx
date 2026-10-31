@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getPractice: vi.fn().mockResolvedValue([]),
   getSessions: vi.fn().mockResolvedValue([]),
   getStats: vi.fn().mockResolvedValue(null),
+  speakText: vi.fn(),
 }));
 vi.mock("../lib/api", async (load) => ({
   ...(await load<object>()),
@@ -15,9 +16,21 @@ vi.mock("../components/EChart", () => ({ EChart: ({ option }: { option: unknown 
 vi.mock("../lib/speech", () => ({
   listBrowserVoices: () => [],
   primeBrowserVoices: vi.fn(),
-  speakText: vi.fn(),
+  speakText: mocks.speakText,
 }));
 import Profile from "./Profile";
+
+it("lets the user cancel a preview while audio is being prepared", async () => {
+  let finish:()=>void=()=>{};
+  const stop=vi.fn(()=>finish());
+  mocks.speakText.mockReturnValueOnce({done:new Promise<void>(resolve=>{finish=resolve;}),stop});
+  const user=userEvent.setup();
+  render(<MemoryRouter initialEntries={["/me?tab=voice"]}><Profile /></MemoryRouter>);
+  await user.click(screen.getByRole("button",{name:"试听"}));
+  await user.click(screen.getByRole("button",{name:"停止试听"}));
+  expect(stop).toHaveBeenCalledOnce();
+  expect(await screen.findByRole("button",{name:"试听"})).toBeEnabled();
+});
 
 it("keeps the settings link and all three voice engines on the separate settings tab", async () => {
   const user = userEvent.setup();
