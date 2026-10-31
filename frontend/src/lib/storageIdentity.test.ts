@@ -44,3 +44,10 @@ it("retains the current token in memory when storage later becomes unreadable",a
   vi.spyOn(Storage.prototype,"getItem").mockImplementation(()=>{throw new Error("storage denied");});
   expect(tokens.getToken()).toBe("current-account-token");
 });
+it("does not silently adopt another tab's token while reading the current request identity", async () => {
+  localStorage.setItem("spoken-token", "account-a");
+  const tokens = await import("./authToken");
+  expect(tokens.getToken()).toBe("account-a");
+  localStorage.setItem("spoken-token", "account-b");
+  expect(tokens.getToken()).toBe("account-a");
+});

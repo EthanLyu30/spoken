@@ -10,6 +10,7 @@ import {
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { transcribeSpeech } from "../lib/transcribe";
 import { speakText, stopSpeaking } from "../lib/speech";
+import { getAuthGeneration } from "../lib/authToken";
 
 export type InterviewMode = "practice" | "simulation";
 type Phase = "intro" | "loading" | "quiz" | "scoring" | "results" | "error";
@@ -55,6 +56,7 @@ const initial = (owner: string): State => ({
 
 /** All asynchronous work belongs to a run and an identity, including mic grants. */
 export function useInterviewSession(owner: string) {
+  const generation = useRef(getAuthGeneration()).current;
   const [state, setState] = useState<State>(() => initial(owner));
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -68,7 +70,7 @@ export function useInterviewSession(owner: string) {
   const pcm = useRef<ArrayBuffer | null>(null);
   const playbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const active = (run: number) =>
-    version.current === run && ownerRef.current === owner;
+    generation === getAuthGeneration() && version.current === run && ownerRef.current === owner;
   const update = (patch: Partial<State>) =>
     setState((previous) =>
       previous.owner === owner ? { ...previous, ...patch } : previous,

@@ -30,3 +30,10 @@ it("allows a failed save to be retried with the same idempotency key", async () 
   await persistSessionOnce("cafe", messages, feedback, "retry-practice");
   expect(mocks.postSession).toHaveBeenCalledTimes(2);
 });
+
+it("does not send a follow-on save captured under an earlier identity", async () => {
+  const { setToken, getAuthGeneration } = await import("./authToken");
+  setToken("session-a"); const generation = getAuthGeneration(); setToken("session-b");
+  await persistSessionOnce("cafe", messages, feedback, "stale-save", generation);
+  expect(mocks.postSession).not.toHaveBeenCalled();
+});

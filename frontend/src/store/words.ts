@@ -188,6 +188,9 @@ export const useWords = create<WordsState>()(
     }),
     {
       name: "spoken-words",
+      // Legacy shared caches have no verified owner. Revalidate from the server
+      // before exposing rows; never hydrate another tab's private vocabulary.
+      skipHydration: true,
       storage: createJSONStorage(() => resilientStorage),
       // Only persist saved rows; in-flight temps (negative ids) never hit storage.
       partialize: (s) => ({ words: s.words.filter((w) => w.id > 0) }),

@@ -70,3 +70,56 @@ it("does not speak an interrupted reply and speaks the corrected retry at the sa
   await user.click(screen.getByRole("button", { name: "重试回复" }));
   await waitFor(() => expect(mocks.speakText.mock.calls.map(([text]) => text)).toEqual(["Hello", "Complete reply"]));
 });
+
+it("does not send a previous identity's unmount feedback result as a new account's session", async () => {
+  const { setToken } = await import("../lib/authToken");
+  setToken("conversation-a");
+  let feedback!: (value: object) => void;
+  mocks.postFeedback.mockReturnValueOnce(new Promise(resolve => { feedback = resolve; }));
+  mocks.streamChat.mockImplementationOnce(async (_id, _history, onText) => { onText("Enjoy your coffee."); return "Enjoy your coffee."; });
+  const user = userEvent.setup();
+  const view = render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", { name: "文字练习" }));
+  await user.type(screen.getByRole("textbox", { name: "英文回复" }), "A latte please.");
+  await user.click(screen.getByRole("button", { name: /^发送$/ }));
+  await screen.findByText("Enjoy your coffee.");
+  view.unmount();
+  expect(mocks.postFeedback).toHaveBeenCalledTimes(1);
+  setToken("conversation-b");
+  feedback({ overall: 80, scores: [] });
+  await Promise.resolve(); await Promise.resolve();
+  expect(mocks.postSession).not.toHaveBeenCalled();
+});
+
+it("does not even request unmount feedback after a synchronous identity change", async () => {
+  const { setToken } = await import("../lib/authToken");
+  setToken("conversation-before");
+  mocks.streamChat.mockImplementationOnce(async (_id, _history, onText) => { onText("Enjoy your coffee."); return "Enjoy your coffee."; });
+  const user = userEvent.setup();
+  const view = render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", { name: "文字练习" }));
+  await user.type(screen.getByRole("textbox", { name: "英文回复" }), "A latte please.");
+  await user.click(screen.getByRole("button", { name: /^发送$/ }));
+  await screen.findByText("Enjoy your coffee.");
+  setToken("conversation-after"); view.unmount();
+  expect(mocks.postFeedback).not.toHaveBeenCalled();
+});
+
+it("does not fall back to a new-credential chat request when an old stream fails", async () => {
+  const { setToken } = await import("../lib/authToken");
+  setToken("stream-owner-a");
+  let reject!: (error: Error) => void;
+  mocks.streamChat.mockReturnValueOnce(new Promise((_resolve, r) => { reject = r; }));
+  const user = userEvent.setup();
+  const view = render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", { name: "文字练习" }));
+  await user.type(screen.getByRole("textbox", { name: "英文回复" }), "A latte please.");
+  await user.click(screen.getByRole("button", { name: /^发送$/ }));
+  setToken("stream-owner-b"); reject(new Error("identity changed"));
+  await Promise.resolve(); await Promise.resolve();
+  expect(mocks.postChat).toHaveBeenCalledTimes(1);
+  view.unmount();
+});

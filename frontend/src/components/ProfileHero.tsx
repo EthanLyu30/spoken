@@ -5,6 +5,7 @@ import { ProgressBar } from "./ui/ProgressBar";
 import { AuthModal } from "./AuthModal";
 import { useAuth } from "../store/auth";
 import { fileToAvatarDataUrl } from "../lib/image";
+import { getAuthGeneration } from "../lib/authToken";
 
 /**
  * The "我的小屋" identity card with the account woven in:
@@ -23,6 +24,7 @@ export function ProfileHero({
   xpNext: number;
   statsKnown?: boolean;
 }) {
+  const generation = useRef(getAuthGeneration()).current;
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
   const refresh = useAuth((s) => s.refresh);
@@ -46,18 +48,21 @@ export function ProfileHero({
   async function onPickAvatar(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ""; // let the user re-pick the same file later
-    if (!file) return;
+    if (!file || generation !== getAuthGeneration()) return;
     setBusy(true);
     try {
-      await updateProfile({ avatar_url: await fileToAvatarDataUrl(file) });
+      const avatar_url = await fileToAvatarDataUrl(file);
+      if (generation !== getAuthGeneration()) return;
+      await updateProfile({ avatar_url });
     } catch {
       /* ignore — keep the old avatar on failure */
     } finally {
-      setBusy(false);
+      if (generation === getAuthGeneration()) setBusy(false);
     }
   }
 
   async function saveName() {
+    if (generation !== getAuthGeneration()) return;
     const v = nameDraft.trim();
     setEditing(false);
     if (!v || v === name) return;

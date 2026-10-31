@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useAuth } from "../store/auth";
 import Admin from "./Admin";
+import { setToken, clearToken } from "../lib/authToken";
 
 vi.mock("../components/EChart", () => ({ EChart: () => null }));
 const overview = { source: "server", count: 0, success_rate: null, errors: 0, timeouts: 0, cancelled: 0,
@@ -20,11 +21,12 @@ const trace = { trace_id: "a".repeat(32), started_at: "2026-10-30T02:00:00Z", so
 const fetcher = vi.fn();
 function show() { return render(<MemoryRouter><Admin /></MemoryRouter>); }
 beforeEach(() => {
+  setToken("test-admin-session");
   useAuth.setState({ user });
   fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes("/overview") ? overview : url.includes(`/traces/${trace.trace_id}`) ? trace : { items: [], total: 0 }), { status: 200 }));
   vi.stubGlobal("fetch", fetcher);
 });
-afterEach(() => { vi.unstubAllGlobals(); fetcher.mockReset(); useAuth.setState({ user: null }); });
+afterEach(() => { vi.unstubAllGlobals(); fetcher.mockReset(); clearToken(); useAuth.setState({ user: null }); });
 
 it("does not load private data for guests or ordinary accounts", () => {
   useAuth.setState({ user: { ...user, is_admin: false } });

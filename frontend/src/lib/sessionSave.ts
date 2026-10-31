@@ -5,7 +5,7 @@
  * saved a single time.
  */
 import { postSession, type ChatMessage, type FeedbackResponse } from "./api";
-import { getToken } from "./authToken";
+import { getToken, getAuthGeneration } from "./authToken";
 import { getClientId } from "./clientId";
 
 const saved = new Set<string>();
@@ -22,8 +22,12 @@ export async function persistSessionOnce(
   messages: ChatMessage[],
   feedback: FeedbackResponse,
   practiceId: string,
+  generation: number = getAuthGeneration(),
 ): Promise<void> {
+  if (generation !== getAuthGeneration()) return;
   const sig = `${getToken() ?? getClientId()}|${practiceId}`;
+  // getClientId can discover an external clear before its storage event arrives.
+  if (generation !== getAuthGeneration()) return;
   if (saved.has(sig)) return;
   const existing = pending.get(sig);
   if (existing) return existing;

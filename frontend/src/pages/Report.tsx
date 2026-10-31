@@ -17,6 +17,7 @@ import { useCustomScene } from "../store/custom";
 import { postFeedback, type FeedbackResponse } from "../lib/api";
 import { useWords } from "../store/words";
 import { persistSessionOnce } from "../lib/sessionSave";
+import { getAuthGeneration } from "../lib/authToken";
 import { getScenario } from "../data/scenarios";
 
 const SCORE_COLORS = ["#ff6f5e", "#ff9f45", "#41c08c", "#57b7e8"];
@@ -25,6 +26,7 @@ const backLink =
   "inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5";
 
 export default function Report() {
+  const generation = useRef(getAuthGeneration()).current;
   const scenarioId = useSession((s) => s.scenarioId);
   const practiceId = useSession((s) => s.practiceId);
   const messages = useSession((s) => s.messages);
@@ -54,7 +56,7 @@ export default function Report() {
   }, [ensureWords]);
 
   useEffect(() => {
-    if (!hasSession || !scenarioId) return;
+    if (!hasSession || !scenarioId || generation !== getAuthGeneration()) return;
     const ctrl = new AbortController();
     const myId = ++reqId.current;
     setLoading(true);
@@ -66,19 +68,19 @@ export default function Report() {
       isCustom ? (customScene ?? undefined) : undefined,
     )
       .then((f) => {
-        if (myId !== reqId.current) return;
+        if (myId !== reqId.current || ctrl.signal.aborted || generation !== getAuthGeneration()) return;
         setFeedback(f);
         if (practiceId)
-          void persistSessionOnce(scenarioId, messages, f, practiceId).catch(
-            () => setSaveError(true),
+          void persistSessionOnce(scenarioId, messages, f, practiceId, generation).catch(
+            () => { if (generation === getAuthGeneration() && !ctrl.signal.aborted) setSaveError(true); },
           );
       })
       .catch(() => {
-        if (!ctrl.signal.aborted && myId === reqId.current)
+        if (!ctrl.signal.aborted && myId === reqId.current && generation === getAuthGeneration())
           setError("生成小结失败，请确认后端在运行后重试。");
       })
       .finally(() => {
-        if (!ctrl.signal.aborted && myId === reqId.current) setLoading(false);
+        if (!ctrl.signal.aborted && myId === reqId.current && generation === getAuthGeneration()) setLoading(false);
       });
     return () => ctrl.abort();
     // Analyse the captured session once on mount.
@@ -86,15 +88,15 @@ export default function Report() {
   }, [attempt]);
 
   async function retrySave() {
-    if (!scenarioId || !practiceId || !feedback || saving) return;
+    if (!scenarioId || !practiceId || !feedback || saving || generation !== getAuthGeneration()) return;
     setSaving(true);
     try {
-      await persistSessionOnce(scenarioId, messages, feedback, practiceId);
-      setSaveError(false);
+      await persistSessionOnce(scenarioId, messages, feedback, practiceId, generation);
+      if (generation === getAuthGeneration()) setSaveError(false);
     } catch {
-      setSaveError(true);
+      if (generation === getAuthGeneration()) setSaveError(true);
     } finally {
-      setSaving(false);
+      if (generation === getAuthGeneration()) setSaving(false);
     }
   }
 
@@ -300,6 +302,7 @@ export default function Report() {
                               collected ? "再次点击取消收藏" : "收藏到生词本"
                             }
                             onClick={() => {
+                              if (generation !== getAuthGeneration()) return;
                               const existing = words.find(
                                 (w) => w.text === p.text,
                               );

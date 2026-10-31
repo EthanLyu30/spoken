@@ -213,3 +213,23 @@ it("does not cancel a save already sent under the correct identity when leaving 
     await pending;
   });
 });
+
+it("does not send grading results after a synchronous credential change before React rerenders", async () => {
+  const { setToken } = await import("../lib/authToken");
+  setToken("interview-a");
+  let scored!: (value: object) => void;
+  mocks.scoreInterview.mockReturnValue(new Promise(resolve => { scored = resolve; }));
+  const { result } = renderHook(() => useInterviewSession("same-account"));
+  await act(async () => result.current.begin("practice"));
+  for (let i = 0; i < 4; i++) {
+    await act(async () => result.current.startAnswer());
+    await act(async () => result.current.finishAnswer());
+    if (i < 3) await act(async () => result.current.acceptAnswer());
+  }
+  let pending!: Promise<void>;
+  act(() => { pending = result.current.acceptAnswer(); });
+  setToken("interview-replacement");
+  await act(async () => { scored({ overall: 4, results: [] }); await pending; });
+  expect(mocks.savePractice).not.toHaveBeenCalled();
+  expect(result.current.result).toBeNull();
+});

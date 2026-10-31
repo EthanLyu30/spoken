@@ -78,6 +78,7 @@ it("does not delete a previously saved word under the new identity when a collec
 });
 
 it("invalidating an expired account also replaces its cached words", async () => {
+  setToken("expired");
   useAuth.setState({
     user: {
       id: 1,
@@ -97,7 +98,7 @@ it("invalidating an expired account also replaces its cached words", async () =>
 
 it("does not log out a valid account or clear its words after a transient refresh failure",async()=>{
   const account={id:7,email:"test@example.test",display_name:"",avatar_url:"",created_at:""};
-  useAuth.setState({user:account});setToken("valid-session");useWords.setState({words:[word(7)]});
+  setToken("valid-session");useAuth.setState({user:account});useWords.setState({words:[word(7)]});
   api.getMe.mockRejectedValueOnce(new TypeError("Failed to fetch"));
   await useAuth.getState().refresh();
   expect(useAuth.getState().user).toEqual(account);
@@ -132,4 +133,27 @@ it("can log in and out consistently when browser storage denies all writes",asyn
     expect(()=>useAuth.getState().logout()).not.toThrow();
     expect(getToken()).toBeNull();expect(useAuth.getState().user).toBeNull();
   } finally {denied.mockRestore();}
+});
+
+it("does not adopt a login response after logout", async () => {
+  const old = deferred<{ token: string; user: NonNullable<ReturnType<typeof useAuth.getState>["user"]> }>();
+  api.loginUser.mockReturnValueOnce(old.promise);
+  const pending = useAuth.getState().login("test@example.test", "password");
+  useAuth.getState().logout();
+  old.resolve({ token: "late-login", user: { id: 1, email: "test@example.test", display_name: "", avatar_url: "", created_at: "" } });
+  await pending;
+  expect(getToken()).toBeNull();
+  expect(useAuth.getState().user).toBeNull();
+});
+
+it("uses the latest login attempt even if an earlier login finishes last", async () => {
+  const user = { id: 2, email: "test@example.test", display_name: "", avatar_url: "", created_at: "" };
+  const old = deferred<{ token: string; user: typeof user }>();
+  api.loginUser.mockReturnValueOnce(old.promise).mockResolvedValueOnce({ token: "new-login", user });
+  const pending = useAuth.getState().login("first@example.test", "password");
+  await useAuth.getState().login("second@example.test", "password");
+  old.resolve({ token: "old-login", user: { ...user, id: 1 } });
+  await pending;
+  expect(getToken()).toBe("new-login");
+  expect(useAuth.getState().user?.id).toBe(2);
 });

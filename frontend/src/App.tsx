@@ -5,6 +5,7 @@ import { Onboarding } from "./components/Onboarding";
 import { AppHeader } from "./components/AppHeader";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { SiteVisitTracker } from "./components/SiteVisitTracker";
+import { useAuth } from "./store/auth";
 
 // Route-level code splitting: each page ships as its own chunk and loads on
 // navigation, so the initial bundle (Home) stays small. Heavy deps that only a
@@ -25,10 +26,20 @@ const Admin = lazy(() => import("./pages/Admin"));
 
 export default function App() {
   const location = useLocation();
+  const generation = useAuth((s) => s.generation);
+  const resolving = useAuth((s) => s.resolving);
+  const resolutionError = useAuth((s) => s.resolutionError);
   const focused = location.pathname.startsWith("/practice/");
   const section = location.pathname.split("/")[1] || "home";
+  if (resolving || resolutionError) return (
+    <div role="status" className="route-loading">
+      {resolving ? "正在确认账户…" : "暂时无法确认账户，请重试。"}
+      {resolutionError && <button onClick={() => void useAuth.getState().refresh()}>重试</button>}
+      <button onClick={() => useAuth.getState().logout()}>退出账户</button>
+    </div>
+  );
   return (
-    <DictionaryProvider>
+    <DictionaryProvider key={generation}>
       <SiteVisitTracker />
       <div className={`app-route route-${section}`}>
         {!focused && <AppHeader />}

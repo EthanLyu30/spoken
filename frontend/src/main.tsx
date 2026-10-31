@@ -7,6 +7,10 @@ import "./index.css";
 import "./ui.css";
 import "./learning.css";
 import { bootstrapLocalSpeechModels } from "./lib/localSpeech/bootstrap";
+import { initializeAuthSync } from "./lib/authSync";
+
+const cleanupAuthSync = initializeAuthSync();
+if (import.meta.hot) import.meta.hot.dispose(cleanupAuthSync);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

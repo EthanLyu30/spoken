@@ -32,6 +32,7 @@ import {
   type UserTurnMetaMap,
 } from "../lib/conversationTurns";
 import { createPracticeId, persistSessionOnce } from "../lib/sessionSave";
+import { getAuthGeneration } from "../lib/authToken";
 import {
   speakText,
   createSpeechQueue,
@@ -66,6 +67,7 @@ const localOpeners: Record<string, string> = {
 };
 
 export default function Conversation() {
+  const generation = useRef(getAuthGeneration()).current;
   const { scenarioId } = useParams();
   const isCustom = scenarioId === "custom";
   const customScene = useCustomScene((s) => s.scene);
@@ -129,6 +131,7 @@ export default function Conversation() {
   const setSession = useSession((s) => s.setSession);
   const hasUserTurn = messages.some((m) => m.role === "user");
   const inCall = callPhase !== null;
+  const isCurrent = () => mountedRef.current && generation === getAuthGeneration();
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -139,7 +142,7 @@ export default function Conversation() {
   }, [turnMeta]);
 
   function finish() {
-    if (!id) return;
+    if (!id || generation !== getAuthGeneration()) return;
     goingToReportRef.current = true; // the report page will save this session
     callRef.current?.end();
     requestControllerRef.current?.abort();
@@ -172,14 +175,14 @@ export default function Conversation() {
       return;
     }
     postChat(id, [], ctrl.signal)
-      .then((r) => setMessages([{ role: "assistant", content: r.reply }]))
+      .then((r) => { if (isCurrent() && !ctrl.signal.aborted) setMessages([{ role: "assistant", content: r.reply }]); })
       .catch(() => {
-        if (ctrl.signal.aborted) return;
+        if (ctrl.signal.aborted || !isCurrent()) return;
         setMessages([{ role: "assistant", content: fallbackOpener }]);
         setError("后端未连接，先看看界面。启动后端后刷新即可与 Pip 对话。");
       })
       .finally(() => {
-        if (!ctrl.signal.aborted) setBooting(false);
+        if (!ctrl.signal.aborted && isCurrent()) setBooting(false);
       });
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -224,12 +227,12 @@ export default function Conversation() {
       recorderRef.current?.stop().catch(() => undefined);
       callRef.current?.end();
       turnMetaRef.current = {};
-      if (!goingToReportRef.current && id) {
+      if (!goingToReportRef.current && id && generation === getAuthGeneration()) {
         const msgs = messagesRef.current;
         if (msgs.some((m) => m.role === "user")) {
           const custom = isCustom ? (customScene ?? undefined) : undefined;
           postFeedback(id, msgs, undefined, custom)
-            .then((f) => persistSessionOnce(id, msgs, f, practiceId))
+            .then((f) => persistSessionOnce(id, msgs, f, practiceId, generation))
             .catch(() => undefined);
         }
       }
@@ -239,6 +242,7 @@ export default function Conversation() {
 
   // Play a line of Pip's speech; resolves when playback finishes.
   function playTts(text: string): Promise<void> {
+    if (!isCurrent()) return Promise.resolve();
     speakingRef.current?.stop();
     const s = speakText(text, id);
     speakingRef.current = s;
@@ -263,6 +267,7 @@ export default function Conversation() {
     meta: UserTurnMeta = { source: "typed" },
     retry = false,
   ) {
+    if (!isCurrent()) return;
     let lastUser = messagesRef.current.length - 1;
     while (lastUser >= 0 && messagesRef.current[lastUser].role !== "user")
       lastUser--;
@@ -302,7 +307,7 @@ export default function Conversation() {
     const custom = isCustom ? (customScene ?? undefined) : undefined;
     let started = false;
     const onText = (t: string) => {
-      if (ctrl.signal.aborted || !mountedRef.current) return;
+      if (ctrl.signal.aborted || !isCurrent()) return;
       if (!started) {
         started = true;
         setStreaming(true);
@@ -314,13 +319,13 @@ export default function Conversation() {
     try {
       // Stream the reply token-by-token for lower perceived latency.
       const full = await streamChat(id, next, onText, ctrl.signal, custom);
-      if (ctrl.signal.aborted || !mountedRef.current) return;
+      if (ctrl.signal.aborted || !isCurrent()) return;
       autoSpeakAllowedRef.current = true;
       setStreaming(false);
       if (started) setLastAssistant(full);
       else setMessages((m) => [...m, { role: "assistant", content: full }]);
     } catch (err) {
-      if (ctrl.signal.aborted || !mountedRef.current) return;
+      if (ctrl.signal.aborted || !isCurrent()) return;
       if (started) {
         setStreaming(false);
         setCanRetry(true);
@@ -330,14 +335,14 @@ export default function Conversation() {
       // Streaming unavailable -> fall back to the plain endpoint.
       try {
         const r = await postChat(id, next, ctrl.signal, custom);
-        if (ctrl.signal.aborted || !mountedRef.current) return;
+        if (ctrl.signal.aborted || !isCurrent()) return;
         autoSpeakAllowedRef.current = true;
         setStreaming(false);
         if (started) setLastAssistant(r.reply);
         else
           setMessages((m) => [...m, { role: "assistant", content: r.reply }]);
       } catch {
-        if (ctrl.signal.aborted || !mountedRef.current) return;
+        if (ctrl.signal.aborted || !isCurrent()) return;
         setStreaming(false);
         setCanRetry(true);
         setError("发送失败，请确认后端在运行后重试。");
@@ -345,13 +350,13 @@ export default function Conversation() {
     } finally {
       if (requestControllerRef.current === ctrl)
         requestControllerRef.current = null;
-      if (mountedRef.current) setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }
 
   // Push-to-talk: record one clip, transcribe into the input box.
   async function handleMic() {
-    if (transcribing || booting || inCall || loading || callStarting) return;
+    if (!isCurrent() || transcribing || booting || inCall || loading || callStarting) return;
     if (recording) {
       setRecording(false);
       const rec = recorderRef.current;
@@ -361,7 +366,9 @@ export default function Conversation() {
       setError(null);
       try {
         const pcm = await rec.stop();
+        if (!isCurrent()) return;
         const spokenText = (await transcribeSpeech(pcm)).trim();
+        if (!isCurrent()) return;
         if (spokenText) {
           // Speaking app: send the recognized speech right away (combining any
           // already-typed text) instead of making the learner tap send. The box
@@ -379,29 +386,30 @@ export default function Conversation() {
           setError("没听清，再说一次试试？");
         }
       } catch {
-        setError("语音识别失败，请检查麦克风权限或后端，或直接打字。");
+        if (isCurrent()) setError("语音识别失败，请检查麦克风权限或后端，或直接打字。");
       } finally {
-        setTranscribing(false);
+        if (isCurrent()) setTranscribing(false);
       }
     } else {
       setError(null);
       try {
         speakingRef.current?.stop();
         recorderRef.current = await startRecording();
-        if (!mountedRef.current) {
+        if (!isCurrent()) {
           await recorderRef.current.stop();
           recorderRef.current = null;
           return;
         }
         setRecording(true);
       } catch {
-        setError("无法使用麦克风，请允许权限后重试，或直接打字。");
+        if (isCurrent()) setError("无法使用麦克风，请允许权限后重试，或直接打字。");
       }
     }
   }
 
   // Hands-free call mode: listen -> ASR -> reply -> speak -> repeat.
   async function startCall() {
+    if (!isCurrent()) return;
     if (
       !id ||
       booting ||
@@ -420,16 +428,19 @@ export default function Conversation() {
     try {
       const call = await startVoiceCall({
         onPhase: (p) => {
-          if (!mountedRef.current || attempt !== callAttemptRef.current) return;
+          if (!isCurrent() || attempt !== callAttemptRef.current) return;
           setCallPhase(p);
           if (p !== "listening") setLiveCaption(""); // user finished this turn
         },
         preferLocalAsr: isMoonshineTranscriptionReady,
-        transcribe: (pcm, engine, signal) =>
-          transcribeSpeech(pcm, signal, engine === "cloud" ? "cloud" : "auto"),
-        onPartial: (t) => setLiveCaption(t),
+        transcribe: (pcm, engine, signal) => {
+          if (!isCurrent()) return Promise.reject(new DOMException("Identity changed", "AbortError"));
+          return transcribeSpeech(pcm, signal, engine === "cloud" ? "cloud" : "auto");
+        },
+        onPartial: (t) => { if (isCurrent()) setLiveCaption(t); },
         reply: async (userText, pcm, onSpeaking, signal) => {
           signal.throwIfAborted();
+          if (!isCurrent()) throw new DOMException("Identity changed", "AbortError");
           const appended = appendUserTurn(
             messagesRef.current,
             turnMetaRef.current,
@@ -451,14 +462,14 @@ export default function Conversation() {
           const queue = createSpeechQueue(id, getInteraction(signal));
           callQueueRef.current = queue;
           void queue.started.then(() => {
-            if (!signal.aborted) onSpeaking();
+            if (!signal.aborted && isCurrent()) onSpeaking();
           });
           const cancelSpeech = () => queue.stop();
           signal.addEventListener("abort", cancelSpeech, { once: true });
 
           let started = false;
           const onText = (txt: string) => {
-            if (signal.aborted || !mountedRef.current) return;
+            if (signal.aborted || !isCurrent()) return;
             if (!started) {
               started = true;
               setMessages((m) => [...m, { role: "assistant", content: txt }]);
@@ -470,6 +481,7 @@ export default function Conversation() {
           try {
             const full = await streamChat(id, next, onText, signal, custom);
             signal.throwIfAborted();
+            if (!isCurrent()) throw new DOMException("Identity changed", "AbortError");
             if (started) setLastAssistant(full);
             else
               setMessages((m) => [...m, { role: "assistant", content: full }]);
@@ -477,10 +489,11 @@ export default function Conversation() {
             if (queue.failed) throw new Error("语音播放失败，请点击回复旁的朗读按钮重试。");
           } catch (err) {
             queue.stop();
-            if (signal.aborted || started) throw err;
+            if (signal.aborted || started || !isCurrent()) throw err;
             // Streaming unavailable -> plain endpoint; speak the whole reply.
             const r = await postChat(id, next, signal, custom);
             signal.throwIfAborted();
+            if (!isCurrent()) throw new DOMException("Identity changed", "AbortError");
             if (started) setLastAssistant(r.reply);
             else
               setMessages((m) => [
@@ -492,7 +505,7 @@ export default function Conversation() {
             const cancelFallback = () => fallback.stop();
             signal.addEventListener("abort", cancelFallback, { once: true });
             void fallback.started.then(() => {
-              if (!signal.aborted) onSpeaking();
+              if (!signal.aborted && isCurrent()) onSpeaking();
             });
             try {
               await fallback.end(mutedRef.current ? "" : r.reply);
@@ -514,20 +527,20 @@ export default function Conversation() {
           speakingRef.current?.stop();
         },
         onError: (msg) => {
-          if (mountedRef.current) setError(msg);
+          if (isCurrent()) setError(msg);
         },
       });
-      if (!mountedRef.current || attempt !== callAttemptRef.current) {
+      if (!isCurrent() || attempt !== callAttemptRef.current) {
         call.end();
         return;
       }
       callRef.current = call;
       setCallPhase("listening");
     } catch {
-      if (mountedRef.current)
+      if (isCurrent())
         setError("无法开始通话，请允许麦克风权限，或用打字 / 点击录音。");
     } finally {
-      if (mountedRef.current) setCallStarting(false);
+      if (isCurrent()) setCallStarting(false);
     }
   }
 
@@ -543,17 +556,18 @@ export default function Conversation() {
   }
 
   async function getHints() {
-    if (!id || hintLoading || booting) return;
+    if (!isCurrent() || !id || hintLoading || booting) return;
     setHintLoading(true);
     setError(null);
     try {
       const custom = isCustom ? (customScene ?? undefined) : undefined;
       const s = await postHint(id, messages, undefined, custom);
+      if (!isCurrent()) return;
       setHints(s.length ? s : ["试着先打个招呼或回应上一句～"]);
     } catch {
-      setError("获取提示失败，请稍后再试。");
+      if (isCurrent()) setError("获取提示失败，请稍后再试。");
     } finally {
-      setHintLoading(false);
+      if (isCurrent()) setHintLoading(false);
     }
   }
 
