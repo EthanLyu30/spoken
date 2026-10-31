@@ -11,9 +11,11 @@ import json
 import secrets
 import re
 from time import perf_counter
+from threading import Lock
 from starlette.requests import ClientDisconnect
 
 from app.core.config import get_settings
+from app.core.performance import numeric, server_timing, elapsed
 
 _current: ContextVar[TraceContext | None] = ContextVar("spoken_trace", default=None)
 _parent: ContextVar[str | None] = ContextVar("spoken_span", default=None)
@@ -53,6 +55,8 @@ class TraceContext:
         self.error_cause_type = None
         self.spans = []
         self.active_spans = {}
+        self.performance = {}
+        self.performance_lock = Lock()
 
     def __enter__(self):
         self._token = _current.set(self)
@@ -85,6 +89,12 @@ class TraceContext:
                 snapshot["duration_ms"] = max(0, elapsed - node["offset_ms"])
                 snapshot["outcome"] = self.outcome if self.outcome != "ok" else "incomplete"
             snapshots.append(snapshot)
+        with self.performance_lock:
+            measurements = numeric(self.performance)
+        if measurements:
+            snapshots.append({"id": "performance", "parent_id": None, "name": "performance",
+                              "offset_ms": 0, "duration_ms": elapsed, "outcome": self.outcome,
+                              "attributes": measurements})
         models = [s["attributes"] for s in snapshots if s["name"].startswith("deepseek.")]
         complete = bool(models) and all(type(m.get("input_tokens")) is int and type(m.get("output_tokens")) is int for m in models)
         first = [m["ttft_ms"] for m in models if isinstance(m.get("ttft_ms"), (float, int))]
@@ -241,7 +251,12 @@ class TelemetryMiddleware:
             nonlocal transport_failed, response_complete
             if message["type"] == "http.response.start":
                 trace.http_status = message["status"]
-                message = {**message, "headers": [*message.get("headers", []), (b"x-trace-id", trace.trace_id.encode())]}
+                elapsed("response_ready", trace.start)
+                # Snapshot only work completed before response start. Final streaming
+                # totals are retained in the trace after the body finishes.
+                message = {**message, "headers": [*message.get("headers", []),
+                           (b"x-trace-id", trace.trace_id.encode()),
+                           (b"server-timing", server_timing(trace).encode("ascii"))]}
             try:
                 await send(message)
             except OSError:

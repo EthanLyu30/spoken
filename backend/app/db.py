@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import get_settings
+from app.core.performance import MeasuredSession, install_sql_timings
 
 
 class Base(DeclarativeBase):
@@ -21,8 +22,9 @@ _connect_args = {"check_same_thread": False} if _url.startswith("sqlite") else {
 # Managed databases may terminate idle connections while the app stays alive.
 # Check on checkout; never replay an application transaction after failure.
 engine = create_engine(_url, connect_args=_connect_args, future=True, pool_pre_ping=True)
+install_sql_timings()
 SessionLocal = sessionmaker(
-    bind=engine, autoflush=False, expire_on_commit=False, class_=Session
+    bind=engine, autoflush=False, expire_on_commit=False, class_=MeasuredSession
 )
 
 

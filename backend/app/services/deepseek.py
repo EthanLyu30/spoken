@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from time import perf_counter
 
 import httpx
 
 from app.core.config import Settings, get_settings
 from app.core.observability import traced, traced_stream, trace_attribute
+from app.core.performance import HttpTimings, elapsed
 
 
 def _usage(data):
@@ -68,12 +70,13 @@ class DeepSeekClient:
             "Content-Type": "application/json",
         }
 
+        request_start = perf_counter()
         try:
             async with httpx.AsyncClient(
                 trust_env=False,
                 timeout=httpx.Timeout(60.0, connect=10.0),
             ) as client:
-                resp = await client.post(url, json=payload, headers=headers)
+                resp = await client.post(url, json=payload, headers=headers, extensions={"trace": HttpTimings()})
                 resp.raise_for_status()
                 data = resp.json()
                 _usage(data)
@@ -91,6 +94,9 @@ class DeepSeekClient:
 
         if not content or not content.strip():
             raise DeepSeekError("DeepSeek returned an empty reply")
+        # Non-streaming text is first observable only after the full JSON body.
+        elapsed("llm_first_text", request_start)
+        elapsed("llm_total", request_start)
         return content.strip()
 
     @traced_stream("deepseek.stream", provider="deepseek")
@@ -121,11 +127,13 @@ class DeepSeekClient:
             "Content-Type": "application/json",
         }
 
+        request_start = perf_counter()
+        first_text = True
         try:
             async with httpx.AsyncClient(
                 trust_env=False, timeout=httpx.Timeout(60.0, connect=10.0)
             ) as client:
-                async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                async with client.stream("POST", url, json=payload, headers=headers, extensions={"trace": HttpTimings()}) as resp:
                     resp.raise_for_status()
                     completed = False
                     async for line in resp.aiter_lines():
@@ -134,6 +142,7 @@ class DeepSeekClient:
                         data = line[5:].strip()
                         if data == "[DONE]":
                             completed = True
+                            elapsed("llm_total", request_start)
                             break
                         try:
                             packet = json.loads(data)
@@ -144,6 +153,9 @@ class DeepSeekClient:
                         except (json.JSONDecodeError, KeyError, IndexError, TypeError):
                             continue
                         if delta:
+                            if first_text:
+                                elapsed("llm_first_text", request_start)
+                                first_text = False
                             yield delta
                     if not completed:
                         raise DeepSeekError("DeepSeek stream ended before completion")

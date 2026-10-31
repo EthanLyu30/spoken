@@ -42,11 +42,11 @@ class _FakeAsyncClient:
     async def __aexit__(self, _exc_type, _exc, _traceback) -> None:
         return None
 
-    async def post(self, _url: str, *, json: dict, headers: dict):
+    async def post(self, _url: str, *, json: dict, headers: dict, extensions=None):
         self.payloads.append(json)
         return _FakeResponse()
 
-    def stream(self, _method: str, _url: str, *, json: dict, headers: dict):
+    def stream(self, _method: str, _url: str, *, json: dict, headers: dict, extensions=None):
         self.payloads.append(json)
         return _FakeStreamResponse()
 

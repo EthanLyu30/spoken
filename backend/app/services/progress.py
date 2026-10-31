@@ -16,6 +16,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session
 
+from app.core.performance import measure
 from app.models.practice import PracticeRecord
 from app.models.progress import EarnedBadge, LearningEvent, ProgressMigration, ProgressOwner
 from app.models.session import PracticeSession
@@ -81,38 +82,39 @@ def stats_and_awards(db: Session, client_id: str, timezone_value: str | None = N
     today = _local_date(utcnow(), zone)
     if events is None:
         events = list(db.scalars(select(LearningEvent).where(LearningEvent.client_id == client_id)))
-    conversations = [e for e in events if e.event_type == "session"]
-    practices = [e for e in events if e.event_type == "practice"]
-    collected = {e.word_text for e in events if e.event_type == "word_collected" and e.word_text is not None}
-    reviewed = {e.word_text for e in events if e.event_type == "word_reviewed" and e.word_text is not None}
-    days = {_local_date(e.occurred_at, zone) for e in events if e.occurred_at is not None}
-    streak = 0
-    cursor = today if today in days else today - timedelta(days=1)
-    while cursor in days:
-        streak += 1
-        cursor -= timedelta(days=1)
-    longest = run = 0
-    previous = None
-    for day in sorted(days):
-        run = run + 1 if previous is not None and day == previous + timedelta(days=1) else 1
-        longest = max(longest, run)
-        previous = day
-    xp_total = len(conversations) * 40 + len(practices) * 15 + len(collected) * 5
-    level = 1 + xp_total // 250
-    achievements = {
-        "first_conversation": len(conversations) >= 1,
-        "streak_3": longest >= 3,
-        "streak_7": longest >= 7,
-        "conversations_10": len(conversations) >= 10,
-        "words_10": len(collected) >= 10,
-        "words_50": len(collected) >= 50,
-        "reviewed_words_10": len(reviewed) >= 10,
-        "pronunciation_90": any(e.kind == "pronunciation" and (e.score or 0) >= 90 for e in practices),
-        "interviews_3": sum(e.kind == "interview" for e in practices) >= 3,
-        "conversation_90": any((e.score or 0) >= 90 for e in conversations),
-        "scenarios_5": len({e.scenario_id for e in conversations if e.scenario_id}) >= 5,
-        "level_3": level >= 3,
-    }
+    with measure("stats_cpu", cpu=True):
+        conversations = [e for e in events if e.event_type == "session"]
+        practices = [e for e in events if e.event_type == "practice"]
+        collected = {e.word_text for e in events if e.event_type == "word_collected" and e.word_text is not None}
+        reviewed = {e.word_text for e in events if e.event_type == "word_reviewed" and e.word_text is not None}
+        days = {_local_date(e.occurred_at, zone) for e in events if e.occurred_at is not None}
+        streak = 0
+        cursor = today if today in days else today - timedelta(days=1)
+        while cursor in days:
+            streak += 1
+            cursor -= timedelta(days=1)
+        longest = run = 0
+        previous = None
+        for day in sorted(days):
+            run = run + 1 if previous is not None and day == previous + timedelta(days=1) else 1
+            longest = max(longest, run)
+            previous = day
+        xp_total = len(conversations) * 40 + len(practices) * 15 + len(collected) * 5
+        level = 1 + xp_total // 250
+        achievements = {
+            "first_conversation": len(conversations) >= 1,
+            "streak_3": longest >= 3,
+            "streak_7": longest >= 7,
+            "conversations_10": len(conversations) >= 10,
+            "words_10": len(collected) >= 10,
+            "words_50": len(collected) >= 50,
+            "reviewed_words_10": len(reviewed) >= 10,
+            "pronunciation_90": any(e.kind == "pronunciation" and (e.score or 0) >= 90 for e in practices),
+            "interviews_3": sum(e.kind == "interview" for e in practices) >= 3,
+            "conversation_90": any((e.score or 0) >= 90 for e in conversations),
+            "scenarios_5": len({e.scenario_id for e in conversations if e.scenario_id}) >= 5,
+            "level_3": level >= 3,
+        }
     badges = set(db.scalars(select(EarnedBadge.badge_key).where(EarnedBadge.client_id == client_id)))
     newly_earned = {key for key, earned in achievements.items() if earned} - badges
     _insert_many(db, EarnedBadge, ({"client_id": client_id, "badge_key": key, "earned_at": utcnow()}

@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy import delete, desc, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.performance import measure
 from app.models.practice import PracticeRecord
 from app.models.session import PracticeSession
 from app.schemas.practice import PracticeCreate
@@ -101,55 +102,56 @@ def compute_insights(db: Session, client_id: str, recent: int = INSIGHTS_RECENT)
             .limit(recent)
         )
     )
-    sessions.reverse()  # oldest -> newest, so the trend reads left to right
+    with measure("insights_cpu", cpu=True):
+        sessions.reverse()  # oldest -> newest, so the trend reads left to right
 
-    series: dict[str, dict] = {}
-    for s in sessions:
-        for sc in s.scores:
-            entry = series.setdefault(
-                sc.key,
-                {"label_zh": sc.label_zh, "label_en": sc.label_en, "scores": []},
-            )
-            entry["scores"].append(sc.score)
+        series: dict[str, dict] = {}
+        for s in sessions:
+            for sc in s.scores:
+                entry = series.setdefault(
+                    sc.key,
+                    {"label_zh": sc.label_zh, "label_en": sc.label_en, "scores": []},
+                )
+                entry["scores"].append(sc.score)
 
-    if not series:
-        return {
-            "available": False,
-            "sessions": len(sessions),
-            "overall_delta": 0,
-            "weakest": None,
-            "strongest": None,
-            "skills": [],
-        }
-
-    skills: list[dict] = []
-    for key, entry in series.items():
-        scores = entry["scores"]
-        avg = round(sum(scores) / len(scores))
-        if len(scores) >= 2:
-            half = len(scores) // 2
-            earlier, later = scores[:half], scores[half:]
-            delta = round(sum(later) / len(later) - sum(earlier) / len(earlier))
-        else:
-            delta = 0
-        skills.append(
-            {
-                "key": key,
-                "label_zh": entry["label_zh"],
-                "label_en": entry["label_en"],
-                "avg": avg,
-                "delta": delta,
-                "samples": len(scores),
+        if not series:
+            return {
+                "available": False,
+                "sessions": len(sessions),
+                "overall_delta": 0,
+                "weakest": None,
+                "strongest": None,
+                "skills": [],
             }
-        )
 
-    skills.sort(key=lambda x: x["avg"])  # weakest first
-    overall_delta = round(sum(x["delta"] for x in skills) / len(skills))
-    return {
-        "available": True,
-        "sessions": len(sessions),
-        "overall_delta": overall_delta,
-        "weakest": skills[0],
-        "strongest": skills[-1],
-        "skills": skills,
-    }
+        skills: list[dict] = []
+        for key, entry in series.items():
+            scores = entry["scores"]
+            avg = round(sum(scores) / len(scores))
+            if len(scores) >= 2:
+                half = len(scores) // 2
+                earlier, later = scores[:half], scores[half:]
+                delta = round(sum(later) / len(later) - sum(earlier) / len(earlier))
+            else:
+                delta = 0
+            skills.append(
+                {
+                    "key": key,
+                    "label_zh": entry["label_zh"],
+                    "label_en": entry["label_en"],
+                    "avg": avg,
+                    "delta": delta,
+                    "samples": len(scores),
+                }
+            )
+
+        skills.sort(key=lambda x: x["avg"])  # weakest first
+        overall_delta = round(sum(x["delta"] for x in skills) / len(skills))
+        return {
+            "available": True,
+            "sessions": len(sessions),
+            "overall_delta": overall_delta,
+            "weakest": skills[0],
+            "strongest": skills[-1],
+            "skills": skills,
+        }

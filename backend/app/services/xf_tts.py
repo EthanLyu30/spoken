@@ -13,11 +13,13 @@ import io
 import json
 import wave
 from collections.abc import AsyncIterator
+from time import perf_counter
 
 import websockets
 
 from app.core.config import Settings, get_settings
 from app.core.observability import traced_stream
+from app.core.performance import elapsed, measured_tts_connection
 from app.data.tts_voices import normalize_cloud_voice
 from app.services.xf_auth import build_auth_url
 
@@ -158,10 +160,11 @@ class XfTtsClient:
 
         received = False
         complete = False
+        request_start = perf_counter()
         try:
             # The provider's status=2 is the audio boundary. Do not hold a complete
             # WAV for a slow close ACK; active synthesis retains its 30s deadline.
-            async with asyncio.timeout(30), websockets.connect(url, max_size=2 * 1024 * 1024, open_timeout=10, close_timeout=0.15) as ws:
+            async with asyncio.timeout(30), measured_tts_connection(websockets.connect(url, max_size=2 * 1024 * 1024, open_timeout=10, close_timeout=0.15)) as ws:
                 await ws.send(json.dumps(frame))
                 async for message in ws:
                     resp = json.loads(message)
@@ -170,11 +173,17 @@ class XfTtsClient:
                             f"iFlytek TTS error {resp.get('code')}: {resp.get('message')}"
                         )
                     data = resp.get("data") or {}
+                    audio = b""
                     if data.get("audio"):
                         audio = base64.b64decode(data["audio"])
                         if audio:
+                            if not received:
+                                elapsed("tts_first_pcm", request_start)
                             received = True
-                            yield audio
+                    if data.get("status") == 2 and received:
+                        elapsed("tts_complete_pcm", request_start)
+                    if audio:
+                        yield audio
                     if data.get("status") == 2:
                         complete = True
                         break
