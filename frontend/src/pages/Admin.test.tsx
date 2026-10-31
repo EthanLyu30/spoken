@@ -43,7 +43,7 @@ it('shows distinct visitor metrics, configured model, rates and honest cost cove
   expect(within(metrics).getByText('登录活跃用户')).toBeVisible();
   expect(within(metrics).getByText('3')).toBeVisible();
   expect(screen.getByText('deepseek-flash')).toBeVisible();
-  expect(screen.getByText(/输入 ¥1–2/)).toBeVisible();
+  expect(screen.getByText(/输入 ¥0.02–2/)).toBeVisible();
   expect(screen.getByText(/输出 ¥4–8/)).toBeVisible();
   expect(screen.getByText(/¥0.0020–0.0060/)).toBeVisible();
   expect(screen.getByText(/2 \/ 3/)).toBeVisible();

@@ -188,8 +188,8 @@ export default function Admin() {
           <div className="admin-status-line"><span>取消 <b>{data.cancelled}</b> 次，单独记录</span><span>各业务耗时独立观察</span></div>
         </article>
         <article className="admin-panel admin-usage"><div className="admin-panel-heading"><h2><Database size={16} />模型与费用</h2>{data.pricing && <code className="admin-model-name">{data.pricing.configured_model}</code>}</div>
-          {data.pricing && <details className="admin-price-details"><summary><span>输入 ¥{data.pricing.rates.input_miss.join('–')} /百万</span><span>输出 ¥{data.pricing.rates.output.join('–')} /百万</span></summary><div>
-            <p>缓存命中输入 ¥{data.pricing.rates.input_hit.join('–')} /百万 Token。低/高值对应空闲/高峰。</p>
+          {data.pricing && <details className="admin-price-details"><summary><span>输入 ¥{data.pricing.rates.input_hit[0]}–{data.pricing.rates.input_miss[1]} /百万</span><span>输出 ¥{data.pricing.rates.output.join('–')} /百万</span></summary><div>
+            <p>人民币 / 百万 Token。缓存命中输入 ¥{data.pricing.rates.input_hit.join('–')}，未命中输入 ¥{data.pricing.rates.input_miss.join('–')}。各项低/高值对应空闲/高峰。</p>
             <p>高峰为北京时间非节假日的工作日 9–12、14–18 点。费用区间采用全命中空闲价至全未命中高峰价，未考虑赠送额度或折扣。</p>
             <p>{data.pricing.official_version} · 核对 {data.pricing.checked_at} · <a href={data.pricing.source_url} target="_blank" rel="noreferrer">官方价格</a></p>
           </div></details>}
