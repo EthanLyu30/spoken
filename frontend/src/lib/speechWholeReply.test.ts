@@ -37,7 +37,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => { samples.push(JSON.parse(String(init.body))); return new Response(null,{status:202}); });
   Object.defineProperty(URL,"revokeObjectURL",{configurable:true,value:revoke});
 });
-afterEach(() => { stopSpeaking(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { stopSpeaking(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it("buffers generated text and sends exactly one complete cloud request at end", async () => {
   const q = createSpeechQueue("cafe"); q.feed("First. "); q.feed("First. Second.");
@@ -143,4 +143,43 @@ it("falls back to one whole cloud file when the device has no English voices", a
   expect(mocks.fetchTtsUrl.mock.calls.map(call=>call[0])).toEqual(["First sentence. Second sentence."]);
   audios[0].onplaying?.(); audios[0].onended?.(); await done;
   expect(samples).toContainEqual(expect.objectContaining({operation:"speech.complete",engine:"xfyun",transport:"buffered",outcome:"ok"}));
+});
+
+it("cancels a silent native startup before one cloud fallback and ignores late native callbacks", async () => {
+  vi.useFakeTimers(); mocks.settings.engine="browser";
+  const q=createSpeechQueue(); const done=q.end("A whole reply that must not get stuck.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  const lateStart=utterances[0].onstart!, lateEnd=utterances[0].onend!;
+  await vi.advanceTimersByTimeAsync(5000);
+  await vi.waitFor(()=>expect(audios).toHaveLength(1));
+  expect(nativeCancel.mock.invocationCallOrder[1]).toBeLessThan(mocks.fetchTtsUrl.mock.invocationCallOrder[0]);
+  expect(mocks.fetchTtsUrl).toHaveBeenCalledOnce();
+  lateStart(); lateEnd();
+  expect(samples).not.toContainEqual(expect.objectContaining({operation:"speech.first_audio"}));
+  audios[0].onplaying?.(); audios[0].onended?.(); await done;
+  expect(q.failed).toBe(false);
+  expect(samples.filter(s=>s.operation==="speech.complete")).toEqual([expect.objectContaining({engine:"xfyun",outcome:"ok"})]);
+});
+
+it("does not start a fallback after cancellation during the native startup deadline", async () => {
+  vi.useFakeTimers(); mocks.settings.engine="browser";
+  const q=createSpeechQueue(); const done=q.end("A complete reply.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  q.stop(); await done;
+  const cancels=nativeCancel.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
+  expect(nativeCancel).toHaveBeenCalledTimes(cancels);
+  expect(samples.filter(s=>s.operation==="speech.complete")).toEqual([expect.objectContaining({outcome:"cancelled"})]);
+});
+
+it("settles a native completion timeout after sound starts without replaying through cloud", async () => {
+  vi.useFakeTimers(); mocks.settings.engine="browser";
+  const q=createSpeechQueue(); const done=q.end("A short complete reply.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  utterances[0].onstart?.();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(q.failed).toBe(true); await done;
+  expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
+  expect(samples).toContainEqual(expect.objectContaining({operation:"speech.playback",outcome:"error"}));
 });

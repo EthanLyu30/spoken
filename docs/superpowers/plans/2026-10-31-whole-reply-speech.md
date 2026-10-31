@@ -37,7 +37,13 @@
 - [x] Run tests and observe intended failures before replacing sentence scheduling.
 - [x] Implement single playback dispatch at `end`, reuse for one-shot speech, freeze engine for the utterance, and preserve cleanup and measurement.
 - [x] Update defaults/migration and user-facing whole-reply labels without promising uniform voice quality.
-- [ ] Run full frontend/backend tests, lint, typecheck and production build; request one fresh read-only review.
+- [x] Run full frontend/backend tests, lint, typecheck and production build; request one fresh read-only review.
 - [ ] Commit as EthanLyu30, fast-forward/push main preserving unrelated changes, and verify deployment.
 - [ ] Verify real native / whole-cloud playback callbacks. Edge exposed voices but ended without start; the fix adds a whole-file fallback. Further browser control was stopped by the tool because the Windows browser URL could not be determined reliably. Do not claim listening acceptance.
 - [ ] Remove temporary test sources, audio, logs and servers; retain final screenshots and project docs.
+
+## Implementation verification
+
+- Frontend: 239 tests across 48 files; backend: 412 tests; ESLint, TypeScript and production build passed.
+- Independent review identified missing native callback deadlines and the old 800-character cloud contract. Both were reproduced with failing tests and fixed in one pass. Coverage includes cancelled startup, late callbacks, incomplete playback without automatic replay, a complete reply over 800 characters, and UTF-8 provider boundaries.
+- Real Edge listed 47 online English voices and zero local English voices; the original native test ended without a start event. This is a failed playback attempt, not acceptance. Browser tooling subsequently stopped because it could not reliably determine the Windows URL. No physical playback or hearing acceptance is claimed.

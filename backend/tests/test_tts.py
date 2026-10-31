@@ -21,8 +21,10 @@ class _StubTts:
         self.aue: str | None = None
         self.speed: int | None = None
         self.pitch: int | None = None
+        self.texts: list[str] = []
 
     async def synthesize(self, text, *, vcn=None, aue="raw", speed=None, pitch=None, **_kwargs):
+        self.texts.append(text)
         self.vcn = vcn
         self.aue = aue
         self.speed = speed
@@ -103,6 +105,42 @@ def test_tts_service_error_maps_to_503():
 
 def test_tts_rejects_empty_text():
     assert client.post("/api/tts", json={"text": ""}).status_code == 422
+
+
+def test_whole_reply_over_800_characters_is_synthesized_once_without_truncation():
+    text = "This complete English reply should be read in one continuous audio file. " * 14
+    assert len(text) > 800
+    stub = _StubTts()
+    app.dependency_overrides[get_tts_client] = lambda: stub
+    try:
+        response = client.post("/api/tts", json={"text": text})
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "audio/wav"
+        assert stub.texts == [text]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("text", ["a" * 7999, "界" * 2666], ids=["ascii-7999", "utf8-7998"])
+def test_whole_reply_accepts_text_below_provider_utf8_byte_limit(text):
+    stub = _StubTts()
+    app.dependency_overrides[get_tts_client] = lambda: stub
+    try:
+        assert client.post("/api/tts", json={"text": text}).status_code == 200
+        assert stub.texts == [text]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("text", ["a" * 8000, "界" * 2667, "😀" * 2000], ids=["ascii-8000", "utf8-8001", "emoji-8000"])
+def test_whole_reply_rejects_provider_oversize_text_before_synthesis(text):
+    stub = _StubTts()
+    app.dependency_overrides[get_tts_client] = lambda: stub
+    try:
+        assert client.post("/api/tts", json={"text": text}).status_code == 422
+        assert stub.texts == []
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_smooth_silences_collapses_only_near_zero_internal_gap():

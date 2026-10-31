@@ -58,7 +58,6 @@ function pickBrowserVoice(uri: string | null): SpeechSynthesisVoice | null {
 }
 function speakBrowser(text: string, settings: VoiceSettings, onStarted: () => void): Speaking {
   const synth = window.speechSynthesis;
-  synth.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   const voice = pickBrowserVoice(settings.browserVoiceURI);
   if (voice) utterance.voice = voice;
@@ -66,23 +65,39 @@ function speakBrowser(text: string, settings: VoiceSettings, onStarted: () => vo
   utterance.rate = 0.7 + ((settings.speed ?? 50) / 100) * 0.8;
   utterance.pitch = 0.6 + ((settings.pitch ?? 50) / 100) * 0.9;
   let failed = false, finished = false, started = false;
+  let startupTimer = 0, completionTimer = 0;
   let settle: () => void = () => {};
   const done = new Promise<void>(resolve => { settle = resolve; });
   const finish = () => {
     if (finished) return;
     finished = true;
+    window.clearTimeout(startupTimer);
+    window.clearTimeout(completionTimer);
     utterance.onstart = utterance.onend = utterance.onerror = null;
     settle();
   };
-  utterance.onstart = () => { started = true; onStarted(); };
-  utterance.onend = () => { failed = !started; finish(); };
-  utterance.onerror = () => { failed = true; finish(); };
-  try { synth.speak(utterance); }
-  catch { failed = true; finish(); }
-  return { done, get failed() { return failed; }, stop: () => {
+  const cancelNative = () => {
+    finish(); // Detach handlers before cancel can synchronously emit callbacks.
+    try { synth.cancel(); } catch { /* the task must still settle */ }
+  };
+  const fail = () => {
     if (finished) return;
-    try { synth.cancel(); } finally { finish(); }
-  } };
+    failed = true; cancelNative();
+  };
+  utterance.onstart = () => {
+    if (finished || started) return;
+    started = true;
+    window.clearTimeout(startupTimer);
+    // Generous text/rate allowance; an incomplete utterance fails without replay.
+    completionTimer = window.setTimeout(fail, Math.max(60_000, text.length * 150 / utterance.rate));
+    onStarted();
+  };
+  utterance.onend = () => { if (!finished) { failed = !started; finish(); } };
+  utterance.onerror = fail;
+  startupTimer = window.setTimeout(fail, 5_000);
+  try { synth.cancel(); synth.speak(utterance); }
+  catch { fail(); }
+  return { done, get failed() { return failed; }, stop: () => { if (!finished) cancelNative(); } };
 }
 function playUrl(url: string, onStarted: () => void): Speaking {
   const audio = new Audio(url);
