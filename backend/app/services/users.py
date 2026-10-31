@@ -9,6 +9,7 @@ from app.models.practice import PracticeRecord
 from app.models.session import PracticeSession
 from app.models.user import User
 from app.models.word import WordEntry
+from app.services import progress
 
 # Every owner-scoped table keyed by client_id; claiming rewrites the owner.
 _OWNED = (WordEntry, PracticeSession, PracticeRecord)
@@ -34,8 +35,18 @@ def claim_device_data(db: Session, device_id: str, owner_id: str) -> None:
     """
     if not device_id or device_id == "anon" or device_id.startswith("u:"):
         return
-    for model in _OWNED:
-        db.execute(
-            update(model).where(model.client_id == device_id).values(client_id=owner_id)
-        )
-    db.commit()
+    if device_id == owner_id:
+        return
+    try:
+        for owner in sorted((device_id, owner_id)):
+            progress.lock_owner(db, owner)
+        progress.claim_progress(db, device_id, owner_id)
+        for model in _OWNED:
+            db.execute(
+                update(model).where(model.client_id == device_id).values(client_id=owner_id)
+            )
+        progress.stats_and_awards(db, owner_id)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise

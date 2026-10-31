@@ -1,6 +1,7 @@
 """Schemas for saving and reading practice sessions."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,3 +33,9 @@ class SessionDetail(SessionSummary):
     tip: str
     scores: list[SkillScore]
     messages: list[ChatMessage]
+
+
+class ExpiredSessionReceipt(SessionSummary):
+    # Historical unknown timestamps must remain unknown, never invented.
+    created_at: datetime | None
+    detail_available: Literal[False] = False

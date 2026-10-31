@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_client_id
+from app.core.deps import get_client_id, get_timezone
 from app.db import get_db
 from app.schemas.practice import Insights, PracticeCreate, PracticeRecordOut, Stats
 from app.services import practice as repo
@@ -19,8 +19,9 @@ def save_practice(
     payload: PracticeCreate,
     db: Session = Depends(get_db),
     client_id: str = Depends(get_client_id),
+    timezone: str = Depends(get_timezone),
 ) -> PracticeRecordOut:
-    return PracticeRecordOut.model_validate(repo.create_record(db, client_id, payload))
+    return PracticeRecordOut.model_validate(repo.create_record(db, client_id, payload, timezone))
 
 
 @router.get("/practice", response_model=list[PracticeRecordOut])
@@ -34,8 +35,9 @@ def list_practice(
 
 
 @router.get("/stats", response_model=Stats)
-def stats(db: Session = Depends(get_db), client_id: str = Depends(get_client_id)) -> Stats:
-    return Stats(**repo.compute_stats(db, client_id))
+def stats(db: Session = Depends(get_db), client_id: str = Depends(get_client_id),
+          timezone: str = Depends(get_timezone)) -> Stats:
+    return Stats(**repo.compute_stats(db, client_id, timezone))
 
 
 @router.get("/practice/{record_id}", response_model=PracticeDetailOut)

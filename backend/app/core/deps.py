@@ -8,6 +8,12 @@ from app.db import get_db
 from app.models.user import User
 
 
+def get_timezone(x_timezone: str | None = Header(default=None, alias="X-Timezone")) -> str:
+    from app.services.progress import timezone_name
+
+    return timezone_name(x_timezone)
+
+
 def _bearer(authorization: str | None) -> str | None:
     if authorization and authorization.lower().startswith("bearer "):
         return authorization[7:].strip() or None

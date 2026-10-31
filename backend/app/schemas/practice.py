@@ -37,6 +37,9 @@ class Stats(BaseModel):
     total_sessions: int
     total_practice: int
     words_count: int
+    earned_badges: list[str] = Field(default_factory=list)
+    timezone: str = "UTC"
+    local_date: str
 
 
 class SkillInsight(BaseModel):

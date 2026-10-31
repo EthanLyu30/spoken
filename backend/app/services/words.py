@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models.word import WordEntry
 from app.services.deepseek import DeepSeekClient, DeepSeekError
+from app.services import progress
 
 # Leitner intervals (days) by box level; remembering bumps the box up.
 SRS_INTERVALS_DAYS = [0, 1, 2, 4, 8, 16, 30]
@@ -50,7 +51,14 @@ def create_word(
     meaning: str,
     example: str,
     kind: str = "word",
+    timezone: str | None = None,
 ) -> WordEntry:
+    progress.lock_owner(db, client_id)
+    text = text.strip()
+    existing = find_by_text(db, client_id, text)
+    if existing is not None:
+        db.commit()
+        return existing
     entry = WordEntry(
         client_id=client_id,
         text=text,
@@ -60,7 +68,15 @@ def create_word(
         kind=kind,
     )
     db.add(entry)
-    db.commit()
+    try:
+        db.flush()
+        progress.record_event(db, client_id, "word_collected", source_id=entry.id,
+                              occurred_at=entry.created_at, word_text=entry.text)
+        progress.stats_and_awards(db, client_id, timezone)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(entry)
     return entry
 
@@ -94,19 +110,49 @@ def list_due(db: Session, client_id: str, kind: str | None = None) -> list[WordE
     return list(db.scalars(stmt.order_by(asc(WordEntry.due_at))))
 
 
-def review_word(db: Session, entry: WordEntry, remembered: bool) -> WordEntry:
+def review_word(db: Session, entry: WordEntry, remembered: bool,
+                timezone: str | None = None) -> WordEntry:
     """Apply a Leitner review: remembered -> longer interval, forgot -> reset."""
+    _lock_entry(db, entry)
     box = entry.box or 0
     box = min(box + 1, len(SRS_INTERVALS_DAYS) - 1) if remembered else 0
     now = datetime.utcnow()
     entry.box = box
     entry.last_reviewed = now
     entry.due_at = now + timedelta(days=SRS_INTERVALS_DAYS[box])
-    db.commit()
+    try:
+        db.flush()
+        progress.record_event(db, entry.client_id, "word_reviewed", source_id=entry.id,
+                              occurred_at=now, word_text=entry.text.strip())
+        progress.stats_and_awards(db, entry.client_id, timezone)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(entry)
     return entry
 
 
 def delete_word(db: Session, entry: WordEntry) -> None:
+    _lock_entry(db, entry)
     db.delete(entry)
     db.commit()
+
+
+def _lock_entry(db: Session, entry: WordEntry) -> None:
+    """Revalidate ownership after waiting for a concurrent review or claim."""
+    owner, word_id = entry.client_id, entry.id
+    progress.lock_owner(db, owner)
+    current = db.scalar(select(WordEntry).where(WordEntry.id == word_id, WordEntry.client_id == owner)
+                        .execution_options(populate_existing=True))
+    if current is None:
+        db.rollback()
+        raise ValueError("Word no longer belongs to this owner")
+
+
+def set_mastered(db: Session, entry: WordEntry, mastered: bool) -> WordEntry:
+    _lock_entry(db, entry)
+    entry.mastered = mastered
+    db.commit()
+    db.refresh(entry)
+    return entry

@@ -3,12 +3,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_client_id
+from app.core.deps import get_client_id, get_timezone
 from app.db import get_db
 from app.models.session import PracticeSession
 from app.schemas.chat import ChatMessage
 from app.schemas.feedback import SkillScore
-from app.schemas.session import SaveSessionRequest, SessionDetail, SessionSummary
+from app.schemas.session import ExpiredSessionReceipt, SaveSessionRequest, SessionDetail, SessionSummary
 from app.services import sessions as repo
 
 router = APIRouter(tags=["sessions"])
@@ -30,13 +30,15 @@ def _detail(session: PracticeSession) -> SessionDetail:
     )
 
 
-@router.post("/sessions", response_model=SessionDetail, status_code=201)
+@router.post("/sessions", response_model=SessionDetail | ExpiredSessionReceipt, status_code=201)
 def save_session(
     payload: SaveSessionRequest,
     db: Session = Depends(get_db),
     client_id: str = Depends(get_client_id),
-) -> SessionDetail:
-    return _detail(repo.create_session(db, client_id, payload))
+    timezone: str = Depends(get_timezone),
+) -> SessionDetail | ExpiredSessionReceipt:
+    saved = repo.create_session(db, client_id, payload, timezone)
+    return saved if isinstance(saved, ExpiredSessionReceipt) else _detail(saved)
 
 
 @router.get("/sessions", response_model=list[SessionSummary])

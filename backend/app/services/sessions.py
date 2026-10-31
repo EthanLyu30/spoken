@@ -7,23 +7,38 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.session import PracticeSession, SkillScore, Turn
-from app.schemas.session import SaveSessionRequest
+from app.models.progress import LearningEvent
+from app.schemas.session import ExpiredSessionReceipt, SaveSessionRequest
+from app.services import progress
 
 # Keep storage bounded: only retain the most recent N sessions.
 SESSION_KEEP = 200
 
 
-def create_session(db: Session, client_id: str, payload: SaveSessionRequest) -> PracticeSession:
-    def existing() -> PracticeSession | None:
+def create_session(db: Session, client_id: str, payload: SaveSessionRequest,
+                   timezone: str | None = None) -> PracticeSession | ExpiredSessionReceipt:
+    def existing() -> PracticeSession | ExpiredSessionReceipt | None:
         if not payload.client_session_id:
             return None
-        return db.scalars(select(PracticeSession).where(
+        receipt = db.scalar(select(LearningEvent).where(
+            LearningEvent.client_id == client_id,
+            LearningEvent.client_session_id == payload.client_session_id,
+        ))
+        retained = db.scalars(select(PracticeSession).where(
             PracticeSession.client_id == client_id,
             PracticeSession.client_session_id == payload.client_session_id,
         )).first()
+        if retained is not None:
+            return retained
+        if receipt is not None:
+            return ExpiredSessionReceipt(id=receipt.source_id, scenario_id=receipt.scenario_id,
+                                         overall=int(receipt.score or 0), created_at=receipt.occurred_at)
+        return None
 
+    progress.lock_owner(db, client_id)
     previous = existing()
     if previous is not None:
+        db.commit()  # Release the owner lock on canonical retry reads too.
         return previous
     session = PracticeSession(
         client_id=client_id,
@@ -43,6 +58,12 @@ def create_session(db: Session, client_id: str, payload: SaveSessionRequest) -> 
     )
     db.add(session)
     try:
+        db.flush()
+        progress.record_event(db, client_id, "session", source_id=session.id,
+                              client_session_id=session.client_session_id,
+                              occurred_at=session.created_at, scenario_id=session.scenario_id,
+                              score=session.overall)
+        progress.stats_and_awards(db, client_id, timezone)
         db.commit()
     except IntegrityError:
         # Concurrent report/navigation retries may reach different workers.
@@ -51,6 +72,9 @@ def create_session(db: Session, client_id: str, payload: SaveSessionRequest) -> 
         if previous is None:
             raise
         return previous
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(session)
     prune_sessions(db, client_id)
     return session

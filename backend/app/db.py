@@ -92,6 +92,9 @@ def init_db() -> None:
     _migrate_users()
     _migrate_session_identity()
     _migrate_telemetry_errors()
+    from app.services.progress import backfill_progress
+
+    backfill_progress(engine)
 
 
 def _migrate_telemetry_errors() -> None:

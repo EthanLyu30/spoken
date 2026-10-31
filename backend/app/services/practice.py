@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
-
-from sqlalchemy import delete, desc, func, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.practice import PracticeRecord
 from app.models.session import PracticeSession
-from app.models.word import WordEntry
 from app.schemas.practice import PracticeCreate
+from app.services import progress
 
 TODAY_GOAL = 3
 XP_PER_LEVEL = 250
@@ -20,7 +18,9 @@ PRACTICE_KEEP = 1000
 INSIGHTS_RECENT = 8
 
 
-def create_record(db: Session, client_id: str, payload: PracticeCreate) -> PracticeRecord:
+def create_record(db: Session, client_id: str, payload: PracticeCreate,
+                  timezone: str | None = None) -> PracticeRecord:
+    progress.lock_owner(db, client_id)
     record = PracticeRecord(
         client_id=client_id,
         kind=payload.kind,
@@ -29,7 +29,15 @@ def create_record(db: Session, client_id: str, payload: PracticeCreate) -> Pract
         detail=payload.detail,
     )
     db.add(record)
-    db.commit()
+    try:
+        db.flush()
+        progress.record_event(db, client_id, "practice", source_id=record.id,
+                              occurred_at=record.created_at, kind=record.kind, score=record.score)
+        progress.stats_and_awards(db, client_id, timezone)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(record)
     prune_records(db, client_id)
     return record
@@ -60,56 +68,20 @@ def list_records(
     return list(db.scalars(stmt))
 
 
-def _local_dates(dts: list[datetime], offset: timedelta) -> list[date]:
-    return [(dt + offset).date() for dt in dts if dt is not None]
-
-
-def compute_stats(db: Session, client_id: str) -> dict:
-    # created_at is stored as naive UTC; shift to local for day grouping.
-    offset = datetime.now() - datetime.utcnow()
-    today = (datetime.utcnow() + offset).date()
-
-    all_dts: list[datetime] = []
-    all_dts += list(db.scalars(select(PracticeSession.created_at).where(PracticeSession.client_id == client_id)))
-    all_dts += list(db.scalars(select(PracticeRecord.created_at).where(PracticeRecord.client_id == client_id)))
-    all_dts += list(db.scalars(select(WordEntry.created_at).where(WordEntry.client_id == client_id)))
-    local = _local_dates(all_dts, offset)
-    days = set(local)
-
-    # Streak: consecutive days up to today (or yesterday if nothing yet today).
-    streak = 0
-    cursor = today if today in days else today - timedelta(days=1)
-    while cursor in days:
-        streak += 1
-        cursor -= timedelta(days=1)
-
-    today_count = sum(1 for d in local if d == today)
-
-    total_sessions = db.scalar(
-        select(func.count(PracticeSession.id)).where(PracticeSession.client_id == client_id)
-    ) or 0
-    total_practice = db.scalar(
-        select(func.count(PracticeRecord.id)).where(PracticeRecord.client_id == client_id)
-    ) or 0
-    words_count = db.scalar(
-        select(func.count(WordEntry.id)).where(WordEntry.client_id == client_id)
-    ) or 0
-
-    xp_total = total_sessions * 40 + total_practice * 15 + words_count * 5
-    level = 1 + xp_total // XP_PER_LEVEL
-    xp = xp_total % XP_PER_LEVEL
-
-    return {
-        "streak_days": streak,
-        "today_count": today_count,
-        "today_goal": TODAY_GOAL,
-        "level": level,
-        "xp": xp,
-        "xp_to_next": XP_PER_LEVEL,
-        "total_sessions": total_sessions,
-        "total_practice": total_practice,
-        "words_count": words_count,
-    }
+def compute_stats(db: Session, client_id: str, timezone: str | None = None) -> dict:
+    try:
+        has_events = db.scalar(select(progress.LearningEvent.event_key)
+                               .where(progress.LearningEvent.client_id == client_id).limit(1))
+        if has_events:
+            progress.lock_owner(db, client_id)
+        # An empty snapshot cannot earn any badges. Keep first-visit reads free
+        # of writes and mutex rows; a racing activity writer owns its awards.
+        result = progress.stats_and_awards(db, client_id, timezone, events=None if has_events else [])
+        db.commit()
+        return result
+    except Exception:
+        db.rollback()
+        raise
 
 
 def compute_insights(db: Session, client_id: str, recent: int = INSIGHTS_RECENT) -> dict:

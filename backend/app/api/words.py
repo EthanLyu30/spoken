@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.chat import get_client
-from app.core.deps import get_client_id
+from app.core.deps import get_client_id, get_timezone
 from app.db import get_db
 from app.schemas.word import Word, WordCreate, WordReview, WordUpdate
 from app.services import words as repo
@@ -19,6 +19,7 @@ async def add_word(
     db: Session = Depends(get_db),
     client: DeepSeekClient = Depends(get_client),
     client_id: str = Depends(get_client_id),
+    timezone: str = Depends(get_timezone),
 ) -> Word:
     text = payload.text.strip()
     # Idempotent: collecting the same text twice returns the existing entry.
@@ -32,7 +33,7 @@ async def add_word(
         m, e = await repo.define_word(text, client)
         meaning = meaning or m
         example = example or e
-    entry = repo.create_word(db, client_id, text, payload.scenario_id, meaning, example, payload.kind)
+    entry = repo.create_word(db, client_id, text, payload.scenario_id, meaning, example, payload.kind, timezone)
     return Word.model_validate(entry)
 
 
@@ -54,11 +55,15 @@ def review_word(
     payload: WordReview,
     db: Session = Depends(get_db),
     client_id: str = Depends(get_client_id),
+    timezone: str = Depends(get_timezone),
 ) -> Word:
     entry = repo.get_word(db, client_id, word_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Word not found")
-    return Word.model_validate(repo.review_word(db, entry, payload.remembered))
+    try:
+        return Word.model_validate(repo.review_word(db, entry, payload.remembered, timezone))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Word not found") from exc
 
 
 @router.patch("/words/{word_id}", response_model=Word)
@@ -71,10 +76,10 @@ def update_word(
     entry = repo.get_word(db, client_id, word_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Word not found")
-    entry.mastered = payload.mastered
-    db.commit()
-    db.refresh(entry)
-    return Word.model_validate(entry)
+    try:
+        return Word.model_validate(repo.set_mastered(db, entry, payload.mastered))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Word not found") from exc
 
 
 @router.delete("/words/{word_id}", status_code=204)
@@ -84,4 +89,7 @@ def remove_word(
     entry = repo.get_word(db, client_id, word_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Word not found")
-    repo.delete_word(db, entry)
+    try:
+        repo.delete_word(db, entry)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Word not found") from exc
