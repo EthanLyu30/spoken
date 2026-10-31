@@ -145,6 +145,17 @@ def test_browser_samples_have_separate_source_and_reject_extra_content():
         assert data['input_tokens'] is None
 
 
+def test_browser_playback_stage_is_accepted_and_remains_separate_from_backend_usage():
+    with TestClient(app) as client:
+        owner = account(client, admin=True)
+        assert client.post('/api/telemetry/client', json={'operation': 'speech.playback',
+            'duration_ms': 2300, 'engine': 'xfyun', 'release': 'qa-playback-stage'}).status_code == 202
+        data = client.get('/api/admin/overview', headers=owner,
+            params={'source': 'browser', 'operation': 'speech.playback', 'release': 'qa-playback-stage'}).json()
+        assert data['count'] == 1
+        assert data['input_tokens'] is None
+
+
 def test_parallel_contexts_do_not_share_spans_or_private_attributes():
     from app.core.observability import TraceContext, span
     async def run():

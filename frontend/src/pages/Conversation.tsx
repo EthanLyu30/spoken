@@ -20,7 +20,6 @@ import { scenarioIcons } from "../lib/icons";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
 import {
   postChat,
-  postAsr,
   postHint,
   postFeedback,
   streamChat,
@@ -426,9 +425,7 @@ export default function Conversation() {
         },
         preferLocalAsr: isMoonshineTranscriptionReady,
         transcribe: (pcm, engine, signal) =>
-          engine === "local"
-            ? transcribeSpeech(pcm, signal)
-            : postAsr(pcm, signal),
+          transcribeSpeech(pcm, signal, engine === "cloud" ? "cloud" : "auto"),
         onPartial: (t) => setLiveCaption(t),
         reply: async (userText, pcm, onSpeaking, signal) => {
           signal.throwIfAborted();

@@ -25,13 +25,13 @@ export async function transcribeSpeechWith(
   return (await backends.cloud(pcm)).trim();
 }
 
-export async function transcribeSpeech(pcm: ArrayBuffer, signal?: AbortSignal): Promise<string> {
+export async function transcribeSpeech(pcm: ArrayBuffer, signal?: AbortSignal, mode: "auto" | "cloud" = "auto"): Promise<string> {
   const start = performance.now();
   const measurement: { engine: "local" | "xfyun" | "unknown" } = { engine: "unknown" };
   try {
   signal?.throwIfAborted();
   const text = await transcribeSpeechWith(pcm, {
-    isMoonshineReady: isMoonshineTranscriptionReady,
+    isMoonshineReady: () => mode !== "cloud" && isMoonshineTranscriptionReady(),
     moonshine: async (audio) => {
       measurement.engine = "local";
       const { transcribeWithMoonshine } = await import(

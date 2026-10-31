@@ -17,6 +17,7 @@ const names: Record<string, string> = {
   "POST /api/tts": "语音合成", "asr.finalize": "语音识别 · 收尾等待",
   "asr.transcribe": "录音识别 · 浏览器总耗时", "speech.first_audio": "语音队列 · 首声等待",
   "speech.complete": "语音队列 · 完成（含播放）",
+  "speech.playback": "语音队列 · 播放阶段（首声至结束）",
   "voice.first_audio": "整轮语音 · 检测到说话结束至首声", "voice.complete": "整轮语音 · 完成（含播放）",
 };
 const ms = (n: number | null | undefined) => n == null ? "—" : n >= 1000 ? `${(n / 1000).toFixed(2)} s` : `${Math.round(n)} ms`;

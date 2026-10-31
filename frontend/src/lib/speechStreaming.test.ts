@@ -43,6 +43,8 @@ it("starts cloud audio before the streamed response finishes and cancels the rea
 });
 
 it("cancels an outstanding cloud synthesis when the queue is stopped", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+  vi.stubGlobal("fetch", fetcher);
   let signal: AbortSignal | undefined;
   mocks.fetchTtsStream.mockImplementation((_text, _id, abortSignal) => {
     signal = abortSignal;
@@ -54,6 +56,22 @@ it("cancels an outstanding cloud synthesis when the queue is stopped", async () 
   queue.stop();
   await queue.end("Hello there. ");
   expect(signal?.aborted).toBe(true);
+  expect(fetcher.mock.calls.map(([, options]) => JSON.parse(options.body))).not.toContainEqual(expect.objectContaining({ operation: "speech.playback" }));
+});
+
+it("marks the playback stage cancelled when stopped after first sound", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+  vi.stubGlobal("fetch", fetcher);
+  let controller: ReadableStreamDefaultController<Uint8Array>;
+  mocks.fetchTtsStream.mockResolvedValue(new Response(new ReadableStream({ start(c) { controller = c; } })));
+  const queue = createSpeechQueue("cafe");
+  const done = queue.end("Hello there.");
+  await vi.waitFor(() => expect(mocks.fetchTtsStream).toHaveBeenCalledOnce());
+  controller!.enqueue(new Uint8Array([0, 64, 0, 64]));
+  await queue.started;
+  queue.stop();
+  await done;
+  await vi.waitFor(() => expect(fetcher.mock.calls.map(([, options]) => JSON.parse(options.body))).toContainEqual(expect.objectContaining({ operation: "speech.playback", outcome: "cancelled" })));
 });
 
 it("reports a failure after first playback as failure rather than successful completion", async () => {
@@ -72,4 +90,30 @@ it("reports a failure after first playback as failure rather than successful com
   await expect(finished).rejects.toThrow("PCM stream interrupted");
   const event = fetcher.mock.calls.map(([, options]) => JSON.parse(options.body)).find(item => item.operation === "speech.complete");
   expect(event.outcome).toBe("error");
+  expect(fetcher.mock.calls.map(([, options]) => JSON.parse(options.body))).toContainEqual(expect.objectContaining({ operation: "speech.playback", outcome: "error" }));
+});
+
+it("measures playback from first sound rather than including the preceding synthesis wait", async () => {
+  let now = 100;
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+  vi.stubGlobal("fetch", fetcher);
+  let controller: ReadableStreamDefaultController<Uint8Array>;
+  mocks.fetchTtsStream.mockResolvedValue(new Response(new ReadableStream({ start(c) { controller = c; } })));
+  const queue = createSpeechQueue("cafe", "e".repeat(32));
+  try {
+    const done = queue.end("Hello there.");
+    await vi.waitFor(() => expect(mocks.fetchTtsStream).toHaveBeenCalledOnce());
+    now = 500;
+    controller!.enqueue(new Uint8Array([0, 64, 0, 64]));
+    await queue.started;
+    now = 2800;
+    controller!.close();
+    sources[0].onended?.();
+    await done;
+    const events = fetcher.mock.calls.map(([, options]) => JSON.parse(options.body));
+    expect(events).toContainEqual(expect.objectContaining({ operation: "speech.first_audio", duration_ms: 400 }));
+    expect(events).toContainEqual(expect.objectContaining({ operation: "speech.playback", duration_ms: 2300, outcome: "ok", interaction_id: "e".repeat(32) }));
+    expect(events).toContainEqual(expect.objectContaining({ operation: "speech.complete", duration_ms: 2700 }));
+  } finally { queue.stop(); clock.mockRestore(); }
 });

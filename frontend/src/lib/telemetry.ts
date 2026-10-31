@@ -1,6 +1,6 @@
 import type { AsrStream } from "./asrStream";
 
-type Operation = "asr.transcribe" | "asr.finalize" | "speech.first_audio" | "speech.complete" | "voice.first_audio" | "voice.complete";
+type Operation = "asr.transcribe" | "asr.finalize" | "speech.first_audio" | "speech.playback" | "speech.complete" | "voice.first_audio" | "voice.complete";
 type Engine = "local" | "xfyun" | "browser" | "unknown";
 type Transport = "direct" | "relay" | "buffered" | "local" | "unknown";
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "";

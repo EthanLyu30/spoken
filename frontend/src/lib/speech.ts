@@ -334,6 +334,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
   const queueAt = performance.now();
   let playbackEngine: "local" | "xfyun" | "browser" | "unknown" = "unknown";
   let firstAudio = false;
+  let firstAudioAt: number | undefined;
   current?.stop();
   current = null;
   const voiceAtStart = useVoice.getState();
@@ -361,7 +362,8 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
   const didStart = () => {
     if (!firstAudio) {
       firstAudio = true;
-      reportTiming("speech.first_audio", performance.now() - queueAt, { engine: playbackEngine, interactionId });
+      firstAudioAt = performance.now();
+      reportTiming("speech.first_audio", firstAudioAt - queueAt, { engine: playbackEngine, interactionId });
     }
     markStarted?.(); markStarted = undefined;
   };
@@ -541,9 +543,12 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
     } finally {
       abandonPrefetch();
       abandonStream();
-      if (spokenUpto > 0) reportTiming("speech.complete", performance.now() - queueAt, {
-        engine: playbackEngine, interactionId, outcome: stopped ? "cancelled" : completedNormally && firstAudio && !hadFailure ? "ok" : "error",
-      });
+      if (spokenUpto > 0) {
+        const completedAt = performance.now();
+        const outcome = stopped ? "cancelled" : completedNormally && firstAudio && !hadFailure ? "ok" : "error";
+        if (firstAudioAt !== undefined) reportTiming("speech.playback", completedAt - firstAudioAt, { engine: playbackEngine, interactionId, outcome });
+        reportTiming("speech.complete", completedAt - queueAt, { engine: playbackEngine, interactionId, outcome });
+      }
     }
   })();
   void consumer.catch(() => undefined); // end() observes failures after generation
