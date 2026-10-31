@@ -42,7 +42,9 @@ async def get_overview(request: Request, options: dict = Depends(filters), db: S
 
 
 def _overview(request, options, db):
+    from app.services.monitoring import visitor_summary, state_time
     data = overview(db, **options)
+    data['visitors'] = visitor_summary(db, hours=options['hours'])
     sink = getattr(request.app.state, "telemetry_sink", None)
     oldest = db.scalar(select(func.min(TelemetryRecord.started_at)))
     source_count = db.scalar(select(func.count()).select_from(TelemetryRecord).where(TelemetryRecord.source == options["source"]))
@@ -55,6 +57,11 @@ def _overview(request, options, db):
         "dropped_since_restart": sink.dropped if sink else 0,
         "write_errors_since_restart": sink.write_errors if sink else 0,
         "active": sink is not None and get_settings().telemetry_enabled}
+    retention = getattr(request.app.state, 'telemetry_retention', None)
+    data['collection']['cleanup'] = {'active': retention is not None,
+        'interval_seconds': retention.interval_seconds if retention else 3600,
+        'last_success_at': state_time(db, 'retention_cleaned'),
+        'failures_since_restart': retention.failures if retention else 0}
     return data
 
 

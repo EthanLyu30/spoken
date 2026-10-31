@@ -11,6 +11,11 @@ const overview = { source: "server", count: 0, success_rate: null, errors: 0, ti
   facets: { operations: ["POST /api/chat/stream", "POST /api/interview/score"], models: [], releases: [] },
   collection: { active: true, retention_days: 14, max_records: 20000, oldest_at: null, dropped_since_restart: 0, write_errors_since_restart: 0 } };
 const user = { id: 7, email: "owner@example.com", display_name: "Owner", avatar_url: "", created_at: "2026-10-30", is_admin: true };
+const monitoring = {
+  visitors: { guest_uv: 12, registered_active: 3, enabled: true, started_at: '2026-10-31T01:00:00Z', hours: 24, max_records: 20000, at_capacity: false },
+  pricing: { configured_model: 'deepseek-flash', official_version: 'DeepSeek-V4.1-Flash-1017', checked_at: '2026-10-31', source_url: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing/', currency: 'CNY', per_tokens: 1000000,
+    rates: { input_hit: [.02, .04], input_miss: [1, 2], output: [4, 8] }, model_records: 3, priced_records: 2, unknown_usage_records: 1, unpriced_records: 0, min_cny: .002, max_cny: .006 },
+};
 const trace = { trace_id: "a".repeat(32), started_at: "2026-10-30T02:00:00Z", source: "server", operation: "POST /api/chat/stream", outcome: "ok", duration_ms: 1200, ttft_ms: 250, model: "deepseek-flash", input_tokens: 20, output_tokens: 10, release: "qa", spans: [{ id: "b".repeat(16), parent_id: null, name: "deepseek.stream", offset_ms: 50, duration_ms: 1100, outcome: "ok", attributes: { provider: "deepseek" } }] };
 const fetcher = vi.fn();
 function show() { return render(<MemoryRouter><Admin /></MemoryRouter>); }
@@ -26,6 +31,34 @@ it("does not load private data for guests or ordinary accounts", () => {
   show();
   expect(screen.getByText(/仅管理员/)).toBeVisible();
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+it('shows distinct visitor metrics, configured model, rates and honest cost coverage', async () => {
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes('/overview')
+    ? { ...overview, ...monitoring } : { items: [], total: 0 })));
+  show(); await screen.findByText(/暂无调用记录/);
+  const metrics = screen.getByRole('region', { name: '运行指标' });
+  expect(within(metrics).getByText('未登录访客 UV')).toBeVisible();
+  expect(within(metrics).getByText('12')).toBeVisible();
+  expect(within(metrics).getByText('登录活跃用户')).toBeVisible();
+  expect(within(metrics).getByText('3')).toBeVisible();
+  expect(screen.getByText('deepseek-flash')).toBeVisible();
+  expect(screen.getByText(/输入 ¥1–2/)).toBeVisible();
+  expect(screen.getByText(/输出 ¥4–8/)).toBeVisible();
+  expect(screen.getByText(/¥0.0020–0.0060/)).toBeVisible();
+  expect(screen.getByText(/2 \/ 3/)).toBeVisible();
+});
+
+it('explains both observation sources and the periodic retention policy', async () => {
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes('/overview')
+    ? { ...overview, ...monitoring, collection: { ...overview.collection, cleanup: { active: true, interval_seconds: 3600, last_success_at: '2026-10-31T02:00:00Z', failures_since_restart: 0 } } }
+    : { items: [], total: 0 })));
+  show(); await screen.findByText(/暂无调用记录/);
+  expect(screen.getByText(/服务端视角/)).toBeVisible();
+  expect(screen.getByText(/每 1 小时/)).toBeVisible();
+  expect(screen.getByText(/下次启动补清理/)).toBeVisible();
+  fireEvent.click(screen.getByRole('tab', { name: '浏览器体验' }));
+  expect(await screen.findByText(/用户端视角/)).toBeVisible();
 });
 
 it("starts with all operations for both independently measured sources", async () => {

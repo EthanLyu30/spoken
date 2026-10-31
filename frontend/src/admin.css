@@ -148,3 +148,27 @@
 @media(max-width:780px){.admin-panels{grid-template-columns:minmax(0,1fr)}.admin-usage dl{display:flex;gap:20px;flex-wrap:wrap}.admin-usage dl>div{display:block;flex:1;border-bottom:0;padding-bottom:0;min-width:100px}.admin-usage dd{margin-top:7px}.admin-usage dt{white-space:nowrap}.admin-usage-coverage{justify-content:flex-start;gap:24px}.admin-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-tabs{width:100%;margin:0}.admin-tabs button{flex:1}.admin-toolbar label{flex:1;min-width:110px}.admin-toolbar label.admin-operation{min-width:100%!important;order:1}.admin-toolbar select{width:100%;max-width:none}.admin-heading-actions{flex-direction:column;align-items:flex-end;gap:9px}}
 @media(max-width:480px){.admin-page{padding:20px 15px}.admin-heading{align-items:flex-start;gap:10px}.admin-heading h1{font-size:25px}.admin-heading p{font-size:12px;max-width:210px}.admin-eyebrow{font-size:12px;letter-spacing:.1px}.admin-heading-actions{padding-top:2px}.admin-refresh{padding:8px 10px}.admin-metrics{gap:10px}.admin-metrics article{padding:13px}.admin-metrics strong{font-size:29px}.admin-metrics article>span{font-size:12px;gap:5px}.admin-metrics small{font-size:12px}.admin-panels{gap:12px}.admin-toolbar{padding:11px}.admin-scope-caption{gap:4px}.admin-panel-heading{padding:13px 15px}.admin-page td,.admin-page th{padding-left:15px;padding-right:15px}.admin-detail{top:82px;right:10px;bottom:10px;width:calc(100vw - 20px);padding:20px}.admin-detail h2{font-size:18px}.admin-table-controls{width:100%;justify-content:space-between;gap:8px}.admin-table-controls label{font-size:12px}.admin-table-tools{padding:0 15px 12px}.admin-trace-lookup{width:100%;gap:7px}.admin-trace-lookup input{flex:1;width:120px}.admin-trace-lookup label{font-size:12px;gap:4px}.admin-trace-lookup label svg{display:none}.admin-trace-lookup button{padding:7px 8px;font-size:12px}.admin-status-line{padding:9px 15px;gap:8px;flex-wrap:wrap}.admin-pagination{padding:11px 15px}.admin-usage-coverage{gap:12px}.admin-locked{padding-top:70px}}
 @media(max-width:480px){.admin-traces>.admin-panel-heading{grid-template-columns:1fr}.admin-toolbar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.admin-tabs{grid-column:1/-1}.admin-toolbar label{min-width:0}.admin-toolbar label.admin-operation{grid-column:1/-1;grid-row:2;min-width:0!important;order:0}.admin-toolbar select{padding-left:6px;padding-right:6px}.admin-table-controls{order:2}}
+/* Audience and prices share the existing compact operational layout. */
+.admin-metrics{grid-template-columns:repeat(6,minmax(0,1fr))}
+.admin-metrics article{padding-left:14px;padding-right:14px}
+.admin-perspective{font-size:12px;line-height:1.7;color:var(--admin-muted);margin:-5px 1px 12px}
+.admin-model-name{font:12px ui-monospace,monospace;color:#805e42;background:#f6eee3;border-radius:4px;padding:3px 5px;max-width:150px;overflow-wrap:anywhere}
+.admin-price-details{margin:0 18px 7px;font-size:12px;color:#866447;line-height:1.8}
+.admin-price-details summary{cursor:pointer}
+.admin-price-details summary span{display:inline-block;margin-right:7px}
+.admin-price-details summary:focus-visible{outline:2px solid #da785b;outline-offset:3px}
+.admin-price-details>div{padding:7px 0 1px;border-top:1px solid var(--admin-line);margin-top:6px}
+.admin-price-details p{padding:0;margin:5px 0;font-size:12px}
+.admin-price-details a{color:#a95538;text-decoration:underline}
+.admin-usage dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}
+.admin-usage dl>div{display:block;min-width:0;padding:7px 0;border-bottom:1px solid #f0e8df}
+.admin-usage dd{margin-top:5px;line-height:1.2}
+.admin-usage dd.admin-cost-value{font-size:14px;white-space:normal;overflow-wrap:anywhere;min-height:24px;display:flex;align-items:center}
+.admin-usage dt{font-size:12px}
+.admin-row-cost{font-size:12px;font-variant-numeric:tabular-nums;color:#80654d!important}
+.admin-page td,.admin-page th{padding-left:14px;padding-right:14px}
+.admin-footnote p{margin:2px 0 0}
+.admin-detail-cost{font-size:14px;color:#79573f;margin:0 0 15px}
+.admin-detail-cost small{display:block;font-size:12px;color:var(--admin-muted);margin-top:4px;line-height:1.7}
+@media(max-width:1150px){.admin-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){.admin-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-usage dl{gap:0 18px}.admin-price-details{margin-left:15px;margin-right:15px}}

@@ -5,19 +5,30 @@ export interface AdminFilters {
   hours: number; source: "server" | "browser"; operation: string; model: string; release: string; outcome: string;
 }
 type Percentiles = { p50: number | null; p95: number | null; p99: number | null };
+export interface AdminPricing {
+  configured_model: string; official_version: string; checked_at: string; source_url: string;
+  currency: string; per_tokens: number; rates: { input_hit: number[]; input_miss: number[]; output: number[] };
+  model_records: number; priced_records: number; unknown_usage_records: number; unpriced_records: number;
+  min_cny: number | null; max_cny: number | null;
+}
 export interface AdminOverview {
+  visitors?: { guest_uv: number | null; registered_active: number | null; enabled: boolean;
+    started_at: string | null; hours: number; max_records: number; at_capacity: boolean };
+  pricing?: AdminPricing;
   source: "server" | "browser"; count: number; success_rate: number | null;
   errors: number; timeouts: number; cancelled: number;
   latency: Percentiles; ttft: Percentiles; ttft_known?: number; input_tokens: number | null; output_tokens: number | null; usage_known: number;
   operations: string[]; facets?: { operations: string[]; models: string[]; releases: string[] };
   trend: { time: string; operation: string; count: number; p95: number | null }[];
-  collection: { active: boolean; retention_days: number; max_records: number; source_budget?: number; at_capacity?: boolean; oldest_at: string | null; dropped_since_restart: number; write_errors_since_restart: number };
+  collection: { active: boolean; retention_days: number; max_records: number; source_budget?: number; at_capacity?: boolean; oldest_at: string | null; dropped_since_restart: number; write_errors_since_restart: number;
+    cleanup?: { active: boolean; interval_seconds: number; last_success_at: string | null; failures_since_restart: number } };
 }
 export interface AdminTrace {
   interaction_id?: string | null; related?: AdminTrace[];
   trace_id: string; started_at: string; operation: string; source: string; outcome: string;
   duration_ms: number; http_status: number | null; ttft_ms: number | null; model: string | null;
   error_type?: string | null; error_cause_type?: string | null;
+  cost_min_cny?: number | null; cost_max_cny?: number | null;
   input_tokens: number | null; output_tokens: number | null; release: string;
   spans?: { id: string; parent_id: string | null; name: string; offset_ms: number; duration_ms: number;
     outcome: string; attributes: Record<string, string | number | boolean> }[];

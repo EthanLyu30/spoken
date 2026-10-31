@@ -4,6 +4,7 @@ import { DictionaryProvider } from "./components/dictionary/DictionaryProvider";
 import { Onboarding } from "./components/Onboarding";
 import { AppHeader } from "./components/AppHeader";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
+import { SiteVisitTracker } from "./components/SiteVisitTracker";
 
 // Route-level code splitting: each page ships as its own chunk and loads on
 // navigation, so the initial bundle (Home) stays small. Heavy deps that only a
@@ -28,6 +29,7 @@ export default function App() {
   const section = location.pathname.split("/")[1] || "home";
   return (
     <DictionaryProvider>
+      <SiteVisitTracker />
       <div className={`app-route route-${section}`}>
         {!focused && <AppHeader />}
         <RouteErrorBoundary key={location.pathname}>

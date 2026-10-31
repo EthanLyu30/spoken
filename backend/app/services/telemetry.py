@@ -69,21 +69,71 @@ def configured_bootstrap_admin():
         logging.getLogger(__name__).warning('Administrator bootstrap unavailable: %s', type(exc).__name__)
 
 
-def persist_batch(records: list[dict]) -> None:
+def _prune_traces(db, now) -> None:
     settings = get_settings()
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=settings.telemetry_retention_days)
+    cutoff = now - timedelta(days=settings.telemetry_retention_days)
+    db.execute(delete(TelemetryRecord).where(TelemetryRecord.started_at < cutoff))
+    server_budget = settings.telemetry_max_records * 3 // 4
+    for source, budget in (("server", server_budget), ("browser", settings.telemetry_max_records - server_budget)):
+        oldest = db.scalar(select(TelemetryRecord.id).where(TelemetryRecord.source == source)
+            .order_by(TelemetryRecord.id.desc()).offset(budget).limit(1))
+        if oldest is not None:
+            db.execute(delete(TelemetryRecord).where(TelemetryRecord.source == source, TelemetryRecord.id <= oldest))
+
+
+def persist_batch(records: list[dict]) -> None:
     with SessionLocal() as db:
         db.add_all(TelemetryRecord(**r) for r in records)
         db.flush()
-        db.execute(delete(TelemetryRecord).where(TelemetryRecord.started_at < cutoff))
-        # Browser samples cannot exhaust the retention budget of trusted traces.
-        server_budget = settings.telemetry_max_records * 3 // 4
-        for source, budget in (("server", server_budget), ("browser", settings.telemetry_max_records - server_budget)):
-            oldest = db.scalar(select(TelemetryRecord.id).where(TelemetryRecord.source == source)
-                .order_by(TelemetryRecord.id.desc()).offset(budget).limit(1))
-            if oldest is not None:
-                db.execute(delete(TelemetryRecord).where(TelemetryRecord.source == source, TelemetryRecord.id <= oldest))
+        _prune_traces(db, datetime.now(timezone.utc).replace(tzinfo=None))
         db.commit()
+
+
+def cleanup_retained_data():
+    from app.services.monitoring import initialize_visitors, mark_state, prune_visits, utcnow
+    with SessionLocal() as db:
+        now = utcnow()
+        initialize_visitors(db, now)
+        _prune_traces(db, now)
+        prune_visits(db, now)
+        mark_state(db, 'retention_cleaned', now)
+        db.commit()
+
+
+class RetentionWorker:
+    """Startup and idle cleanup; no dependence on incoming measurements."""
+    def __init__(self, interval_seconds=3600, cleanup=None):
+        self.interval_seconds = interval_seconds
+        self.cleanup = cleanup or cleanup_retained_data
+        self.failures = 0
+        self.stop = asyncio.Event()
+        self.worker = None
+
+    async def sweep(self):
+        try:
+            await asyncio.to_thread(self.cleanup)
+        except Exception as exc:
+            self.failures += 1
+            logging.getLogger(__name__).warning('Monitoring cleanup failed: %s', type(exc).__name__)
+
+    async def start(self):
+        await self.sweep()
+        self.worker = asyncio.create_task(self._run())
+
+    async def _run(self):
+        while not self.stop.is_set():
+            try:
+                await asyncio.wait_for(self.stop.wait(), timeout=self.interval_seconds)
+            except TimeoutError:
+                await self.sweep()
+
+    async def close(self):
+        self.stop.set()
+        if self.worker is not None:
+            try:
+                await asyncio.wait_for(self.worker, timeout=5)
+            except TimeoutError:
+                self.worker.cancel()
 
 
 class TelemetrySink:
@@ -171,19 +221,24 @@ def conditions(hours=24, source="server", operation=None, model=None, release=No
 
 
 def serialize(record, *, detail=False):
+    from app.services.model_pricing import record_reference_cost
     out = {key: getattr(record, key) for key in ("trace_id", "interaction_id", "operation", "source", "outcome", "duration_ms",
         "http_status", "ttft_ms", "model", "input_tokens", "output_tokens", "release",
         "error_type", "error_cause_type")}
     out["started_at"] = record.started_at.isoformat(timespec="milliseconds") + "Z"
+    cost = record_reference_cost(record, source=record.source)
+    out['cost_min_cny'] = cost[0] if cost is not None else None
+    out['cost_max_cny'] = cost[1] if cost is not None else None
     if detail:
         out["spans"] = json.loads(record.spans_json)
     return out
 
 
 def overview(db, **filters):
+    from app.services.model_pricing import pricing_summary
     rows = db.execute(select(TelemetryRecord.duration_ms, TelemetryRecord.ttft_ms,
         TelemetryRecord.outcome, TelemetryRecord.input_tokens, TelemetryRecord.output_tokens,
-        TelemetryRecord.started_at, TelemetryRecord.operation).where(*conditions(**filters))).all()
+        TelemetryRecord.started_at, TelemetryRecord.operation, TelemetryRecord.model).where(*conditions(**filters))).all()
     completed = [r for r in rows if r.outcome != "cancelled"]
     known = [r for r in rows if r.input_tokens is not None and r.output_tokens is not None]
     buckets = {}
@@ -196,6 +251,7 @@ def overview(db, **filters):
                                   .distinct().order_by(column).limit(100)).all())
               for name, column in (("operations", TelemetryRecord.operation), ("models", TelemetryRecord.model), ("releases", TelemetryRecord.release))}
     return {"source": filters.get("source", "server"), "count": len(rows), "facets": facets,
+        "pricing": pricing_summary(rows, source=filters.get('source', 'server')),
         "success_rate": sum(r.outcome == "ok" for r in completed) / len(completed) if completed else None,
         "errors": sum(r.outcome == "error" for r in rows), "timeouts": sum(r.outcome == "timeout" for r in rows),
         "cancelled": sum(r.outcome == "cancelled" for r in rows),

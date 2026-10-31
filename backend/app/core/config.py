@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     telemetry_enabled: bool = True
     telemetry_retention_days: int = Field(default=14, ge=1, le=90)
     telemetry_max_records: int = Field(default=20_000, ge=100, le=100_000)
+    visitor_max_records: int = Field(default=20_000, ge=100, le=100_000)
     # Optional one-shot owner binding for hosts without a server shell.
     admin_bootstrap_email: str = ""
     # Change only to explicitly authorize another one-shot server-side attempt.

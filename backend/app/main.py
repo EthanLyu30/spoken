@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.middleware import SelectiveGZipMiddleware
 from app.core.observability import TelemetryMiddleware
-from app.services.telemetry import TelemetrySink, configured_bootstrap_admin
+from app.services.telemetry import TelemetrySink, RetentionWorker, configured_bootstrap_admin
 from app.api import admin, telemetry
 from app.api import (
     asr,
@@ -43,12 +43,17 @@ async def lifespan(application):
     await asyncio.to_thread(configured_bootstrap_admin)
     sink = TelemetrySink() if get_settings().telemetry_enabled else None
     application.state.telemetry_sink = sink
+    retention = RetentionWorker()
+    application.state.telemetry_retention = retention
+    await retention.start()
     try:
         yield
     finally:
+        await retention.close()
         if sink:
             await sink.close()
         application.state.telemetry_sink = None
+        application.state.telemetry_retention = None
 
 app = FastAPI(
     title=f"{settings.app_name} API",
