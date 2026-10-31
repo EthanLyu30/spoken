@@ -31,6 +31,23 @@ it("shows history while the optional latest report is still pending", async () =
   expect(result.current.sessions).toEqual([session]);
   expect(result.current.latest).toBeNull();
 });
+
+it("resumes history requests when returning during a refresh with fast statistics",async()=>{
+  const first=renderHook(()=>useProgressData("account-refresh"));
+  await waitFor(()=>expect(first.result.current.practicePending).toBe(false));
+  api.getSessions.mockReturnValueOnce(new Promise(()=>{})).mockResolvedValueOnce([{...session,id:3}]);
+  api.getPractice.mockReturnValueOnce(new Promise(()=>{})).mockResolvedValueOnce([{id:3}]);
+  api.getStats.mockResolvedValueOnce({total_sessions:90});
+  api.getInsights.mockReturnValueOnce(new Promise(()=>{}));
+  act(()=>first.result.current.reload());
+  await waitFor(()=>expect(first.result.current.stats?.total_sessions).toBe(90));
+  first.unmount();
+  const second=renderHook(()=>useProgressData("account-refresh"));
+  await waitFor(()=>expect(api.getSessions).toHaveBeenCalledTimes(3));
+  await waitFor(()=>expect(second.result.current.practice[0]?.id).toBe(3));
+  expect(second.result.current.sessions[0]?.id).toBe(3);
+  expect(api.getInsights).toHaveBeenCalledTimes(3);
+});
 it("does not fail history when optional statistics fail", async () => {
   api.getStats.mockRejectedValue(new Error("offline"));
   const { result } = renderHook(() => useProgressData("device-b"));

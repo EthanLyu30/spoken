@@ -17,6 +17,8 @@ export interface ProgressData {
   errors: string[];
   practicePending: boolean;
   statsPending: boolean;
+  sessionsPending: boolean;
+  insightsPending: boolean;
 }
 const cache = new Map<string, { at: number; data: ProgressData }>();
 let generation = 0;

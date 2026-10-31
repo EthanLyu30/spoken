@@ -20,6 +20,12 @@ vi.mock("../lib/speech", () => ({
 }));
 import Profile from "./Profile";
 
+it("shows the authoritative conversation total rather than the recent-history length",async()=>{
+  mocks.getStats.mockResolvedValueOnce({total_sessions:78});
+  render(<MemoryRouter><Profile/></MemoryRouter>);
+  expect(await screen.findByText("78")).toBeVisible();
+});
+
 it("lets the user cancel a preview while audio is being prepared", async () => {
   let finish:()=>void=()=>{};
   const stop=vi.fn(()=>finish());

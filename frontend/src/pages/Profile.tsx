@@ -46,14 +46,14 @@ export default function Profile() {
   const words = useWords((s) => s.words);
   const ensureLoaded = useWords((s) => s.ensureLoaded);
   const userId = useAuth((s) => s.user?.id ?? null);
-  const { sessions, stats, practice, status, reload } = useProfileData(userId);
+  const { sessions, stats, practice, status, errors, reload } = useProfileData(userId, !settings);
   const { hash } = useLocation();
 
   // Re-fetch when the account changes (login/logout) so stats/history follow
   // the new owner; the word bag is reset+refetched by the auth store itself.
   useEffect(() => {
-    ensureLoaded();
-  }, [ensureLoaded, userId]);
+    if (!settings) ensureLoaded();
+  }, [ensureLoaded, userId, settings]);
 
   useEffect(() => {
     if (hash && !settings && status === "ready")
@@ -62,7 +62,7 @@ export default function Profile() {
         ?.scrollIntoView({ block: "start" });
   }, [hash, settings, status]);
 
-  const sessionCount = sessions.length;
+  const sessionCount = stats?.total_sessions ?? sessions.length;
   const wordCount = words.length;
   const best = sessions.reduce((m, s) => Math.max(m, s.overall), 0);
   const avg = sessions.length
@@ -187,7 +187,7 @@ export default function Profile() {
               level={level}
               xp={xp}
               xpNext={xpNext}
-              statsKnown={status === "ready"}
+              statsKnown={stats !== null}
             />
             <nav className="profile-tabs" aria-label="个人中心设置">
               <Link to="/me" className={!settings ? "active" : ""}>
@@ -216,11 +216,15 @@ export default function Profile() {
               </div>
             ) : (
               <>
+                {errors.length > 0 && <div role="status" className="learning-notice">
+                  部分进度暂未更新，已加载的记录仍可查看。
+                  <button type="button" onClick={reload}>重试读取</button>
+                </div>}
                 <div className="profile-stats mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <Stat
                     icon={<MessageSquare className="h-4 w-4" />}
                     value={sessionCount}
-                    label="练习次数"
+                    label="对话练习次数"
                   />
                   <Stat
                     icon={<Sparkles className="h-4 w-4" />}
@@ -235,7 +239,7 @@ export default function Profile() {
                   <Stat
                     icon={<Trophy className="h-4 w-4" />}
                     value={avg || "—"}
-                    label="平均分"
+                    label="近期平均分"
                   />
                 </div>
 

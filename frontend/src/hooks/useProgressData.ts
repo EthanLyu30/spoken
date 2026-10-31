@@ -25,6 +25,8 @@ const empty = (owner: string): ProgressData => ({
   errors: [],
   practicePending: true,
   statsPending: true,
+  sessionsPending: true,
+  insightsPending: true,
 });
 
 /** Independent sections: a slow report or analysis never hides readable history. */
@@ -46,7 +48,7 @@ export function useProgressData(owner: string) {
       (previous) =>
         cached ??
         (previous.owner === owner && previous.status === "ready"
-          ? { ...previous, errors: [] }
+          ? { ...previous, errors: [], sessionsPending: true, practicePending: true, statsPending: true, insightsPending: true }
           : empty(owner)),
     );
     const update = (patch: Partial<ProgressData>) => {
@@ -78,17 +80,17 @@ export function useProgressData(owner: string) {
       getSession(id, controller.signal)
         .then((latest) => update({ latest }))
         .catch(() => failed("latest"));
-    if (!cached)
+    if (!cached || cached.sessionsPending || cached.errors.includes("sessions"))
       getSessions(controller.signal)
         .then((sessions) => {
           if (controller.signal.aborted) return;
-          update({ sessions, status: "ready", latest: null });
+          update({ sessions, status: "ready", latest: null, sessionsPending: false });
           if (sessions.length) void loadLatest(sessions[0].id);
         })
-        .catch(() => failed("sessions", { status: "error" }));
+        .catch(() => failed("sessions", { status: "error", sessionsPending: false }));
     else if (cached.sessions.length && !cached.latest)
       void loadLatest(cached.sessions[0].id);
-    if (!cached?.stats)
+    if (!cached?.stats || cached.statsPending || cached.errors.includes("stats"))
       getStats(controller.signal)
         .then((stats) => update({ stats, statsPending: false }))
         .catch(() => failed("stats", { statsPending: false }));
@@ -96,10 +98,10 @@ export function useProgressData(owner: string) {
       getPractice(undefined, 100, controller.signal)
         .then((practice) => update({ practice, practicePending: false }))
         .catch(() => failed("practice", { practicePending: false }));
-    if (!cached?.insights)
+    if (!cached?.insights || cached.insightsPending || cached.errors.includes("insights"))
       getInsights(controller.signal)
-        .then((insights) => update({ insights }))
-        .catch(() => failed("insights"));
+        .then((insights) => update({ insights, insightsPending: false }))
+        .catch(() => failed("insights", { insightsPending: false }));
     return () => controller.abort();
   }, [owner, attempt, revision]);
   return {
