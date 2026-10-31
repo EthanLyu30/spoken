@@ -45,6 +45,22 @@ def test_tts_returns_wav_audio():
         app.dependency_overrides.clear()
 
 
+def test_whole_audio_preserves_provider_pcm_and_natural_pauses():
+    import io
+    import wave
+    tone = array.array('h', [8000, -8000] * 1600)
+    pause = array.array('h', [0] * 8000)
+    pcm = (tone + pause + tone).tobytes()
+    app.dependency_overrides[get_tts_client] = lambda: _StubTts(pcm)
+    try:
+        response = client.post('/api/tts', json={'text': 'First sentence. Second sentence.'})
+        assert response.status_code == 200
+        with wave.open(io.BytesIO(response.content), 'rb') as audio:
+            assert audio.readframes(audio.getnframes()) == pcm
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_tts_uses_scenario_voice():
     stub = _StubTts()
     app.dependency_overrides[get_tts_client] = lambda: stub

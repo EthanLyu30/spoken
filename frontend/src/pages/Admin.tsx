@@ -15,9 +15,9 @@ const names: Record<string, string> = {
   "POST /api/interview/score": "Interview · 四题评分", "POST /api/asr": "录音识别",
   "POST /api/asr/session": "直连识别 · 授权", "POST /api/tts/stream": "语音合成 · 流式",
   "POST /api/tts": "语音合成", "asr.finalize": "语音识别 · 收尾等待",
-  "asr.transcribe": "录音识别 · 浏览器总耗时", "speech.first_audio": "语音队列 · 首声等待",
-  "speech.complete": "语音队列 · 完成（含播放）",
-  "speech.playback": "语音队列 · 播放阶段（首声至结束）",
+  "asr.transcribe": "录音识别 · 浏览器总耗时", "speech.first_audio": "语音播放 · 首声等待",
+  "speech.complete": "语音播放 · 完成（含播放）",
+  "speech.playback": "语音播放 · 播放阶段（首声至结束）",
   "voice.first_audio": "整轮语音 · 检测到说话结束至首声", "voice.complete": "整轮语音 · 完成（含播放）",
 };
 const ms = (n: number | null | undefined) => n == null ? "—" : n >= 1000 ? `${(n / 1000).toFixed(2)} s` : `${Math.round(n)} ms`;
@@ -170,7 +170,7 @@ export default function Admin() {
     {overviewError && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{overviewError}</span><button onClick={() => setRevision(v => v + 1)}>重试</button></p>}
     {overviewLoading && !data && <p className="admin-loading" role="status">正在读取运行概览…</p>}
     {data && <>
-      {filters.source === "browser" && <p className="admin-notice">浏览器上报可能缺失或被修改，独立于后端成功率与 Token 计量。语音队列首声不含之前的识别；整轮首声从检测到说话结束起计。</p>}
+      {filters.source === "browser" && <p className="admin-notice">浏览器上报可能缺失或被修改，独立于后端成功率与 Token 计量。朗读任务首声含等待文字与音频准备，不含之前的识别；整轮首声从检测到说话结束起计。</p>}
       {(!data.collection.active || data.collection.dropped_since_restart > 0 || data.collection.write_errors_since_restart > 0) && <p className="admin-notice" role="status">采集存在缺口：本进程启动后丢弃 {data.collection.dropped_since_restart} 条，写入失败 {data.collection.write_errors_since_restart} 次。{!data.collection.active && "采集未启用。"}</p>}
       {data.collection.at_capacity && <p className="admin-notice">此来源已达到 {data.collection.source_budget?.toLocaleString()} 条保留上限，时间窗可能不完整。以下统计基于当前保留记录。</p>}
       {data.visitors?.at_capacity && <p className="admin-notice">访客记录达到 {data.visitors.max_records.toLocaleString()} 条独立保留上限，UV 可能低于实际。</p>}

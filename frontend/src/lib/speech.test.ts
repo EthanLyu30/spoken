@@ -15,7 +15,7 @@ vi.mock("./api", () => ({
 vi.mock("../store/voice", () => ({
   useVoice: {
     getState: () => ({
-      engine: "browser",
+      engine: "local",
       vcn: null,
       browserVoiceURI: null,
       speed: null,
@@ -164,108 +164,39 @@ describe("cloud speech queue cleanup", () => {
     expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
   });
 
-  it("switches a streaming reply to Kokoro at the next sentence boundary", async () => {
-    mocks.fetchTtsUrl
-      .mockResolvedValueOnce("blob:first-cloud")
-      .mockResolvedValueOnce("blob:second-prefetch");
-    mocks.createObjectUrl.mockReturnValue("blob:second-kokoro");
-    mocks.synthesizeWithKokoro.mockResolvedValue({
-      audio: new Float32Array([0, 0.1]),
-      sampleRate: 24_000,
-    });
-
-    const queue = createSpeechQueue("cafe");
-    queue.feed("First. Second. ");
-    const done = queue.end("First. Second. ");
-    await vi.waitFor(() => {
-      expect(audioInstances).toHaveLength(1);
-      expect(mocks.fetchTtsUrl).toHaveBeenCalledTimes(2);
-    });
-
+  it("synthesizes one complete local reply after final text, without switching sentence voices", async () => {
     mocks.localReady = true;
-    audioInstances[0].onended?.();
-    await vi.waitFor(() => {
-      expect(mocks.synthesizeWithKokoro).toHaveBeenCalledWith(
-        "Second.",
-        expect.any(Number),
-      );
-      expect(audioInstances).toHaveLength(2);
-    });
-    expect(audioInstances[1].src).toBe("blob:second-kokoro");
-    audioInstances[1].onended?.();
-    await done;
-
-    expect(mocks.revokeObjectUrl).toHaveBeenCalledWith(
-      "blob:second-prefetch",
-    );
+    mocks.createObjectUrl.mockReturnValue("blob:local-whole");
+    mocks.synthesizeWithKokoro.mockResolvedValue({audio:new Float32Array([0,0.1]),sampleRate:24000});
+    const q=createSpeechQueue("cafe");
+    q.feed("First. ");
+    await new Promise(resolve=>setTimeout(resolve,0));
+    expect(mocks.synthesizeWithKokoro).not.toHaveBeenCalled();
+    const done=q.end("First. Second.");
+    await vi.waitFor(()=>expect(audioInstances).toHaveLength(1));
+    expect(mocks.synthesizeWithKokoro.mock.calls.map(call=>call[0])).toEqual(["First. Second."]);
+    mocks.localReady=false;
+    audioInstances[0].onended?.(); await done;
+    expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
   });
 
-  it("revokes prefetched audio when the queue is stopped before playback", async () => {
-    let resolvePrefetch: (url: string) => void = () => undefined;
-    mocks.fetchTtsUrl
-      .mockResolvedValueOnce("blob:first")
-      .mockImplementationOnce(
-        () =>
-          new Promise<string>((resolve) => {
-            resolvePrefetch = resolve;
-          }),
-      );
-
-    const queue = createSpeechQueue("cafe");
-    queue.feed("First. Second. ");
-
-    await vi.waitFor(() => {
-      expect(mocks.fetchTtsUrl).toHaveBeenCalledTimes(2);
-    });
-
-    queue.stop();
-    resolvePrefetch("blob:second");
-    await queue.end("First. Second. ");
-    await Promise.resolve();
-
-    expect(mocks.revokeObjectUrl).toHaveBeenCalledWith("blob:first");
-    expect(mocks.revokeObjectUrl).toHaveBeenCalledWith("blob:second");
+  it("global stop releases the active whole audio file", async () => {
+    mocks.fetchTtsUrl.mockResolvedValue("blob:whole");
+    const q=createSpeechQueue("cafe");
+    const done=q.end("First. Second.");
+    await vi.waitFor(()=>expect(audioInstances).toHaveLength(1));
+    stopSpeaking(); await done;
+    expect(mocks.revokeObjectUrl).toHaveBeenCalledWith("blob:whole");
   });
 
-  it("synthesizes the next local sentence while the current sentence is playing", async () => {
-    mocks.localReady = true;
-    mocks.createObjectUrl.mockReturnValueOnce("blob:local-first").mockReturnValueOnce("blob:local-next");
-    mocks.synthesizeWithKokoro.mockResolvedValue({ audio: new Float32Array([0, 0.1]), sampleRate: 24000 });
-    const queue = createSpeechQueue("cafe");
-    queue.feed("First. Second. ");
-    await vi.waitFor(() => expect(audioInstances).toHaveLength(1));
-    try {
-      await vi.waitFor(() => expect(mocks.synthesizeWithKokoro).toHaveBeenCalledTimes(2));
-      expect(audioInstances).toHaveLength(1);
-    } finally { queue.stop(); await queue.end("First. Second. "); }
-  });
-
-  it("global stop also stops the active streaming speech queue", async () => {
-    mocks.fetchTtsUrl.mockResolvedValue("blob:active-queue");
-    const queue = createSpeechQueue("cafe");
-    queue.feed("First. ");
-    await vi.waitFor(() => expect(audioInstances).toHaveLength(1));
-    stopSpeaking();
-    expect(mocks.revokeObjectUrl).toHaveBeenCalledWith("blob:active-queue");
-    queue.stop();
-    await queue.end("First. ");
-  });
-
-  it("recovers a failed local prefetch with cloud audio instead of skipping the sentence", async () => {
-    mocks.localReady = true;
-    mocks.createObjectUrl.mockReturnValue("blob:local-first");
-    mocks.synthesizeWithKokoro.mockResolvedValueOnce({ audio: new Float32Array([0, 0.1]), sampleRate: 24000 }).mockRejectedValueOnce(new Error("worker failed"));
-    mocks.fetchTtsUrl.mockResolvedValue("blob:cloud-second");
-    const queue = createSpeechQueue("cafe");
-    queue.feed("First. Second. ");
-    const done = queue.end("First. Second. ");
-    try {
-      await vi.waitFor(() => expect(mocks.synthesizeWithKokoro).toHaveBeenCalledTimes(2));
-      audioInstances[0].onended?.();
-      await vi.waitFor(() => expect(mocks.fetchTtsUrl).toHaveBeenCalledOnce());
-      expect(audioInstances[1].src).toBe("blob:cloud-second");
-      audioInstances[1].onended?.();
-      await done;
-    } finally { queue.stop(); }
+  it("falls back once for the complete reply when local synthesis fails", async () => {
+    mocks.localReady=true;
+    mocks.synthesizeWithKokoro.mockRejectedValue(new Error("worker failed"));
+    mocks.fetchTtsUrl.mockResolvedValue("blob:cloud-whole");
+    const q=createSpeechQueue("cafe");
+    const done=q.end("First. Second.");
+    await vi.waitFor(()=>expect(audioInstances).toHaveLength(1));
+    expect(mocks.fetchTtsUrl.mock.calls.map(call=>call[0])).toEqual(["First. Second."]);
+    audioInstances[0].onended?.(); await done;
   });
 });

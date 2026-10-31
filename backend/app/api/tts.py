@@ -1,11 +1,11 @@
-"""Text-to-speech endpoint: returns MP3 audio of Pip's line (iFlytek TTS)."""
+"""Text-to-speech endpoint: returns complete WAV audio of Pip's line."""
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 
 from app.data import scenarios as catalog
 from app.schemas.tts import TtsRequest
-from app.services.xf_tts import XfTtsClient, XfTtsError, pcm16_to_wav, smooth_silences
+from app.services.xf_tts import XfTtsClient, XfTtsError, pcm16_to_wav
 
 router = APIRouter(tags=["tts"])
 
@@ -25,8 +25,7 @@ async def tts(
     speed = req.speed if req.speed is not None else int(cfg["speed"])  # type: ignore[arg-type]
     pitch = req.pitch if req.pitch is not None else int(cfg["pitch"])  # type: ignore[arg-type]
     try:
-        # Synthesize as raw PCM and wrap once as WAV -> gapless, continuous
-        # playback (concatenated MP3 frames sound choppy / syllable-by-syllable).
+        # Collect the provider waveform and wrap it once as a complete WAV.
         pcm = await client.synthesize(
             req.text,
             vcn=vcn,
@@ -36,8 +35,8 @@ async def tts(
         )
     except XfTtsError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    # Collapse the engine's over-long inter-word gaps so speech sounds connected.
-    return Response(content=pcm16_to_wav(smooth_silences(pcm)), media_type="audio/wav")
+    # Preserve the provider's complete waveform and natural sentence pauses.
+    return Response(content=pcm16_to_wav(pcm), media_type="audio/wav")
 
 
 @router.post("/tts/stream")

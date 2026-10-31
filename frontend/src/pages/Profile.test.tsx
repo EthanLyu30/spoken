@@ -30,7 +30,7 @@ it("keeps the settings link and all three voice engines on the separate settings
     screen.getByRole("heading", { name: "让声音，适合你的节奏。" }),
   ).toBeVisible();
   expect(screen.getByRole("button", { name: /云端语音/ })).toBeVisible();
-  expect(screen.getByRole("button", { name: /设备语音/ })).toBeVisible();
+  expect(screen.getByRole("button", { name: /浏览器语音/ })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("button", { name: /本地模型/ })).toBeVisible();
   expect(screen.getByRole("slider", { name: "朗读语速" })).toBeVisible();
   expect(screen.getByRole("slider", { name: "朗读音调" })).toBeVisible();

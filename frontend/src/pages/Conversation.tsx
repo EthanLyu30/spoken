@@ -446,9 +446,7 @@ export default function Conversation() {
           setMessages(next);
           const custom = isCustom ? (customScene ?? undefined) : undefined;
 
-          // Speak the reply sentence-by-sentence as it streams, so the first
-          // sentence plays while the rest is still being generated. The text
-          // bubble fills in token-by-token at the same time.
+          // Stream the text bubble, then speak the complete final reply once.
           const queue = createSpeechQueue(id, getInteraction(signal));
           callQueueRef.current = queue;
           void queue.started.then(() => {
@@ -475,6 +473,7 @@ export default function Conversation() {
             else
               setMessages((m) => [...m, { role: "assistant", content: full }]);
             await queue.end(mutedRef.current ? "" : full);
+            if (queue.failed) throw new Error("语音播放失败，请点击回复旁的朗读按钮重试。");
           } catch (err) {
             queue.stop();
             if (signal.aborted || started) throw err;
@@ -496,6 +495,7 @@ export default function Conversation() {
             });
             try {
               await fallback.end(mutedRef.current ? "" : r.reply);
+              if (fallback.failed) throw new Error("语音播放失败，请点击回复旁的朗读按钮重试。");
             } finally {
               signal.removeEventListener("abort", cancelFallback);
               if (callQueueRef.current === fallback)
@@ -688,8 +688,8 @@ export default function Conversation() {
                   }
                   className="w-full rounded-xl border border-border bg-surface-2 p-2 text-sm"
                 >
-                  <option value="iflytek">云端语音 · 推荐</option>
-                  <option value="browser">设备语音 · 音质因设备而异</option>
+                  <option value="browser">浏览器语音 · 整段朗读（默认）</option>
+                  <option value="iflytek">云端语音 · 整段生成后播放</option>
                   <option value="local">本地模型 · 实验功能，首次需下载</option>
                 </select>
                 <Link

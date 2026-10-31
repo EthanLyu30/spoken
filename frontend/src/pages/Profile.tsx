@@ -338,8 +338,8 @@ export default function Profile() {
 }
 
 const ENGINES: { id: VoiceEngine; label: string; hint: string }[] = [
-  { id: "iflytek", label: "云端语音", hint: "推荐 · 音质稳定，流式播放" },
-  { id: "browser", label: "设备语音", hint: "无需合成接口，音质因设备而异" },
+  { id: "browser", label: "浏览器语音", hint: "默认 · 整段朗读，音色因设备而异" },
+  { id: "iflytek", label: "云端语音", hint: "整段生成后播放 · 可选音色" },
   { id: "local", label: "本地模型", hint: "实验功能 · 首次需下载较大模型" },
 ];
 
@@ -422,10 +422,10 @@ function VoiceSettings() {
       </div>
       <p className="mb-4 text-xs text-muted">
         {engine === "browser"
-          ? "使用设备提供的英文声音；效果随系统变化，没有可用声音时切到云端。"
+          ? "完整回复生成后一次朗读，优先使用设备英文声音；没有可用声音或无法启动朗读时，自动使用云端整段音频。"
           : engine === "local"
             ? "选择后才会后台下载识别与合成模型。加载中、设备较慢或失败时使用云端，建议在 Wi-Fi 下启用。"
-            : "使用讯飞云端语音，收到音频即可播放；不选音色时跟随场景。"}
+            : "使用讯飞一次合成完整回复，音频生成完成后播放；不选音色时跟随场景。"}
       </p>
 
       <label
@@ -441,7 +441,7 @@ function VoiceSettings() {
           onChange={(e) => setBrowserVoiceURI(e.target.value || null)}
           className="mb-5 w-full rounded-2xl border border-border bg-surface-2 px-4 py-2.5 text-ink outline-none focus:border-coral"
         >
-          <option value="">自动（最自然）</option>
+          <option value="">自动（优先设备音色）</option>
           {browserVoices.map((v) => (
             <option key={v.voiceURI} value={v.voiceURI}>
               {v.name}
@@ -470,7 +470,7 @@ function VoiceSettings() {
       )}
       {engine === "browser" && browserVoices.length === 0 && (
         <p className="-mt-3 mb-4 text-xs text-muted">
-          此设备暂未提供英文浏览器音色；朗读时会自动使用自然的讯飞云端音色。
+          此设备暂未提供英文浏览器音色；朗读时会自动使用云端整段音频。
         </p>
       )}
 

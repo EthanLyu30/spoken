@@ -6,8 +6,8 @@ export type VoiceEngine = "browser" | "iflytek" | "local";
 /**
  * User overrides for Pip's read-aloud voice.
  *
- * - `engine`: "browser" uses the OS/browser Web Speech voices (more natural,
- *   connected speech); "iflytek" uses the cloud cascade voices.
+ * - `engine`: "browser" uses one OS/browser Web Speech utterance;
+ *   "iflytek" generates one complete cloud audio file per reply.
  * - `vcn` / `browserVoiceURI`: the chosen voice for each engine (null = auto).
  * - `speed` / `pitch`: 0-100 sliders (null = neutral / follow scenario), mapped
  *   per engine when speaking.
@@ -29,7 +29,7 @@ interface VoiceState {
 export const useVoice = create<VoiceState>()(
   persist(
     (set) => ({
-      engine: "iflytek",
+      engine: "browser",
       vcn: null,
       browserVoiceURI: null,
       speed: null,
@@ -41,7 +41,14 @@ export const useVoice = create<VoiceState>()(
       setPitch: (pitch) => set({ pitch }),
       reset: () => set({ vcn: null, browserVoiceURI: null, speed: null, pitch: null }),
     }),
-    { name: "spoken-voice" },
+    {
+      name: "spoken-voice",
+      version: 1,
+      migrate: (persisted) => {
+        const saved = persisted && typeof persisted === "object" ? persisted as Partial<VoiceState> : {};
+        return { ...saved, engine: saved.engine === "local" ? "local" : "browser" } as VoiceState;
+      },
+    },
   ),
 );
 

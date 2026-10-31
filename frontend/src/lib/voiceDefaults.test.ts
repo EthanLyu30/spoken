@@ -1,11 +1,6 @@
 import { expect, it } from "vitest";
-import { useVoice } from "../store/voice";
 import { resolveVoiceMode } from "./voiceResolver";
 import { createLocalSpeechBootstrap } from "./localSpeech/bootstrap";
-
-it("defaults new users to cloud speech without depending on installed device voices", () => {
-  expect(useVoice.getState().engine).toBe("iflytek");
-});
 
 it("resolves explicitly selected local speech without waiting for browser voices", async () => {
   const mode = await resolveVoiceMode("local" as Parameters<typeof resolveVoiceMode>[0], {
