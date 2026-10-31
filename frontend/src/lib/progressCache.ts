@@ -49,9 +49,10 @@ export function writeProgressCache(
   owner: string,
   data: ProgressData,
   expectedGeneration: number,
+  statsDay: string,
 ): void {
   if (expectedGeneration !== generation || data.status !== "ready") return;
   if (!cache.has(owner) && cache.size >= 4)
     cache.delete(cache.keys().next().value!);
-  cache.set(owner, { at: Date.now(), day: learningDay(), data });
+  cache.set(owner, { at: Date.now(), day: statsDay, data });
 }

@@ -149,3 +149,21 @@ it("hides yesterday's stats on a day change while retaining history and rejects 
   unmount();
   vi.useRealTimers();
 });
+
+it("does not cache old stats as current when history finishes after midnight before a day recheck", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date(2026, 9, 30, 23, 59, 55));
+  let finishPractice!: (value: unknown) => void;
+  api.getPractice.mockReturnValueOnce(new Promise(resolve => { finishPractice = resolve; }));
+  const { result, unmount } = renderHook(() => useProgressData("late-history"));
+  await waitFor(() => expect(result.current.stats?.total_sessions).toBe(80));
+  api.getStats.mockResolvedValueOnce({ total_sessions: 81 });
+  act(() => { vi.setSystemTime(new Date(2026, 9, 31, 0, 0, 1)); finishPractice([{ id: 9 }]); });
+  await waitFor(() => expect(result.current.practice[0]?.id).toBe(9));
+  act(() => window.dispatchEvent(new Event("focus")));
+  await waitFor(() => expect(result.current.stats?.total_sessions).toBe(81));
+  expect(api.getStats).toHaveBeenCalledTimes(2);
+  expect(result.current.practice[0]?.id).toBe(9);
+  unmount();
+  vi.useRealTimers();
+});

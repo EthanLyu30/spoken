@@ -70,7 +70,7 @@ export function useProgressData(owner: string) {
           ...patch,
           errors: previous.errors.filter((part) => !(part in patch)),
         };
-        writeProgressCache(owner, next, generation);
+        writeProgressCache(owner, next, generation, statsDayRef.current);
         return next;
       });
     };
