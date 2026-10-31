@@ -28,6 +28,31 @@ it("does not load private data for guests or ordinary accounts", () => {
   expect(fetcher).not.toHaveBeenCalled();
 });
 
+it.each([true, false])("refreshes an existing account's server role (%s) before reading private data", async authorized => {
+  useAuth.setState({ user: { ...user, is_admin: false } });
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes('/api/auth/me') ? { ...user, is_admin: authorized }
+    : url.includes('/overview') ? overview : { items: [], total: 0 }), { status: 200 }));
+  show();
+  fireEvent.click(screen.getByRole('button', { name: '刷新账号权限' }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).includes('/api/auth/me'))).toBe(true));
+  if (authorized) expect(await screen.findByRole('heading', { name: /运行看板/ })).toBeVisible();
+  else {
+    await waitFor(() => expect(screen.getByRole('button', { name: '刷新账号权限' })).toBeEnabled());
+    expect(screen.getByText(/仅管理员/)).toBeVisible();
+    expect(fetcher.mock.calls.some(([url]) => String(url).includes('/api/admin/'))).toBe(false);
+  }
+});
+
+it("retries private reads after a stale administrator denial is refreshed", async () => {
+  fetcher.mockResolvedValue(new Response('{}', { status: 403 }));
+  show();
+  await screen.findByText(/权限已失效/);
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes('/api/auth/me') ? user
+    : url.includes('/overview') ? overview : { items: [], total: 0 }), { status: 200 }));
+  fireEvent.click(screen.getByRole('button', { name: '刷新账号权限' }));
+  expect(await screen.findByRole('heading', { name: /运行看板/ })).toBeVisible();
+});
+
 it("shows empty measurements honestly and keeps business filters aligned", async () => {
   show();
   expect(await screen.findByText(/暂无调用记录/)).toBeVisible();

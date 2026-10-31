@@ -13,7 +13,7 @@ class AdminAccount(Base):
 
 
 class AdminBootstrap(Base):
-    """Consumed configuration markers, retained even after a role is revoked."""
+    """Hashed email/attempt markers, retained even after a role is revoked."""
     __tablename__ = "admin_bootstraps"
     email_digest: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

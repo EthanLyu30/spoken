@@ -33,12 +33,16 @@ def grant_admin(db: Session, email: str) -> int:
     return user.id
 
 
-def bootstrap_admin(db: Session, email: str) -> int | None:
+def bootstrap_admin(db: Session, email: str, *, attempt: str = "") -> int | None:
     """Consume once, including a missing-account result. Registration never grants."""
     normalized = email.strip().lower()
     if not normalized:
         return None
-    digest = hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+    # Keep legacy markers valid. A new attempt requires an explicit server
+    # configuration change; restarting or registering never retries a marker.
+    attempt = attempt.strip()
+    identity = json.dumps([normalized, attempt], separators=(',', ':')) if attempt else normalized
+    digest = hashlib.sha256(identity.encode('utf-8')).hexdigest()
     if db.get(AdminBootstrap, digest) is not None:
         return None
     user = db.scalar(select(User).where(User.email == normalized))
@@ -52,12 +56,13 @@ def bootstrap_admin(db: Session, email: str) -> int | None:
 
 
 def configured_bootstrap_admin():
-    email = get_settings().admin_bootstrap_email
+    settings = get_settings()
+    email = settings.admin_bootstrap_email
     if not email.strip():
         return
     try:
         with SessionLocal() as db:
-            uid = bootstrap_admin(db, email)
+            uid = bootstrap_admin(db, email, attempt=settings.admin_bootstrap_attempt)
             if uid is not None:
                 logging.getLogger(__name__).info('Administrator bootstrap bound an existing account')
     except SQLAlchemyError as exc:

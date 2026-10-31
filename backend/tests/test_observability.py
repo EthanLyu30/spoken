@@ -274,3 +274,47 @@ def test_startup_bootstrap_authorizes_configured_existing_owner(monkeypatch):
     monkeypatch.setattr(get_settings(), 'admin_bootstrap_email', email, raising=False)
     with TestClient(app) as client:
         assert client.get('/api/auth/me', headers=headers).json()['is_admin'] is True
+
+
+def test_operator_can_start_a_new_binding_attempt_after_a_late_registration(monkeypatch):
+    from types import SimpleNamespace
+    from app.core.config import get_settings
+    from app.models.telemetry import AdminAccount
+    from app.services import telemetry
+    email = 'late-owner-' + uuid.uuid4().hex + '@example.com'
+    with SessionLocal() as db:
+        assert telemetry.bootstrap_admin(db, email) is None
+    with TestClient(app) as client:
+        registered = client.post('/api/auth/register', json={'email': email, 'password': 'qa-password'}).json()
+        headers = {'Authorization': 'Bearer ' + registered['token']}
+        assert client.get('/api/auth/me', headers=headers).json()['is_admin'] is False
+    settings = SimpleNamespace(**{**get_settings().model_dump(), 'admin_bootstrap_email': email,
+        'admin_bootstrap_attempt': 'explicit-operator-retry'})
+    monkeypatch.setattr(telemetry, 'get_settings', lambda: settings)
+    with TestClient(app) as client:
+        assert client.get('/api/auth/me', headers=headers).json()['is_admin'] is True
+        assert client.get('/api/admin/overview', headers=headers).status_code == 200
+    with SessionLocal() as db:
+        db.delete(db.get(AdminAccount, registered['user']['id'])); db.commit()
+    with TestClient(app) as client:
+        assert client.get('/api/auth/me', headers=headers).json()['is_admin'] is False
+        assert client.get('/api/admin/overview', headers=headers).status_code == 403
+
+
+def test_missing_account_consumes_the_explicit_attempt_until_operator_changes_it(monkeypatch):
+    from types import SimpleNamespace
+    from app.core.config import get_settings
+    from app.services import telemetry
+    email = 'late-explicit-' + uuid.uuid4().hex + '@example.com'
+    settings = SimpleNamespace(**{**get_settings().model_dump(), 'admin_bootstrap_email': email,
+        'admin_bootstrap_attempt': 'first-attempt'})
+    monkeypatch.setattr(telemetry, 'get_settings', lambda: settings)
+    with TestClient(app) as client:
+        registered = client.post('/api/auth/register', json={'email': email, 'password': 'qa-password'}).json()
+        headers = {'Authorization': 'Bearer ' + registered['token']}
+        assert registered['user']['is_admin'] is False
+    with TestClient(app) as client:
+        assert client.get('/api/auth/me', headers=headers).json()['is_admin'] is False
+    settings.admin_bootstrap_attempt = 'second-explicit-attempt'
+    with TestClient(app) as client:
+        assert client.get('/api/auth/me', headers=headers).json()['is_admin'] is True

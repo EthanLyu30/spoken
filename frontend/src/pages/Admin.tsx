@@ -33,6 +33,7 @@ export default function Admin() {
   const [slow, setSlow] = useState(false);
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [refreshingAccount, setRefreshingAccount] = useState(false);
   const [error, setError] = useState("");
   const [denied, setDenied] = useState(false);
   const [detail, setDetail] = useState<AdminTrace | null>(null);
@@ -93,7 +94,15 @@ export default function Admin() {
 
   if (!canRead || denied) return <main className="admin-page admin-locked">
     <ShieldCheck size={34} /><h1>{denied ? "后台访问权限已失效" : "仅管理员可访问运行看板"}</h1>
-    <p>{denied ? "请重新登录并确认服务器管理员授权。" : "请使用已授权的管理员账号登录。"}</p><Link to="/me">前往个人中心</Link>
+    <p>{denied ? "请刷新账号权限并确认服务器管理员授权。" : "请使用已授权的管理员账号登录。"}</p>
+    {user && <button className="admin-refresh" disabled={refreshingAccount} onClick={async () => {
+      setRefreshingAccount(true);
+      try {
+        await useAuth.getState().refresh();
+        if (canRead) setRevision(value => value + 1);
+      } finally { setRefreshingAccount(false); }
+    }}><RefreshCw size={16} />{refreshingAccount ? "核对中…" : "刷新账号权限"}</button>}
+    <Link to="/me">前往个人中心</Link>
   </main>;
 
   return <main className="admin-page">

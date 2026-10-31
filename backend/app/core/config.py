@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     telemetry_max_records: int = Field(default=20_000, ge=100, le=100_000)
     # Optional one-shot owner binding for hosts without a server shell.
     admin_bootstrap_email: str = ""
+    # Change only to explicitly authorize another one-shot server-side attempt.
+    admin_bootstrap_attempt: str = Field(default="", max_length=128)
 
     # iFlytek (科大讯飞)
     xf_app_id: str = ""
