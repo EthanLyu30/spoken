@@ -237,3 +237,41 @@ def test_tts_service_yields_first_frame_before_upstream_finishes(monkeypatch):
         with pytest.raises(StopAsyncIteration):
             await anext(stream)
     asyncio.run(run())
+
+
+def test_complete_synthesis_does_not_wait_for_a_slow_close_handshake(monkeypatch):
+    from app.core.config import Settings
+    from app.services import xf_tts
+    pcm = b"\x01\x00\x02\x00"
+
+    class Socket:
+        async def send(self, data):
+            pass
+
+        def __aiter__(self):
+            return self.frames()
+
+        async def frames(self):
+            yield json.dumps({"code": 0, "data": {"audio": base64.b64encode(pcm[:2]).decode(), "status": 1}})
+            await asyncio.sleep(0.2)  # More than the close budget: audio must still finish.
+            yield json.dumps({"code": 0, "data": {"audio": base64.b64encode(pcm[2:]).decode(), "status": 2}})
+
+    class Connection:
+        def __init__(self, close_timeout):
+            self.close_timeout = close_timeout
+
+        async def __aenter__(self):
+            return Socket()
+
+        async def __aexit__(self, *args):
+            # Model a peer that has sent all audio but never promptly ACKs close.
+            await asyncio.sleep(min(self.close_timeout, 1.5))
+
+    monkeypatch.setattr(xf_tts.websockets, "connect", lambda *args, **kwargs: Connection(kwargs["close_timeout"]))
+
+    async def run():
+        service = XfTtsClient(Settings(xf_app_id="test", xf_api_key="test", xf_api_secret="test"))
+        audio = await asyncio.wait_for(service.synthesize("One complete reply."), timeout=0.8)
+        assert audio == pcm
+
+    asyncio.run(run())

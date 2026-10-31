@@ -153,7 +153,9 @@ class XfTtsClient:
         received = False
         complete = False
         try:
-            async with asyncio.timeout(30), websockets.connect(url, max_size=2 * 1024 * 1024, open_timeout=10, close_timeout=3) as ws:
+            # The provider's status=2 is the audio boundary. Do not hold a complete
+            # WAV for a slow close ACK; active synthesis retains its 30s deadline.
+            async with asyncio.timeout(30), websockets.connect(url, max_size=2 * 1024 * 1024, open_timeout=10, close_timeout=0.15) as ws:
                 await ws.send(json.dumps(frame))
                 async for message in ws:
                     resp = json.loads(message)
