@@ -17,6 +17,7 @@ export interface AdminTrace {
   interaction_id?: string | null; related?: AdminTrace[];
   trace_id: string; started_at: string; operation: string; source: string; outcome: string;
   duration_ms: number; http_status: number | null; ttft_ms: number | null; model: string | null;
+  error_type?: string | null; error_cause_type?: string | null;
   input_tokens: number | null; output_tokens: number | null; release: string;
   spans?: { id: string; parent_id: string | null; name: string; offset_ms: number; duration_ms: number;
     outcome: string; attributes: Record<string, string | number | boolean> }[];

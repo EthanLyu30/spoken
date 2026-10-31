@@ -39,7 +39,7 @@
 
 ### Task 2: Compact, resilient dashboard
 
-**Files:** `frontend/src/pages/Admin.tsx`, `frontend/src/admin.css`, `frontend/src/lib/adminApi.ts`, `frontend/src/pages/Admin.test.tsx`, `docs/admin-observability.md`.
+**Files:** `frontend/src/pages/Admin.tsx`, `frontend/src/admin.css`, `frontend/src/lib/adminApi.ts`, `frontend/src/pages/Admin.test.tsx`, `frontend/src/components/EChart.tsx`, `docs/admin-observability.md`.
 
 **Interfaces:** Consume nullable metadata from Task 1; still accept old responses with fields absent. Overview excludes table-only outcome, list retains all filters.
 

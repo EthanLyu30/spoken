@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useAuth } from "../store/auth";
@@ -26,6 +26,71 @@ it("does not load private data for guests or ordinary accounts", () => {
   show();
   expect(screen.getByText(/仅管理员/)).toBeVisible();
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+it("starts with all operations for both independently measured sources", async () => {
+  show(); await screen.findByText(/暂无调用记录/);
+  expect(screen.getByLabelText("业务操作")).toHaveValue("");
+  fireEvent.click(screen.getByRole("tab", { name: "浏览器体验" }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).includes("source=browser"))).toBe(true));
+  expect(screen.getByLabelText("业务操作")).toHaveValue("");
+  expect(fetcher.mock.calls.every(([url]) => !new URL(String(url), "http://localhost").searchParams.has("operation"))).toBe(true);
+});
+
+it("filters failed traces without changing the overview denominator", async () => {
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes("/overview")
+    ? { ...overview, count: 4, errors: 1, success_rate: 0.75 } : { items: [], total: 0 })));
+  show(); await screen.findByText("75.0%");
+  fireEvent.click(screen.getByRole("button", { name: /^失败 1$/ }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).includes("outcome=error"))).toBe(true));
+  expect(screen.getByLabelText("调用状态")).toHaveValue("error");
+  expect(fetcher.mock.calls.filter(([url]) => String(url).includes("/overview")).every(([url]) => !String(url).includes("outcome="))).toBe(true);
+  expect(await screen.findByText("75.0%")).toBeVisible();
+});
+
+it.each(["overview", "traces"])("keeps the other panel usable if %s fails", async failed => {
+  fetcher.mockImplementation(async (url: string) => String(url).includes(`/admin/${failed}`)
+    ? new Response("{}", { status: 500 })
+    : new Response(JSON.stringify(String(url).includes("/overview") ? { ...overview, count: 42 } : { items: [trace], total: 1 })));
+  show();
+  if (failed === "overview") {
+    expect(await screen.findByRole("button", { name: /查看调用/ })).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("概览暂时无法加载");
+  } else {
+    expect(await screen.findByText("42")).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("调用列表暂时无法加载");
+  }
+});
+
+it("labels retained overview results after refresh fails, and clears them on a new scope", async () => {
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes("/overview") ? { ...overview, count: 42 } : { items: [], total: 0 })));
+  show(); await screen.findByText("42");
+  await waitFor(() => expect(screen.getByRole("button", { name: "刷新数据" })).toBeEnabled());
+  fetcher.mockImplementation(async (url: string) => url.includes("/overview") ? new Response("{}", { status: 500 }) : new Response('{"items":[],"total":0}'));
+  fireEvent.click(screen.getByRole("button", { name: "刷新数据" }));
+  expect(await screen.findByText(/概览刷新失败，当前显示上次成功加载的数据/)).toBeVisible();
+  expect(screen.getByText("42")).toBeVisible();
+  fireEvent.click(screen.getByLabelText("优先查看慢请求"));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).includes("slow_first=true"))).toBe(true));
+  expect(screen.getByText(/概览刷新失败，当前显示上次成功加载的数据/)).toBeVisible();
+  fireEvent.change(screen.getByLabelText("时间范围"), { target: { value: "168" } });
+  await waitFor(() => expect(screen.queryByText("42")).not.toBeInTheDocument());
+});
+
+it.each([undefined, null, "OperationalError"])("shows honest diagnostics for old/new failure metadata (%s)", async errorType => {
+  const failure = { ...trace, outcome: "error", http_status: null, spans: [], error_type: errorType, error_cause_type: errorType ? "AdminShutdown" : null };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes("/overview")
+    ? { ...overview, count: 1, errors: 1 } : url.includes(`/traces/${trace.trace_id}`) ? failure : { items: [failure], total: 1 })));
+  show(); fireEvent.click(await screen.findByRole("button", { name: /查看调用/ }));
+  const detail = await screen.findByRole("complementary", { name: "调用详情" });
+  if (errorType) {
+    expect(within(detail).getByText("OperationalError")).toBeVisible();
+    expect(within(detail).getByText("AdminShutdown")).toBeVisible();
+  } else expect(within(detail).getByText(/未采集异常类型/)).toBeVisible();
+  expect(within(detail).getByText("HTTP 状态未采集")).toBeVisible();
+  expect(within(detail).queryByText(/已修复|HTTP 500/)).not.toBeInTheDocument();
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(screen.queryByRole("complementary", { name: "调用详情" })).not.toBeInTheDocument();
 });
 
 it.each([true, false])("refreshes an existing account's server role (%s) before reading private data", async authorized => {
@@ -76,6 +141,25 @@ it("clears private data if the server rejects a stale administrator flag", async
   show();
   expect(await screen.findByText(/权限已失效/)).toBeVisible();
   expect(screen.queryByText(/输入 Token/)).not.toBeInTheDocument();
+});
+
+it("aborts pending private overview reads as soon as the list rejects access", async () => {
+  fetcher.mockImplementation((url: string) => url.includes("/overview")
+    ? new Promise<Response>(() => {}) : Promise.resolve(new Response("{}", { status: 403 })));
+  show(); await screen.findByText(/权限已失效/);
+  expect(fetcher.mock.calls.every(([, options]) => options.signal.aborted)).toBe(true);
+});
+
+it("aborts a pending list when direct trace lookup rejects access", async () => {
+  show(); await screen.findByText(/暂无调用记录/);
+  fetcher.mockImplementation((url: string) => url.includes(`/traces/${trace.trace_id}`)
+    ? Promise.resolve(new Response("{}", { status: 403 })) : new Promise<Response>(() => {}));
+  fireEvent.click(screen.getByLabelText("优先查看慢请求"));
+  fireEvent.change(screen.getByLabelText("Trace ID"), { target: { value: trace.trace_id } });
+  fireEvent.click(screen.getByRole("button", { name: "查找调用" }));
+  await screen.findByText(/权限已失效/);
+  const pending = fetcher.mock.calls.find(([url]) => String(url).includes("slow_first=true"));
+  expect(pending?.[1].signal.aborted).toBe(true);
 });
 
 it("aborts in-flight reads and hides private results on logout", async () => {
