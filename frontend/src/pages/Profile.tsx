@@ -374,8 +374,7 @@ function VoiceSettings() {
     vcn != null || browserVoiceURI != null || speed != null || pitch != null;
 
   useEffect(() => {
-    setBrowserVoices(listBrowserVoices());
-    primeBrowserVoices(() => setBrowserVoices(listBrowserVoices()));
+    return primeBrowserVoices(() => setBrowserVoices(listBrowserVoices()));
   }, []);
 
   const speedLabel =
@@ -432,7 +431,7 @@ function VoiceSettings() {
       </div>
       <p className="mb-4 text-xs text-muted">
         {engine === "browser"
-          ? "完整回复生成后一次朗读，自动优先选择 Google / Natural 等自然英文音色；没有可用声音或无法启动朗读时，自动使用云端整段音频。"
+          ? "完整回复生成后一次朗读，优先选择设备提供的自然英文音色，例如 Edge 的 Natural、Chrome 的 Google 声音。没有可用声音或无法启动朗读时，使用云端整段音频。"
           : engine === "local"
             ? "选择后才会准备模型，朗读优先加载。两项能力独立就绪，加载中和运行失败都可使用备用方案。"
             : "使用讯飞一次合成完整回复，音频生成完成后播放；不选音色时跟随场景。"}

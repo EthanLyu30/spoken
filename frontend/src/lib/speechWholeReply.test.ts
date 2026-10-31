@@ -5,7 +5,7 @@ vi.mock("./api", () => ({ fetchTtsUrl: mocks.fetchTtsUrl, fetchTtsStream: mocks.
 vi.mock("../store/voice", async actual => ({ ...await actual<object>(), useVoice: { getState: () => mocks.settings } }));
 vi.mock("./localSpeech/runtime", () => ({ isLocalSpeechModelReady: () => mocks.localReady,localSpeechCoordinator:{markError:mocks.modelError} }));
 vi.mock("./localSpeech/kokoro", () => ({ synthesizeWithKokoro: mocks.synthesize }));
-import { createSpeechQueue, speakText, stopSpeaking } from "./speech";
+import { createSpeechQueue, speakText, stopSpeaking, primeBrowserVoices, listBrowserVoices } from "./speech";
 
 class AudioDouble {
   onplaying: (() => void) | null = null;
@@ -98,6 +98,34 @@ it("prefers Chrome's natural Google English voice over a traditional local syste
   await vi.waitFor(()=>expect(utterances).toHaveLength(1));
   expect(utterances[0].voice?.voiceURI).toBe("google");
   utterances[0].onstart?.(); utterances[0].onend?.(); await done;
+});
+
+it("keeps late Edge Natural voices discoverable after initial system voices and unsubscribes on cleanup",()=>{
+  const events=new EventTarget();
+  let voices=[{name:"Microsoft David Desktop",voiceURI:"desktop",lang:"en-US",localService:true}] as SpeechSynthesisVoice[];
+  vi.stubGlobal("speechSynthesis",{getVoices:()=>voices,addEventListener:events.addEventListener.bind(events),removeEventListener:events.removeEventListener.bind(events)});
+  const updates:string[][]=[];
+  const dispose=primeBrowserVoices(()=>updates.push(listBrowserVoices().map(voice=>voice.voiceURI)));
+  voices=[...voices,{name:"Microsoft Jenny Online (Natural)",voiceURI:"edge-jenny",lang:"en-US",localService:false} as SpeechSynthesisVoice];
+  events.dispatchEvent(new Event("voiceschanged"));
+  expect(updates).toEqual([["desktop"],["desktop","edge-jenny"]]);
+  if(typeof dispose === "function") dispose();
+  events.dispatchEvent(new Event("voiceschanged"));
+  expect(updates).toHaveLength(2);
+});
+
+it("uses Edge's Microsoft Natural voice as one whole native utterance without cloud synthesis",async()=>{
+  mocks.settings.engine="browser";
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([
+    {name:"Microsoft David Desktop",voiceURI:"desktop",lang:"en-US",localService:true},
+    {name:"Microsoft Jenny Online (Natural)",voiceURI:"edge-jenny",lang:"en-US",localService:false},
+  ] as SpeechSynthesisVoice[]);
+  const speech=speakText("One complete answer. Another sentence.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  expect(utterances[0].voice?.voiceURI).toBe("edge-jenny");
+  expect(utterances[0].text).toBe("One complete answer. Another sentence.");
+  utterances[0].onstart?.();utterances[0].onend?.();await speech.done;
+  expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
 });
 
 it("respects an explicit system voice even when natural English voices are available", async () => {

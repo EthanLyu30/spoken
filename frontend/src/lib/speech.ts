@@ -32,11 +32,14 @@ export function listBrowserVoices(): SpeechSynthesisVoice[] {
   try { return window.speechSynthesis.getVoices().filter(v => v.lang?.toLowerCase().startsWith("en")); }
   catch { return []; }
 }
-export function primeBrowserVoices(onReady?: () => void): void {
-  if (!hasSpeech()) return;
-  if (listBrowserVoices().length) { onReady?.(); return; }
-  const handler = () => { onReady?.(); window.speechSynthesis.removeEventListener("voiceschanged", handler); };
-  window.speechSynthesis.addEventListener("voiceschanged", handler);
+export function primeBrowserVoices(onReady?: () => void): () => void {
+  if (!hasSpeech()) { onReady?.(); return () => {}; }
+  const synth = window.speechSynthesis;
+  const handler = () => onReady?.();
+  // Online/Natural voices can arrive after the initial system voice list.
+  synth.addEventListener("voiceschanged", handler);
+  handler();
+  return () => synth.removeEventListener("voiceschanged", handler);
 }
 function voiceSource() {
   return {
