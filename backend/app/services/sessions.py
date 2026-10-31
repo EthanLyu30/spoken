@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.models.session import PracticeSession, SkillScore, Turn
 from app.models.progress import LearningEvent
-from app.schemas.session import ExpiredSessionReceipt, SaveSessionRequest
-from app.services import progress
+from app.schemas.session import ExpiredSessionReceipt, SaveSessionRequest, SessionSummary
+from app.services import practice, progress
 
 # Keep storage bounded: only retain the most recent N sessions.
 SESSION_KEEP = 200
@@ -112,3 +112,26 @@ def get_session(db: Session, client_id: str, session_id: int) -> PracticeSession
             PracticeSession.id == session_id, PracticeSession.client_id == client_id
         )
     ).first()
+
+
+def progress_sessions(db: Session, client_id: str) -> dict:
+    """Bound the overview to metadata for 50 sessions and scores for the newest 8."""
+    summaries = [SessionSummary.model_validate(row) for row in db.execute(
+        select(PracticeSession.id, PracticeSession.scenario_id, PracticeSession.overall,
+               PracticeSession.created_at)
+        .where(PracticeSession.client_id == client_id)
+        .order_by(desc(PracticeSession.created_at)).limit(50))]
+    recent = summaries[:practice.INSIGHTS_RECENT]
+    by_session = {session.id: [] for session in recent}
+    if recent:
+        scores = db.execute(select(SkillScore.session_id, SkillScore.key, SkillScore.label_en,
+                                   SkillScore.label_zh, SkillScore.score)
+            .join(PracticeSession, PracticeSession.id == SkillScore.session_id)
+            .where(PracticeSession.client_id == client_id, SkillScore.session_id.in_(by_session)))
+        for score in scores:
+            by_session[score.session_id].append(score)
+    return {"sessions": summaries,
+            "insights": practice.insights_from_scores(list(by_session.values())),
+            "latest": {"id": recent[0].id,
+                       "scores": [dict(score._mapping) for score in by_session[recent[0].id]]}
+                      if recent else None}

@@ -5,12 +5,13 @@ serializes badge thresholds/receipts across workers without read-modify-write
 counters. Helpers never commit: the caller owns the activity transaction.
 """
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from itertools import islice
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection, Engine
@@ -53,11 +54,35 @@ def _insert_many(db: Session, model, rows) -> None:
 
 
 def lock_owner(db: Session, client_id: str) -> None:
-    _insert(db, ProgressOwner, {"client_id": client_id})
-    # A no-op UPDATE locks the row in Postgres and obtains SQLite's writer lock.
-    # It is also effective when the row already existed (including SQLite).
-    db.execute(update(ProgressOwner).where(ProgressOwner.client_id == client_id)
-               .values(client_id=client_id))
+    # Conflict UPDATE takes the same row/writer lock as an ordinary UPDATE,
+    # including when the owner already exists, in a single round trip.
+    insert = sqlite_insert if db.get_bind().dialect.name == "sqlite" else pg_insert
+    db.execute(insert(ProgressOwner).values(client_id=client_id).on_conflict_do_update(
+        index_elements=[ProgressOwner.client_id], set_={"client_id": client_id}))
+
+
+@dataclass(frozen=True)
+class ProgressSnapshot:
+    has_events: bool
+    badges: frozenset[str]
+    words_count: int
+
+
+def read_snapshot(db: Session, client_id: str, *, include_events: bool = False) -> ProgressSnapshot:
+    """One portable read, including for owners without any permanent badges.
+
+    The scalar seed always returns one row; its outer join yields every badge
+    without JSON aggregation or a separate vocabulary count round trip.
+    """
+    has_events = (select(LearningEvent.event_key).where(LearningEvent.client_id == client_id).exists()
+                  if include_events else literal(False))
+    seed = select(has_events.label("has_events"),
+        select(func.count(WordEntry.id)).where(WordEntry.client_id == client_id)
+        .scalar_subquery().label("words_count")).subquery()
+    rows = db.execute(select(seed.c.has_events, seed.c.words_count, EarnedBadge.badge_key)
+        .select_from(seed.outerjoin(EarnedBadge, EarnedBadge.client_id == client_id))).all()
+    return ProgressSnapshot(bool(rows[0].has_events),
+        frozenset(row.badge_key for row in rows if row.badge_key is not None), rows[0].words_count)
 
 
 def record_event(db: Session, client_id: str, event_type: str, **metadata) -> LearningEvent:
@@ -75,7 +100,8 @@ def _local_date(timestamp: datetime, zone: ZoneInfo):
 
 
 def stats_and_awards(db: Session, client_id: str, timezone_value: str | None = None,
-                     *, events: list[LearningEvent] | None = None) -> dict:
+                     *, events: list[LearningEvent] | None = None,
+                     snapshot: ProgressSnapshot | None = None) -> dict:
     """Compute from the journal and persist newly proven badges without committing."""
     zone_name = timezone_name(timezone_value)
     zone = ZoneInfo(zone_name)
@@ -115,7 +141,9 @@ def stats_and_awards(db: Session, client_id: str, timezone_value: str | None = N
             "scenarios_5": len({e.scenario_id for e in conversations if e.scenario_id}) >= 5,
             "level_3": level >= 3,
         }
-    badges = set(db.scalars(select(EarnedBadge.badge_key).where(EarnedBadge.client_id == client_id)))
+    if snapshot is None:
+        snapshot = read_snapshot(db, client_id)
+    badges = snapshot.badges
     newly_earned = {key for key, earned in achievements.items() if earned} - badges
     _insert_many(db, EarnedBadge, ({"client_id": client_id, "badge_key": key, "earned_at": utcnow()}
                                  for key in sorted(newly_earned)))
@@ -129,7 +157,7 @@ def stats_and_awards(db: Session, client_id: str, timezone_value: str | None = N
         "xp_to_next": 250,
         "total_sessions": len(conversations),
         "total_practice": len(practices),
-        "words_count": db.scalar(select(func.count(WordEntry.id)).where(WordEntry.client_id == client_id)) or 0,
+        "words_count": snapshot.words_count,
         "earned_badges": sorted(badges | newly_earned),
         "timezone": zone_name,
         "local_date": today.isoformat(),

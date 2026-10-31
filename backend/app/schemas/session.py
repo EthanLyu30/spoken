@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.chat import ChatMessage
 from app.schemas.feedback import SkillScore
+from app.schemas.practice import Insights
 
 
 class SaveSessionRequest(BaseModel):
@@ -33,6 +34,17 @@ class SessionDetail(SessionSummary):
     tip: str
     scores: list[SkillScore]
     messages: list[ChatMessage]
+
+
+class LatestSessionScores(BaseModel):
+    id: int
+    scores: list[SkillScore]
+
+
+class ProgressSessions(BaseModel):
+    sessions: list[SessionSummary]
+    insights: Insights
+    latest: LatestSessionScores | None
 
 
 class ExpiredSessionReceipt(SessionSummary):

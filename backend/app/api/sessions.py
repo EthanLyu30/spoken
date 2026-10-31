@@ -8,7 +8,7 @@ from app.db import get_db
 from app.models.session import PracticeSession
 from app.schemas.chat import ChatMessage
 from app.schemas.feedback import SkillScore
-from app.schemas.session import ExpiredSessionReceipt, SaveSessionRequest, SessionDetail, SessionSummary
+from app.schemas.session import ExpiredSessionReceipt, ProgressSessions, SaveSessionRequest, SessionDetail, SessionSummary
 from app.services import sessions as repo
 
 router = APIRouter(tags=["sessions"])
@@ -56,3 +56,10 @@ def get_session(
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return _detail(session)
+
+
+@router.get("/progress/sessions", response_model=ProgressSessions)
+def progress_sessions(
+    db: Session = Depends(get_db), client_id: str = Depends(get_client_id)
+) -> ProgressSessions:
+    return ProgressSessions.model_validate(repo.progress_sessions(db, client_id))

@@ -89,7 +89,7 @@ def test_retention_scale_backfill_uses_bounded_real_multirow_sql(engine):
     assert not any(column in sql for sql in source_selects for column in (".summary", ".detail", ".meaning", ".example"))
     with trace_sql(engine) as repeated:
         progress.backfill_progress(engine)
-    assert len(repeated) == 3
+    assert len(repeated) == 2
     assert not any(sql.startswith("INSERT INTO learning_events") for sql, _, _ in repeated)
     assert_legacy_outcome(engine)
 
@@ -103,7 +103,8 @@ def test_fully_awarded_stats_do_not_insert_badges_again_and_keep_permanent_union
     print(f"repeat stats SQL: total={len(calls)}, badge INSERTs={len(inserts)}")
     assert stats["earned_badges"] == ALL_BADGES
     assert inserts == []
-    assert len([sql for sql, _, _ in calls if sql.startswith("SELECT earned_badges")]) == 1
+    assert len(calls) == 4
+    assert len([sql for sql, _, _ in calls if "LEFT OUTER JOIN earned_badges" in sql]) == 2
     with Session(engine) as db:
         db.execute(delete(LearningEvent))
         db.commit()

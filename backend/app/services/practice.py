@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from sqlalchemy import delete, desc, select
+from sqlalchemy import case, delete, desc, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.performance import measure
 from app.models.practice import PracticeRecord
 from app.models.session import PracticeSession
-from app.schemas.practice import PracticeCreate
+from app.schemas.practice import PracticeCreate, PracticeRecordOut
 from app.services import progress
 
 TODAY_GOAL = 3
@@ -61,23 +61,31 @@ def prune_records(db: Session, client_id: str, keep: int = PRACTICE_KEEP) -> Non
 
 def list_records(
     db: Session, client_id: str, kind: str | None = None, limit: int = 100
-) -> list[PracticeRecord]:
-    stmt = select(PracticeRecord).where(PracticeRecord.client_id == client_id)
+) -> list[PracticeRecordOut]:
+    # Only interview metadata needs its stored rubric body to infer score_max.
+    # Keep parsing in the existing model property, including malformed legacy JSON.
+    stmt = select(PracticeRecord.id, PracticeRecord.kind, PracticeRecord.score,
+                  PracticeRecord.title, PracticeRecord.created_at,
+                  case((PracticeRecord.kind == "interview", PracticeRecord.detail),
+                       else_="").label("detail")).where(PracticeRecord.client_id == client_id)
     if kind:
         stmt = stmt.where(PracticeRecord.kind == kind)
     stmt = stmt.order_by(desc(PracticeRecord.created_at)).limit(limit)
-    return list(db.scalars(stmt))
+    return [PracticeRecordOut.model_validate(PracticeRecord(**row._mapping)) for row in db.execute(stmt)]
 
 
 def compute_stats(db: Session, client_id: str, timezone: str | None = None) -> dict:
     try:
-        has_events = db.scalar(select(progress.LearningEvent.event_key)
-                               .where(progress.LearningEvent.client_id == client_id).limit(1))
-        if has_events:
+        snapshot = progress.read_snapshot(db, client_id, include_events=True)
+        if snapshot.has_events:
             progress.lock_owner(db, client_id)
+            # The probe predates the lock: neither its badge set nor its word
+            # count is authoritative for an award decision. Read both again.
+            result = progress.stats_and_awards(db, client_id, timezone)
+        else:
+            result = progress.stats_and_awards(db, client_id, timezone, events=[], snapshot=snapshot)
         # An empty snapshot cannot earn any badges. Keep first-visit reads free
         # of writes and mutex rows; a racing activity writer owns its awards.
-        result = progress.stats_and_awards(db, client_id, timezone, events=None if has_events else [])
         db.commit()
         return result
     except Exception:
@@ -102,12 +110,16 @@ def compute_insights(db: Session, client_id: str, recent: int = INSIGHTS_RECENT)
             .limit(recent)
         )
     )
+    return insights_from_scores([session.scores for session in sessions])
+
+
+def insights_from_scores(session_scores) -> dict:
+    """Shared insight algorithm; input is newest-first, including unscored sessions."""
     with measure("insights_cpu", cpu=True):
-        sessions.reverse()  # oldest -> newest, so the trend reads left to right
 
         series: dict[str, dict] = {}
-        for s in sessions:
-            for sc in s.scores:
+        for scores in reversed(session_scores):  # oldest -> newest
+            for sc in scores:
                 entry = series.setdefault(
                     sc.key,
                     {"label_zh": sc.label_zh, "label_en": sc.label_en, "scores": []},
@@ -117,7 +129,7 @@ def compute_insights(db: Session, client_id: str, recent: int = INSIGHTS_RECENT)
         if not series:
             return {
                 "available": False,
-                "sessions": len(sessions),
+                "sessions": len(session_scores),
                 "overall_delta": 0,
                 "weakest": None,
                 "strongest": None,
@@ -149,7 +161,7 @@ def compute_insights(db: Session, client_id: str, recent: int = INSIGHTS_RECENT)
         overall_delta = round(sum(x["delta"] for x in skills) / len(skills))
         return {
             "available": True,
-            "sessions": len(sessions),
+            "sessions": len(session_scores),
             "overall_delta": overall_delta,
             "weakest": skills[0],
             "strongest": skills[-1],

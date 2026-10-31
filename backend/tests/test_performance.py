@@ -76,7 +76,7 @@ def test_stats_header_reports_real_work_and_numeric_fixed_names_only():
         response = client.get("/api/stats", headers={"X-Client-Id": "SECRET-OWNER"})
     assert response.status_code == 200
     header = response.headers.get("server-timing", "")
-    assert 'db_queries;desc="3"' in header
+    assert 'db_queries;desc="1"' in header
     for name in ("db_acquire", "db_query", "db_commit", "stats_cpu", "response_ready"):
         assert re.search(rf"(?:^|, ){name};dur=\d+\.\d{{3}}(?:,|$)", header)
     assert "SECRET" not in header
