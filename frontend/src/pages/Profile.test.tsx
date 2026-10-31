@@ -109,3 +109,9 @@ it("keeps five-point and legacy six-point interview history on separate native a
   expect(charts.find((chart) => chart.yAxis.max === 5).series[0].data).toEqual([3, 5]);
   expect(charts.find((chart) => chart.yAxis.max === 6).series[0].data).toEqual([4, 6]);
 });
+
+it("uses lifetime badge keys even when recent lists are empty", async () => {
+  mocks.getStats.mockResolvedValueOnce({earned_badges:["pronunciation_90"], total_sessions:0});
+  render(<MemoryRouter><Profile/></MemoryRouter>);
+  expect(await screen.findByText("1/12")).toBeVisible();
+});

@@ -1,3 +1,5 @@
+import { learningDay, statsMatchDay } from "../lib/learningDay";
+import { useLearningDay } from "./useLearningDay";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { subscribeProgress, progressGeneration } from "../lib/progressCache";
 import {
@@ -30,11 +32,14 @@ const empty = (owner: number | null): ProfileData => ({
 
 /** Identity-keyed results prevent a previous account flashing while effects rerun. */
 export function useProfileData(owner: number | null, details = true) {
+  const day = useLearningDay();
+  const [statsDay, setStatsDay] = useState(day);
   const revision = useSyncExternalStore(subscribeProgress, progressGeneration, progressGeneration);
   const [data, setData] = useState<ProfileData>(() => empty(owner));
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
+    const requestDay = learningDay();
     const sections = details ? ["sessions", "stats", "practice"] : ["stats"];
     setData(previous => ({...(previous.owner === owner && previous.status === "ready" ? previous : empty(owner)),pending:sections,errors:[]}));
     const complete = (part:string, patch:Partial<ProfileData>, failed=false) => {
@@ -47,15 +52,15 @@ export function useProfileData(owner: number | null, details = true) {
         return {...previous,...patch,pending,errors,status:readable ? "ready" : pending.length ? "loading" : "error"};
       });
     };
-    void getStats(controller.signal).then(stats=>complete("stats",{stats})).catch(()=>complete("stats",{},true));
+    void getStats(controller.signal).then(stats=>{ if (learningDay() !== requestDay) return; if (!statsMatchDay(stats, requestDay)) { complete("stats",{},true); return; } setStatsDay(requestDay); complete("stats",{stats}); }).catch(()=>complete("stats",{},true));
     if (details) {
       void getSessions(controller.signal).then(sessions=>complete("sessions",{sessions})).catch(()=>complete("sessions",{},true));
       void getPractice(undefined,100,controller.signal).then(practice=>complete("practice",{practice})).catch(()=>complete("practice",{},true));
     }
     return () => controller.abort();
-  }, [owner, attempt, revision, details]);
+  }, [owner, attempt, revision, details, day]);
   return {
-    ...(data.owner === owner ? data : empty(owner)),
+    ...(data.owner === owner ? (statsDay === day ? data : {...data, stats: null}) : empty(owner)),
     reload: () => setAttempt((n) => n + 1),
   };
 }

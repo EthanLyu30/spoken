@@ -1,3 +1,4 @@
+import { learningDay } from "./learningDay";
 import type {
   Insights,
   PracticeRecord,
@@ -20,7 +21,7 @@ export interface ProgressData {
   sessionsPending: boolean;
   insightsPending: boolean;
 }
-const cache = new Map<string, { at: number; data: ProgressData }>();
+const cache = new Map<string, { at: number; day: string; data: ProgressData }>();
 let generation = 0;
 const listeners = new Set<() => void>();
 export function subscribeProgress(listener: () => void): () => void {
@@ -39,7 +40,7 @@ export function progressGeneration(): number {
 }
 export function readProgressCache(owner: string): ProgressData | undefined {
   const hit = cache.get(owner);
-  return hit && Date.now() - hit.at < 30_000 ? hit.data : undefined;
+  return hit && Date.now() - hit.at < 30_000 ? (hit.day === learningDay() ? hit.data : { ...hit.data, stats: null, statsPending: true }) : undefined;
 }
 export function discardProgressCache(owner: string): void {
   cache.delete(owner);
@@ -52,5 +53,5 @@ export function writeProgressCache(
   if (expectedGeneration !== generation || data.status !== "ready") return;
   if (!cache.has(owner) && cache.size >= 4)
     cache.delete(cache.keys().next().value!);
-  cache.set(owner, { at: Date.now(), data });
+  cache.set(owner, { at: Date.now(), day: learningDay(), data });
 }

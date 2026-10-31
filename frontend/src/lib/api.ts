@@ -5,7 +5,8 @@
  * (see vite.config.ts). In other environments, set VITE_API_BASE_URL.
  */
 import { useVoice } from "../store/voice";
-import { getToken } from "./authToken";
+import { getToken, getAuthGeneration } from "./authToken";
+import { deviceTimezone } from "./learningDay";
 import { getClientId } from "./clientId";
 import { readChatStream } from "./chatStream";
 import { transcribeDirect } from "./directAsr";
@@ -40,17 +41,23 @@ export interface HealthResponse {
  * cleanly (surfaced as an error the UI can show) instead of spinning forever.
  */
 async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const generation = getAuthGeneration();
+  const checkGeneration = () => { if (generation !== getAuthGeneration()) throw new DOMException("Account changed", "AbortError"); };
+  const requestInit: RequestInit = {
     ...init,
     headers: {
       "Content-Type": "application/json",
       "X-Client-Id": getClientId(),
+      "X-Timezone": deviceTimezone(),
       ...authHeader(),
       ...traceHeaders(init?.signal),
       ...(init?.headers as Record<string, string> | undefined),
     },
     signal: withTimeout(init?.signal, timeoutMs),
-  });
+  };
+  checkGeneration();
+  const res = await fetch(`${BASE_URL}${path}`, requestInit);
+  checkGeneration();
   if (!res.ok) {
     // Surface the backend's message (FastAPI `detail`) when present, e.g. the
     // Chinese login/register errors; fall back to a generic status string.
@@ -61,10 +68,13 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
     } catch {
       /* non-JSON error body */
     }
+    checkGeneration();
     throw new ApiError(detail || `${init?.method ?? "GET"} ${path} failed: ${res.status}`, res.status);
   }
+  const data = await res.json() as T;
+  checkGeneration();
   if (init?.method && init.method !== "GET" && /^\/api\/(sessions|practice|words)(\/|$)/.test(path)) invalidateProgress();
-  return res.json() as Promise<T>;
+  return data;
 }
 
 /** Liveness check used to surface backend connectivity in the UI. */
@@ -527,6 +537,9 @@ export function getPracticeDetail(id: number, signal?: AbortSignal): Promise<Pra
 }
 
 export interface Stats {
+  earned_badges?: string[];
+  timezone?: string;
+  local_date?: string;
   streak_days: number;
   today_count: number;
   today_goal: number;
@@ -646,12 +659,13 @@ export function patchWord(id: number, mastered: boolean, signal?: AbortSignal): 
 }
 
 export async function deleteWord(id: number, signal?: AbortSignal): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/words/${id}`, {
-    method: "DELETE",
-    headers: { "X-Client-Id": getClientId(), ...authHeader() },
-    signal,
-  });
+  const generation = getAuthGeneration();
+  const headers = { "X-Client-Id": getClientId(), "X-Timezone": deviceTimezone(), ...authHeader() };
+  if (generation !== getAuthGeneration()) throw new DOMException("Account changed", "AbortError");
+  const res = await fetch(`${BASE_URL}/api/words/${id}`, { method: "DELETE", headers, signal });
+  if (generation !== getAuthGeneration()) throw new DOMException("Account changed", "AbortError");
   if (!res.ok) throw new Error(`delete word failed: ${res.status}`);
+  invalidateProgress();
 }
 
 // --- Accounts (optional; the app also works anonymously per-device) ---

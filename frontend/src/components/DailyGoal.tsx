@@ -1,27 +1,12 @@
-import { useEffect, useState } from "react";
 import { ArrowRight, Target } from "lucide-react";
 import { Link } from "react-router-dom";
-import { getStats, type Stats } from "../lib/api";
+import { useProfileData } from "../hooks/useProfileData";
 import { useAuth } from "../store/auth";
 
 export function DailyGoal() {
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [error, setError] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  const owner = useAuth((s) => s.user?.id);
-  useEffect(() => {
-    const ctrl = new AbortController();
-    setStats(null);
-    setError(false);
-    getStats(ctrl.signal)
-      .then((s) => {
-        if (!ctrl.signal.aborted) setStats(s);
-      })
-      .catch(() => {
-        if (!ctrl.signal.aborted) setError(true);
-      });
-    return () => ctrl.abort();
-  }, [owner, attempt]);
+  const owner = useAuth((s) => s.user?.id ?? null);
+  const { stats, errors, reload } = useProfileData(owner, false);
+  const error = errors.includes("stats");
   const goal = stats?.today_goal ?? 3;
   return (
     <aside className="daily-goal">
@@ -53,7 +38,7 @@ export function DailyGoal() {
         {error ? (
           <>
             目标暂时无法读取。
-            <button type="button" onClick={() => setAttempt((n) => n + 1)}>
+            <button type="button" onClick={reload}>
               重新读取
             </button>
           </>

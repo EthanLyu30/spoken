@@ -1,4 +1,6 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { learningDay, statsMatchDay } from "../lib/learningDay";
+import { useLearningDay } from "./useLearningDay";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   getInsights,
   getPractice,
@@ -32,6 +34,7 @@ const empty = (owner: string): ProgressData => ({
 
 /** Independent sections: a slow report or analysis never hides readable history. */
 export function useProgressData(owner: string) {
+  const day = useLearningDay();
   const revision = useSyncExternalStore(
     subscribeProgress,
     progressGeneration,
@@ -40,9 +43,12 @@ export function useProgressData(owner: string) {
   const [data, setData] = useState<ProgressData>(
     () => readProgressCache(owner) ?? empty(owner),
   );
+  const [statsDay, setStatsDay] = useState(day);
+  const statsDayRef = useRef(day);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
+    const requestDay = learningDay();
     const cached = attempt === 0 ? readProgressCache(owner) : undefined;
     // A refresh can be abandoned before any response updates the cache.
     // Retain readable component state, but never leave an old complete entry.
@@ -52,7 +58,7 @@ export function useProgressData(owner: string) {
       (previous) =>
         cached ??
         (previous.owner === owner && previous.status === "ready"
-          ? { ...previous, errors: [], sessionsPending: true, practicePending: true, statsPending: true, insightsPending: true }
+          ? { ...previous, stats: statsDayRef.current === requestDay ? previous.stats : null, errors: [], sessionsPending: true, practicePending: true, statsPending: true, insightsPending: true }
           : empty(owner)),
     );
     const update = (patch: Partial<ProgressData>) => {
@@ -96,7 +102,7 @@ export function useProgressData(owner: string) {
       void loadLatest(cached.sessions[0].id);
     if (!cached?.stats || cached.statsPending || cached.errors.includes("stats"))
       getStats(controller.signal)
-        .then((stats) => update({ stats, statsPending: false }))
+        .then((stats) => { if (learningDay() !== requestDay) return; if (!statsMatchDay(stats, requestDay)) { failed("stats", { statsPending: false }); return; } statsDayRef.current = requestDay; setStatsDay(requestDay); update({ stats, statsPending: false }); })
         .catch(() => failed("stats", { statsPending: false }));
     if (!cached || cached.practicePending || cached.errors.includes("practice"))
       getPractice(undefined, 100, controller.signal)
@@ -107,9 +113,9 @@ export function useProgressData(owner: string) {
         .then((insights) => update({ insights, insightsPending: false }))
         .catch(() => failed("insights", { insightsPending: false }));
     return () => controller.abort();
-  }, [owner, attempt, revision]);
+  }, [owner, attempt, revision, day]);
   return {
-    ...(data.owner === owner ? data : empty(owner)),
+    ...(data.owner === owner ? (statsDay === day ? data : { ...data, stats: null }) : empty(owner)),
     reload: () => setAttempt((n) => n + 1),
   };
 }

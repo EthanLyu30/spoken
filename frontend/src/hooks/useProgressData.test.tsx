@@ -133,3 +133,19 @@ it("refreshes a mounted page when a practice finishes saving after navigation", 
   await waitFor(() => expect(result.current.practice).toHaveLength(1));
   expect(api.getSessions).toHaveBeenCalledTimes(2);
 });
+
+it("hides yesterday's stats on a day change while retaining history and rejects late stats", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date(2026, 9, 30, 12));
+  const { result, unmount } = renderHook(() => useProgressData("day-change"));
+  await waitFor(() => expect(result.current.stats?.total_sessions).toBe(80));
+  let resolve!: (value: unknown) => void;
+  api.getStats.mockReturnValueOnce(new Promise(r => { resolve = r; }));
+  act(() => { vi.setSystemTime(new Date(2026, 9, 31, 12)); window.dispatchEvent(new Event("focus")); });
+  await waitFor(() => expect(result.current.stats).toBeNull());
+  expect(result.current.sessions).toEqual([session]);
+  act(() => { vi.setSystemTime(new Date(2026, 10, 1, 12)); resolve({total_sessions: 999}); window.dispatchEvent(new Event("focus")); });
+  await waitFor(() => expect(result.current.stats?.total_sessions).toBe(80));
+  unmount();
+  vi.useRealTimers();
+});

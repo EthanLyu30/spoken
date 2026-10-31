@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Flame, Mic, Sparkles, Target } from "lucide-react";
 import { Buddy } from "./Buddy";
 import { Ring } from "./ui/Ring";
 import { ProgressBar } from "./ui/ProgressBar";
 import { StatChip } from "./StatChip";
-import { getStats, type Stats } from "../lib/api";
+import { useProfileData } from "../hooks/useProfileData";
+import { useAuth } from "../store/auth";
 import { useWords } from "../store/words";
 
 interface BuddyHeroProps {
@@ -14,16 +15,14 @@ interface BuddyHeroProps {
 
 /** Home hero: Pip greets the learner, with real level / XP / streak / daily goal. */
 export function BuddyHero({ greeting }: BuddyHeroProps) {
-  const [stats, setStats] = useState<Stats | null>(null);
+  const owner = useAuth(s => s.user?.id ?? null);
+  const { stats } = useProfileData(owner, false);
   const words = useWords((s) => s.words);
   const ensureLoaded = useWords((s) => s.ensureLoaded);
   const wordCount = words.filter((w) => w.kind !== "sentence").length;
 
   useEffect(() => {
-    const ctrl = new AbortController();
-    getStats(ctrl.signal).then(setStats).catch(() => undefined);
     ensureLoaded();
-    return () => ctrl.abort();
   }, [ensureLoaded]);
 
   const level = stats?.level ?? 1;
@@ -64,7 +63,7 @@ export function BuddyHero({ greeting }: BuddyHeroProps) {
           <div className="flex items-center gap-4">
             <Ring pct={goalPct} color="var(--leaf)" size={84}>
               <div className="text-center">
-                <div className="font-display text-lg font-bold leading-none tabnum text-ink">{todayCount}</div>
+                <div className="font-display text-lg font-bold leading-none tabnum text-ink">{stats ? todayCount : "—"}</div>
                 <div className="text-[0.6rem] font-bold uppercase text-muted">/ {todayGoal} 次</div>
               </div>
             </Ring>
@@ -94,7 +93,7 @@ export function BuddyHero({ greeting }: BuddyHeroProps) {
             <Link to="/progress" className="transition-transform hover:-translate-y-0.5" aria-label="查看进度">
               <StatChip
                 icon={<Target className="h-4 w-4" />}
-                value={`${Math.round(goalPct)}%`}
+                value={stats ? `${Math.round(goalPct)}%` : "—"}
                 label="今日目标"
                 tint="#e2f6ee"
                 fg="#2b9b70"

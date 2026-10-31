@@ -65,11 +65,9 @@ export default function Profile() {
 
   const sessionCount = stats?.total_sessions ?? sessions.length;
   const wordCount = words.length;
-  const best = sessions.reduce((m, s) => Math.max(m, s.overall), 0);
   const avg = sessions.length
     ? Math.round(sessions.reduce((a, s) => a + s.overall, 0) / sessions.length)
     : 0;
-  const distinct = new Set(sessions.map((s) => s.scenario_id)).size;
 
   const level = stats?.level ?? 1;
   const xp = stats?.xp ?? 0;
@@ -79,105 +77,81 @@ export default function Profile() {
   const todayGoal = stats?.today_goal ?? 3;
   const goalPct = Math.min(100, (todayCount / todayGoal) * 100);
 
-  const bestPron = practice
-    .filter((p) => p.kind === "pronunciation")
-    .reduce((m, p) => Math.max(m, p.score), 0);
-  const interviewCount = practice.filter((p) => p.kind === "interview").length;
-  const reviewedCount = words.filter((w) => (w.box ?? 0) > 0).length;
-
   const badges = [
     {
       icon: Star,
       title: "初次开口",
-      source: "sessions",
       desc: "完成第一次对话",
-      earned: sessionCount >= 1,
+      earned: stats?.earned_badges?.includes("first_conversation") ?? false,
     },
     {
       icon: Flame,
       title: "三日连击",
-      source: "stats",
       desc: "连续练习 3 天",
-      earned: streak >= 3,
+      earned: stats?.earned_badges?.includes("streak_3") ?? false,
     },
     {
       icon: Flame,
       title: "一周不断",
-      source: "stats",
       desc: "连续练习 7 天",
-      earned: streak >= 7,
+      earned: stats?.earned_badges?.includes("streak_7") ?? false,
     },
     {
       icon: MessageSquare,
       title: "话痨",
-      source: "sessions",
       desc: "累计 10 次对话",
-      earned: sessionCount >= 10,
+      earned: stats?.earned_badges?.includes("conversations_10") ?? false,
     },
     {
       icon: Sparkles,
       title: "词汇收藏家",
-      source: "words",
       desc: "收藏 10 个词",
-      earned: wordCount >= 10,
+      earned: stats?.earned_badges?.includes("words_10") ?? false,
     },
     {
       icon: Sparkles,
       title: "百词斩",
-      source: "words",
       desc: "收藏 50 个词",
-      earned: wordCount >= 50,
+      earned: stats?.earned_badges?.includes("words_50") ?? false,
     },
     {
       icon: Repeat,
       title: "复习标兵",
-      source: "words",
       desc: "复习过 10 个词",
-      earned: reviewedCount >= 10,
+      earned: stats?.earned_badges?.includes("reviewed_words_10") ?? false,
     },
     {
       icon: Mic,
       title: "发音达人",
-      source: "practice",
       desc: "跟读得分 ≥ 90",
-      earned: bestPron >= 90,
+      earned: stats?.earned_badges?.includes("pronunciation_90") ?? false,
     },
     {
       icon: Timer,
       title: "口语考官",
-      source: "practice",
       desc: "完成 3 次Take an Interview",
-      earned: interviewCount >= 3,
+      earned: stats?.earned_badges?.includes("interviews_3") ?? false,
     },
     {
       icon: Trophy,
       title: "高分达人",
-      source: "sessions",
       desc: "单次总分 ≥ 90",
-      earned: best >= 90,
+      earned: stats?.earned_badges?.includes("conversation_90") ?? false,
     },
     {
       icon: Award,
       title: "场景探索者",
-      source: "sessions",
       desc: "体验 5 个不同场景",
-      earned: distinct >= 5,
+      earned: stats?.earned_badges?.includes("scenarios_5") ?? false,
     },
     {
       icon: Rocket,
       title: "升级达人",
-      source: "stats",
       desc: "等级达到 Lv.3",
-      earned: level >= 3,
+      earned: stats?.earned_badges?.includes("level_3") ?? false,
     },
   ];
-  const sourceKnown:Record<string,boolean> = {
-    stats: stats !== null,
-    sessions: !pending.includes("sessions") && !errors.includes("sessions"),
-    practice: !pending.includes("practice") && !errors.includes("practice"),
-    words: wordsKnown,
-  };
-  const badgeKnown = (badge:typeof badges[number]) => badge.earned || sourceKnown[badge.source];
+  const badgeKnown = () => Array.isArray(stats?.earned_badges);
   const earnedCount = badges.filter((b) => b.earned).length;
 
   return (
@@ -295,7 +269,7 @@ export default function Profile() {
                       成就徽章
                     </h2>
                     <span className="text-sm font-semibold text-muted">
-                      {badges.every(badgeKnown) ? `${earnedCount}/${badges.length}` : `已确认 ${earnedCount} 枚`}
+                      {badgeKnown() ? `${earnedCount}/${badges.length}` : `已确认 ${earnedCount} 枚`}
                     </span>
                     <button
                       type="button"
@@ -328,7 +302,7 @@ export default function Profile() {
                         >
                           {b.earned ? (
                             <b.icon className="h-6 w-6" />
-                          ) : !badgeKnown(b) ? <span aria-hidden="true">—</span> : (
+                          ) : !badgeKnown() ? <span aria-hidden="true">—</span> : (
                             <Lock className="h-5 w-5" />
                           )}
                         </span>
@@ -336,7 +310,7 @@ export default function Profile() {
                           {b.title}
                         </p>
                         <p className="text-[0.66rem] text-muted">{b.desc}</p>
-                        {!badgeKnown(b) && <p className="text-[0.66rem] text-muted">状态待更新</p>}
+                        {!badgeKnown() && <p className="text-[0.66rem] text-muted">状态待更新</p>}
                       </div>
                     ))}
                   </div>
