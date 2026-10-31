@@ -29,25 +29,27 @@
 
 **Files:** clientId/authToken helpers and tests; api.ts typed ApiError; auth store/ownership tests; backend deps, auth/asr routes and ownership regression/tests.
 
-- [ ] Write failing tests for unique stable in-memory guests, token write/read/removal failures, 401 vs transient refresh, and blocked missing/blank/anon stored-data access. Preserve headerless registration and optional public endpoints.
-- [ ] Implement RAM fallbacks, explicit token overrides, typed HTTP status and 401-only logout; strict data-owner dependency and optional identity where no private records are exposed.
-- [ ] Run frontend identity and backend ownership suites, fix compatibility fixtures to identify their test guests explicitly, and commit.
+- [x] Write failing tests for unique stable in-memory guests, token write/read/removal failures, 401 vs transient refresh, and blocked missing/blank/anon stored-data access. Preserve headerless registration and optional public endpoints.
+- [x] Implement RAM fallbacks, explicit token overrides, typed HTTP status and 401-only logout; strict data-owner dependency and optional identity where no private records are exposed. Optional persisted Zustand caches also use a resilient storage adapter: quota errors must not turn successful login/logout into rejected actions.
+- [x] Run frontend identity and backend ownership suites, fix compatibility fixtures to identify their test guests explicitly, and commit.
 
 ### Task 2: Independent, current progress data
 
 **Files:** progressCache/useProgressData and tests; useProfileData and tests; Profile.tsx/tests.
 
-- [ ] Observe RED for single-endpoint failure, mounted-save invalidation and remounting after partially completed refresh.
-- [ ] Track sessionsPending, reset refresh pending flags and resume incomplete cached requests. Load profile sections independently with progress invalidation; voice tab loads stats only. Show partial failures without hiding history; count sessions from authoritative total.
-- [ ] Run focused profile/progress tests and commit.
+- [x] Observe RED for single-endpoint failure, mounted-save invalidation and remounting after partially completed refresh.
+- [x] Track sessionsPending/insightsPending, reset refresh pending flags and resume incomplete cached requests. Load profile sections independently with progress invalidation; voice tab loads stats only. Show partial failures without hiding history; count sessions from authoritative total.
+- [x] Run focused profile/progress tests and commit.
 
 ### Task 3: Browser-neutral voice discovery
 
 **Files:** speech.ts, speechWholeReply.test.ts, Profile.tsx.
 
-- [ ] Reproduce late Natural voice discovery and listener cleanup; test Edge's Microsoft Natural selection and full utterance without cloud calls.
-- [ ] Keep discovery subscription until cleanup, wire effect disposal, preserve explicit URI and whole-reply playback.
-- [ ] Run speech/profile tests and commit. Physical browser acceptance stays explicitly blocked if URL safety detection cannot operate.
+- [x] Reproduce late Natural voice discovery and listener cleanup; test Edge's Microsoft Natural selection and full utterance without cloud calls.
+- [x] Keep discovery subscription until cleanup, wire effect disposal, preserve explicit URI and whole-reply playback.
+- [x] Run speech/profile tests and commit. Physical browser acceptance stays explicitly blocked if URL safety detection cannot operate.
+
+**Verification before review:** frontend 278/278, backend 426/426 (90 existing/deprecation warnings), lint, TypeScript and production build passed. No new packages, suppliers, model downloads, credentials, database changes or production test records were created. Reproducible identity/progress bugs were validated in isolated tests, not by reading real users' data. Browser control stopped on unreliable Edge URL detection after the extension reported an unattached debugger. Both old task-directory and pytest-cache deletion were blocked before process launch by automatic policy, with no stated reason.
 
 ### Release
 

@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, createJSONStorage } from "zustand/middleware";
+import { resilientStorage } from "../lib/resilientStorage";
 
 export type VoiceEngine = "browser" | "iflytek" | "local";
 
@@ -49,6 +50,7 @@ export const useVoice = create<VoiceState>()(
     }),
     {
       name: "spoken-voice",
+      storage: createJSONStorage(() => resilientStorage),
       version: 2,
       migrate: (persisted, version) => {
         const saved = persisted && typeof persisted === "object" ? persisted as Partial<VoiceState> : {};

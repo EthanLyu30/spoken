@@ -6,6 +6,7 @@ const api = vi.hoisted(() => ({
   deleteWord: vi.fn(),
   patchWord: vi.fn(),
   reviewWord: vi.fn(),
+  loginUser: vi.fn(),
 }));
 vi.mock("../lib/api", async (load) => ({ ...(await load<object>()), ...api }));
 import { useWords } from "./words";
@@ -119,4 +120,16 @@ it("does not restore an account if its refresh returns after logout", async () =
   old.resolve(account);
   await pending;
   expect(useAuth.getState().user).toBeNull();
+});
+
+it("can log in and out consistently when browser storage denies all writes",async()=>{
+  const account={id:9,email:"test@example.test",display_name:"",avatar_url:"",created_at:""};
+  api.loginUser.mockResolvedValueOnce({token:"restricted-storage-token",user:account});
+  const denied=vi.spyOn(Storage.prototype,"setItem").mockImplementation(()=>{throw new Error("quota");});
+  try {
+    await expect(useAuth.getState().login("test@example.test","test-password")).resolves.toBeUndefined();
+    expect(useAuth.getState().user?.id).toBe(9);expect(getToken()).toBe("restricted-storage-token");
+    expect(()=>useAuth.getState().logout()).not.toThrow();
+    expect(getToken()).toBeNull();expect(useAuth.getState().user).toBeNull();
+  } finally {denied.mockRestore();}
 });

@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, createJSONStorage } from "zustand/middleware";
+import { resilientStorage } from "../lib/resilientStorage";
 import {
   deleteWord,
   getWords,
@@ -187,6 +188,7 @@ export const useWords = create<WordsState>()(
     }),
     {
       name: "spoken-words",
+      storage: createJSONStorage(() => resilientStorage),
       // Only persist saved rows; in-flight temps (negative ids) never hit storage.
       partialize: (s) => ({ words: s.words.filter((w) => w.id > 0) }),
     },

@@ -23,6 +23,12 @@ it("keeps an existing real guest identity if subsequent storage reads fail",asyn
   vi.spyOn(Storage.prototype,"getItem").mockImplementation(()=>{throw new Error("storage denied");});
   expect(getClientId()).toBe("existing-device");
 });
+it("starts a fresh guest after accessible site identity storage is cleared",async()=>{
+  localStorage.setItem("spoken-client-id","previous-device");
+  const {getClientId}=await import("./clientId");expect(getClientId()).toBe("previous-device");
+  localStorage.removeItem("spoken-client-id");
+  const fresh=getClientId();expect(fresh).not.toBe("previous-device");expect(getClientId()).toBe(fresh);
+});
 it("uses the new account token after overwrite failure and none after removal failure",async()=>{
   localStorage.setItem("spoken-token","old-account-token");
   const tokens=await import("./authToken");

@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, createJSONStorage } from "zustand/middleware";
+import { resilientStorage } from "../lib/resilientStorage";
 import { type CustomScene } from "../lib/api";
 
 /**
@@ -19,6 +20,6 @@ export const useCustomScene = create<CustomState>()(
       setScene: (scene) => set({ scene }),
       clear: () => set({ scene: null }),
     }),
-    { name: "spoken-custom-scene" },
+    { name: "spoken-custom-scene", storage: createJSONStorage(() => resilientStorage) },
   ),
 );

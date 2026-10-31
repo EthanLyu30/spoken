@@ -33,6 +33,10 @@ it('never rejects into the page when collection fails', async () => {
 it('does not turn unavailable device storage into one shared guest', async () => {
   const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('storage disabled'); });
   const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
-  try { await recordSiteVisit(); expect(fetcher).not.toHaveBeenCalled(); }
+  try {
+    await recordSiteVisit();
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0][1].headers['X-Client-Id']).not.toBe('anon');
+  }
   finally { read.mockRestore(); }
 });

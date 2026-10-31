@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, createJSONStorage } from "zustand/middleware";
+import { resilientStorage } from "../lib/resilientStorage";
 import {
   getMe,
   loginUser,
@@ -86,6 +87,7 @@ export const useAuth = create<AuthState>()(
     }),
     {
       name: "spoken-auth",
+      storage: createJSONStorage(() => resilientStorage),
       partialize: (s) => ({ user: s.user }),
     },
   ),

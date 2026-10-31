@@ -24,6 +24,9 @@ export function setToken(token: string): void {
     memoryOverride = false;
   } catch {
     memoryOverride = true;
+    // If writes hit quota but removal still works, do not retain the previous
+    // account token for a later page load. This page uses the new RAM session.
+    try { localStorage.removeItem(KEY); } catch { /* current-page override wins */ }
   }
 }
 
