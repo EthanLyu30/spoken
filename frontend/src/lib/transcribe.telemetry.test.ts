@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const backends = vi.hoisted(() => ({ cloud: vi.fn(), local: vi.fn() }));
 vi.mock("./api", () => ({ postAsr: backends.cloud }));
-vi.mock("./localSpeech/runtime", () => ({ isLocalSpeechModelReady: () => true }));
+vi.mock("./localSpeech/runtime", () => ({ isLocalSpeechModelReady: () => true,localSpeechCoordinator:{markError:vi.fn()} }));
 vi.mock("./localSpeech/moonshine", () => ({ transcribeWithMoonshine: backends.local }));
 vi.mock("../store/voice", () => ({ useVoice: { getState: () => ({ engine: "local" }) } }));
 import { transcribeSpeech } from "./transcribe";

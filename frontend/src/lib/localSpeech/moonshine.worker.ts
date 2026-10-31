@@ -58,7 +58,7 @@ function loadModel(): Promise<Transcriber> {
         );
       }
       return transcriber;
-    })();
+    })().catch(error => { modelPromise = null; throw error; });
   }
   return modelPromise;
 }

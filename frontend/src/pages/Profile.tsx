@@ -33,6 +33,7 @@ import { useWords } from "../store/words";
 import { useAuth } from "../store/auth";
 import { ProfileHero } from "../components/ProfileHero";
 import { SpeechPlaybackStatus } from "../components/SpeechPlaybackStatus";
+import { LocalSpeechStatus } from "../components/LocalSpeechStatus";
 import { resetOnboarding } from "../lib/onboarding";
 import { tokens } from "../lib/tokens";
 import { cn } from "../lib/utils";
@@ -342,7 +343,7 @@ export default function Profile() {
 const ENGINES: { id: VoiceEngine; label: string; hint: string }[] = [
   { id: "browser", label: "浏览器语音", hint: "默认 · 整段朗读，音色因设备而异" },
   { id: "iflytek", label: "云端语音", hint: "整段生成后播放 · 可选音色" },
-  { id: "local", label: "本地模型", hint: "实验功能 · 首次需下载较大模型" },
+  { id: "local", label: "本地 AI 语音（实验）", hint: "本机朗读与识别 · 首次需下载模型" },
 ];
 
 function VoiceSettings() {
@@ -427,18 +428,18 @@ function VoiceSettings() {
       </div>
       <p className="mb-4 text-xs text-muted">
         {engine === "browser"
-          ? "完整回复生成后一次朗读，优先使用设备英文声音；没有可用声音或无法启动朗读时，自动使用云端整段音频。"
+          ? "完整回复生成后一次朗读，自动优先选择 Google / Natural 等自然英文音色；没有可用声音或无法启动朗读时，自动使用云端整段音频。"
           : engine === "local"
-            ? "选择后才会后台下载识别与合成模型。加载中、设备较慢或失败时使用云端，建议在 Wi-Fi 下启用。"
+            ? "选择后才会准备模型，朗读优先加载。两项能力独立就绪，加载中和运行失败都可使用备用方案。"
             : "使用讯飞一次合成完整回复，音频生成完成后播放；不选音色时跟随场景。"}
       </p>
 
-      <label
+      {engine !== "local" && <label
         htmlFor="voice-selection"
         className="mb-1.5 block text-sm font-bold text-ink"
       >
         音色
-      </label>
+      </label>}
       {engine === "browser" ? (
         <select
           id="voice-selection"
@@ -453,18 +454,15 @@ function VoiceSettings() {
             </option>
           ))}
         </select>
-      ) : (
+      ) : engine === "iflytek" ? (
         <select
           id="voice-selection"
           value={vcn ?? ""}
           onChange={(e) => setVcn(e.target.value || null)}
-          disabled={engine === "local"}
           className="mb-5 w-full rounded-2xl border border-border bg-surface-2 px-4 py-2.5 text-ink outline-none focus:border-coral"
         >
           <option value="">
-            {engine === "local"
-              ? "本地英文女声 · 云端回退跟随设置"
-              : "跟随场景（推荐）"}
+            跟随场景（推荐）
           </option>
           {VOICE_OPTIONS.map((o) => (
             <option key={o.id} value={o.id}>
@@ -472,7 +470,7 @@ function VoiceSettings() {
             </option>
           ))}
         </select>
-      )}
+      ) : <LocalSpeechStatus />}
       {engine === "browser" && browserVoices.length === 0 && (
         <p className="-mt-3 mb-4 text-xs text-muted">
           此设备暂未提供英文浏览器音色；朗读时会自动使用云端整段音频。
@@ -494,7 +492,7 @@ function VoiceSettings() {
         style={{ accentColor: "var(--coral)" }}
       />
 
-      <div className="mb-1.5 flex items-center justify-between text-sm">
+      {engine !== "local" && <><div className="mb-1.5 flex items-center justify-between text-sm">
         <span className="font-bold text-ink">音调</span>
         <span className="font-semibold text-muted">{pitchLabel}</span>
       </div>
@@ -508,6 +506,7 @@ function VoiceSettings() {
         className="mb-5 w-full"
         style={{ accentColor: "var(--coral)" }}
       />
+      </>}
 
       <button
         type="button"

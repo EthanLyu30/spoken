@@ -1,0 +1,22 @@
+import {act,render,screen} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import {afterEach,expect,it,vi} from "vitest";
+import {createLocalSpeechCoordinator,type LocalSpeechCoordinator} from "../lib/localSpeech/coordinator";
+import {useVoice} from "../store/voice";
+const runtime=vi.hoisted(()=>({coordinator:null as LocalSpeechCoordinator|null}));
+vi.mock("../lib/localSpeech/runtime",()=>({get localSpeechCoordinator(){return runtime.coordinator;}}));
+import {LocalSpeechStatus} from "./LocalSpeechStatus";
+afterEach(()=>useVoice.getState().reset());
+it("shows independent model readiness and recovers a failed recognition model with retry",async()=>{
+  useVoice.setState({engine:"local"});
+  const recognition=vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(undefined);
+  runtime.coordinator=createLocalSpeechCoordinator({capability:{eligible:true},loadKokoro:async()=>{},loadMoonshine:recognition});
+  render(<LocalSpeechStatus/>);
+  await act(async()=>{await runtime.coordinator!.preload({includeKokoro:true,priority:"kokoro"});});
+  expect(screen.getByText(/Kokoro · Heart/)).toBeInTheDocument();
+  expect(screen.getByText("已就绪")).toBeInTheDocument();
+  expect(screen.getByText("加载或运行失败")).toBeInTheDocument();
+  await userEvent.setup().click(screen.getByRole("button",{name:"重试未就绪模型"}));
+  expect(await screen.findAllByText("已就绪")).toHaveLength(2);
+  expect(recognition).toHaveBeenCalledTimes(2);
+});

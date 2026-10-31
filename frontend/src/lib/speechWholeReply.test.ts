@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ fetchTtsUrl: vi.fn(), fetchTtsStream: vi.fn(), synthesize: vi.fn(), localReady: false,
+const mocks = vi.hoisted(() => ({ fetchTtsUrl: vi.fn(), fetchTtsStream: vi.fn(), synthesize: vi.fn(), modelError:vi.fn(), localReady: false,
   settings: { engine: "iflytek", vcn: null, speed: null, pitch: null, browserVoiceURI: null as string | null } }));
 vi.mock("./api", () => ({ fetchTtsUrl: mocks.fetchTtsUrl, fetchTtsStream: mocks.fetchTtsStream }));
 vi.mock("../store/voice", async actual => ({ ...await actual<object>(), useVoice: { getState: () => mocks.settings } }));
-vi.mock("./localSpeech/runtime", () => ({ isLocalSpeechModelReady: () => mocks.localReady }));
+vi.mock("./localSpeech/runtime", () => ({ isLocalSpeechModelReady: () => mocks.localReady,localSpeechCoordinator:{markError:mocks.modelError} }));
 vi.mock("./localSpeech/kokoro", () => ({ synthesizeWithKokoro: mocks.synthesize }));
 import { createSpeechQueue, speakText, stopSpeaking } from "./speech";
 
@@ -31,7 +31,7 @@ beforeEach(() => {
   audios.length = 0; utterances.length = 0; samples = [];
   mocks.settings.engine = "iflytek"; mocks.settings.browserVoiceURI = null; mocks.localReady = false;
   mocks.fetchTtsUrl.mockReset().mockResolvedValue("blob:whole");
-  mocks.fetchTtsStream.mockReset(); mocks.synthesize.mockReset(); nativeCancel.mockClear(); revoke.mockClear();
+  mocks.fetchTtsStream.mockReset(); mocks.synthesize.mockReset(); mocks.modelError.mockReset(); nativeCancel.mockClear(); revoke.mockClear();
   vi.stubGlobal("AudioContext", undefined); vi.stubGlobal("Audio", AudioDouble);
   vi.stubGlobal("SpeechSynthesisUtterance", UtteranceDouble);
   vi.stubGlobal("speechSynthesis", { getVoices: () => [{name:"Device English",voiceURI:"device-en",lang:"en-US",localService:true}], addEventListener: vi.fn(), removeEventListener: vi.fn(), cancel:nativeCancel, speak:(u:UtteranceDouble)=>utterances.push(u) });
@@ -49,6 +49,27 @@ it("buffers generated text and sends exactly one complete cloud request at end",
   expect(mocks.fetchTtsUrl.mock.calls.map(call=>call[0])).toEqual(["First. Second."]);
   expect(mocks.fetchTtsStream).not.toHaveBeenCalled();
   audios[0].onplaying?.(); audios[0].onended?.(); await done;
+});
+
+it("uses browser speech immediately while the selected local model is still loading",async()=>{
+  mocks.settings.engine="local";
+  const q=createSpeechQueue(); const done=q.end("Still a complete reply.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  expect(q.status).toMatchObject({effectiveEngine:"browser",fallbackReason:"local-unavailable"});
+  utterances[0].onstart?.(); utterances[0].onend?.(); await done;
+  expect(mocks.synthesize).not.toHaveBeenCalled();
+  expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
+});
+
+it("marks failed local inference unavailable and recovers with an available browser voice",async()=>{
+  mocks.settings.engine="local";mocks.localReady=true;
+  const error=new Error("local inference timed out");
+  mocks.synthesize.mockRejectedValueOnce(error);
+  const q=createSpeechQueue();const done=q.end("Recover without a cloud request.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  expect(mocks.modelError).toHaveBeenCalledWith("kokoro",error);
+  utterances[0].onstart?.();utterances[0].onend?.();await done;
+  expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
 });
 
 it("uses one native utterance for the final multi-sentence reply and preserves separate timings", async () => {

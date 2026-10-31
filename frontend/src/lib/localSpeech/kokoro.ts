@@ -8,8 +8,10 @@ const client = new LocalModelWorkerClient(
     }),
 );
 
-export async function loadKokoroModel(): Promise<void> {
-  await client.request("load", undefined, [], 8 * 60_000);
+export async function loadKokoroModel(report?: (progress: unknown) => void): Promise<void> {
+  const unsubscribe = report ? client.subscribeProgress(report) : () => {};
+  try { await client.request("load", undefined, [], 8 * 60_000); }
+  finally { unsubscribe(); }
 }
 
 export async function synthesizeWithKokoro(
@@ -19,7 +21,7 @@ export async function synthesizeWithKokoro(
   const result = await client.request<{
     audio: ArrayBuffer;
     sampleRate: number;
-  }>("synthesize", { text, speed }, [], 60_000);
+  }>("synthesize", { text, speed }, [], 2_000);
   return {
     audio: new Float32Array(result.audio),
     sampleRate: result.sampleRate,

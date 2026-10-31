@@ -11,6 +11,7 @@ export class LocalModelWorkerClient {
   private worker: Worker | null = null;
   private nextId = 1;
   private readonly pending = new Map<number, PendingRequest>();
+  private readonly progressListeners = new Set<(progress: unknown) => void>();
 
   constructor(private readonly createWorker: () => Worker) {}
 
@@ -25,19 +26,30 @@ export class LocalModelWorkerClient {
 
   private readonly onMessage = (event: MessageEvent<LocalWorkerResponse>) => {
     const message = event.data;
-    if (!("id" in message)) return; // progress is deliberately best-effort
+    if (!("id" in message)) {
+      if (message.type === "progress") this.progressListeners.forEach(listener => listener(message.progress));
+      return;
+    }
     const pending = this.pending.get(message.id);
     if (!pending) return;
     this.pending.delete(message.id);
     clearTimeout(pending.timer);
     if (message.ok) pending.resolve(message.result);
-    else pending.reject(new Error(message.error));
+    else {
+      const error = new Error(message.error);
+      pending.reject(error);
+      this.dispose(error); // Retry must get a fresh model, including failed cached promises.
+    }
   };
 
   private readonly onWorkerError = () => {
-    this.failAll(new Error("Local speech worker failed"));
-    this.dispose();
+    this.dispose(new Error("Local speech worker failed"));
   };
+
+  subscribeProgress(listener: (progress: unknown) => void): () => void {
+    this.progressListeners.add(listener);
+    return () => { this.progressListeners.delete(listener); };
+  }
 
   request<T>(
     type: string,
@@ -56,8 +68,7 @@ export class LocalModelWorkerClient {
 
       const id = this.nextId++;
       const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`Local speech worker timed out: ${type}`));
+        this.dispose(new Error(`Local speech worker timed out: ${type}`));
       }, timeoutMs);
       this.pending.set(id, {
         resolve: (value) => resolve(value as T),
@@ -84,7 +95,8 @@ export class LocalModelWorkerClient {
     this.pending.clear();
   }
 
-  dispose(): void {
+  dispose(error = new Error("Local speech worker stopped")): void {
+    this.failAll(error);
     if (!this.worker) return;
     this.worker.removeEventListener("message", this.onMessage);
     this.worker.removeEventListener("error", this.onWorkerError);

@@ -40,6 +40,7 @@ vi.mock("./voiceResolver", () => ({
 
 vi.mock("./localSpeech/runtime", () => ({
   isLocalSpeechModelReady: () => mocks.localReady,
+  localSpeechCoordinator: { markError:vi.fn() },
 }));
 
 vi.mock("./localSpeech/kokoro", () => ({

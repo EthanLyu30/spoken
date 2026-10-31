@@ -4,7 +4,7 @@ import { useVoice, VOICE_OPTIONS } from "../store/voice";
 import { beginSpeechPlayback, type SpeechPlayback } from "../store/speechPlayback";
 import { autoCloudOverrides, resolveVoiceMode } from "./voiceResolver";
 import { float32ToWavBlob } from "./localSpeech/audio";
-import { isLocalSpeechModelReady } from "./localSpeech/runtime";
+import { isLocalSpeechModelReady, localSpeechCoordinator } from "./localSpeech/runtime";
 import { bindInteraction, reportTiming } from "./telemetry";
 
 export interface Speaking {
@@ -165,39 +165,42 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
       playback.update({phase:"preparing"});
       const mode = await resolveVoiceMode(settings.engine, voiceSource());
       if (stopped) return;
-      if (mode.kind === "browser") {
-        engine = "browser";
-        playback.update({effectiveEngine:"browser",voice:pickBrowserVoice(settings.browserVoiceURI)?.name ?? "英文音色"});
+      let url: string | undefined;
+      const fallbackReason = settings.engine === "local" ? "local-unavailable" : settings.engine === "browser" ? "browser-unavailable" : null;
+      if (settings.engine === "local" && isLocalSpeechModelReady("kokoro")) {
+        try {
+          engine = "local"; transport = "local";
+          playback.update({effectiveEngine:"local",voice:"Kokoro · Heart"});
+          url = await fetchKokoroUrl(text, settings.speed);
+        } catch (error) {
+          localSpeechCoordinator.markError("kokoro",error);
+          if (stopped) return;
+        }
+      }
+      const browserMode = !url && settings.engine === "local"
+        ? await resolveVoiceMode("browser",voiceSource()) : mode;
+      if (stopped) { if (url) URL.revokeObjectURL(url); return; }
+      if (!url && browserMode.kind === "browser") {
+        engine = "browser"; transport = "unknown";
+        playback.update({effectiveEngine:"browser",voice:pickBrowserVoice(settings.browserVoiceURI)?.name ?? "英文音色",
+          fallbackReason:settings.engine === "local" ? "local-unavailable" : null});
         active = speakBrowser(text, settings, didStart);
         await active.done;
         // A listed voice may still be unavailable. Retry the complete reply
         // only before any native sound starts, so partial speech never repeats.
         if (!stopped && active.failed && firstAt === undefined) {
-          engine = "xfyun"; transport = "buffered";
-          const overrides = autoCloudOverrides(settings);
-          playback.update({effectiveEngine:"xfyun",voice:cloudVoiceName(overrides.vcn),fallbackReason:"browser-unavailable"});
-          const url = await fetchTtsUrl(text, scenarioId, controller.signal, overrides);
-          if (stopped) { URL.revokeObjectURL(url); return; }
-          active = playUrl(url, didStart);
+          active = null;
         }
-      } else {
-        let url: string | undefined;
-        if (settings.engine === "local" && isLocalSpeechModelReady("kokoro")) {
-          try {
-            engine = "local"; transport = "local";
-            playback.update({effectiveEngine:"local",voice:"Kokoro · Heart"});
-            url = await fetchKokoroUrl(text, settings.speed);
-          }
-          catch { if (stopped) return; }
-        }
+      }
+      if (!active) {
         if (!url) {
           if (stopped) return;
           engine = "xfyun"; transport = "buffered";
-          const overrides = mode.automaticFallback ? autoCloudOverrides(settings) : {
+          const overrides = settings.engine !== "iflytek" ? autoCloudOverrides(settings) : {
             vcn:settings.vcn ?? undefined,speed:settings.speed ?? undefined,pitch:settings.pitch ?? undefined,
           };
           playback.update({effectiveEngine:"xfyun",voice:cloudVoiceName(overrides.vcn),
-            fallbackReason:settings.engine === "browser" ? "browser-unavailable" : settings.engine === "local" ? "local-unavailable" : null});
+            fallbackReason});
           url = await fetchTtsUrl(text, scenarioId, controller.signal, overrides);
         }
         if (stopped) { URL.revokeObjectURL(url); return; }

@@ -8,8 +8,10 @@ const client = new LocalModelWorkerClient(
     }),
 );
 
-export async function loadMoonshineModel(): Promise<void> {
-  await client.request("load", undefined, [], 5 * 60_000);
+export async function loadMoonshineModel(report?: (progress: unknown) => void): Promise<void> {
+  const unsubscribe = report ? client.subscribeProgress(report) : () => {};
+  try { await client.request("load", undefined, [], 5 * 60_000); }
+  finally { unsubscribe(); }
 }
 
 export async function transcribeWithMoonshine(
@@ -22,6 +24,6 @@ export async function transcribeWithMoonshine(
     "transcribe",
     { pcm: transferable },
     [transferable],
-    45_000,
+    5_000,
   );
 }

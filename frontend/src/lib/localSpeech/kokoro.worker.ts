@@ -87,7 +87,7 @@ function loadModel(): Promise<KokoroTTS> {
         }
         throw error;
       }
-    })();
+    })().catch(error => { modelPromise = null; throw error; });
   }
   return modelPromise;
 }

@@ -3,13 +3,13 @@ import { readBrowserLocalSpeechCapability } from "./policy";
 
 export const localSpeechCoordinator = createLocalSpeechCoordinator({
   capability: readBrowserLocalSpeechCapability(),
-  loadMoonshine: async () => {
+  loadMoonshine: async (report) => {
     const { loadMoonshineModel } = await import("./moonshine");
-    await loadMoonshineModel();
+    await loadMoonshineModel(report);
   },
-  loadKokoro: async () => {
+  loadKokoro: async (report) => {
     const { loadKokoroModel } = await import("./kokoro");
-    await loadKokoroModel();
+    await loadKokoroModel(report);
   },
 });
 

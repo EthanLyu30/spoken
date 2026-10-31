@@ -1,5 +1,5 @@
 import { postAsr } from "./api";
-import { isLocalSpeechModelReady } from "./localSpeech/runtime";
+import { isLocalSpeechModelReady, localSpeechCoordinator } from "./localSpeech/runtime";
 import { useVoice } from "../store/voice";
 import { getInteraction, reportTiming } from "./telemetry";
 
@@ -37,7 +37,8 @@ export async function transcribeSpeech(pcm: ArrayBuffer, signal?: AbortSignal, m
       const { transcribeWithMoonshine } = await import(
         "./localSpeech/moonshine"
       );
-      return transcribeWithMoonshine(audio);
+      try { return await transcribeWithMoonshine(audio); }
+      catch (error) { localSpeechCoordinator.markError("moonshine",error); throw error; }
     },
     cloud: (audio) => { measurement.engine = "xfyun"; return postAsr(audio, signal); },
   });

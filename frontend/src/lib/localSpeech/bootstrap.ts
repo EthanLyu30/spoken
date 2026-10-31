@@ -1,12 +1,14 @@
 import { localSpeechCoordinator } from "./runtime";
 import { scheduleLocalSpeechPreload } from "./policy";
 import { useVoice } from "../../store/voice";
+import type { LocalSpeechPreloadOptions } from "./coordinator";
 
 interface BootstrapDependencies {
   enabled?: () => boolean;
   schedule: (task: () => void) => () => void;
   hasEnglishBrowserVoice: () => Promise<boolean>;
-  preload: (options: { includeKokoro: boolean }) => Promise<void>;
+  priority?: LocalSpeechPreloadOptions["priority"];
+  preload: (options: LocalSpeechPreloadOptions) => Promise<void>;
 }
 
 export function createLocalSpeechBootstrap(
@@ -18,15 +20,17 @@ export function createLocalSpeechBootstrap(
     started = true;
     dependencies.schedule(() => {
       void (async () => {
+        if (dependencies.enabled?.() === false) { started = false; return; }
         let hasEnglishVoice = false;
         try {
           hasEnglishVoice = await dependencies.hasEnglishBrowserVoice();
         } catch {
           // Treat voice discovery failure the same as a missing browser voice.
         }
-        await dependencies
-          .preload({ includeKokoro: !hasEnglishVoice })
-          .catch(() => undefined);
+        if (dependencies.enabled?.() === false) { started = false; return; }
+        await dependencies.preload({ includeKokoro: !hasEnglishVoice,
+          ...(dependencies.priority ? {priority:dependencies.priority} : {}),
+        }).catch(() => { started = false; });
       })();
     });
   };
@@ -36,7 +40,8 @@ const startLocalModels = createLocalSpeechBootstrap({
   enabled: () => useVoice.getState().engine === "local",
   schedule: scheduleLocalSpeechPreload,
   hasEnglishBrowserVoice: async () => false,
-  preload: (options) => localSpeechCoordinator.preload(options),
+  priority: "kokoro",
+  preload: (options) => localSpeechCoordinator.preload({...options,shouldContinue:()=>useVoice.getState().engine === "local"}),
 });
 
 let subscribed = false;
