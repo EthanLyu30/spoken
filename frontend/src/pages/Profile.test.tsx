@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { expect, it, vi } from "vitest";
@@ -19,6 +19,23 @@ vi.mock("../lib/speech", () => ({
   speakText: mocks.speakText,
 }));
 import Profile from "./Profile";
+
+it("does not claim practice history is empty while its request is still pending",async()=>{
+  mocks.getPractice.mockReturnValueOnce(new Promise(()=>{}));
+  render(<MemoryRouter><Profile/></MemoryRouter>);
+  expect(await screen.findByRole("heading",{name:"练习记录"})).toBeVisible();
+  expect(screen.queryByText(/还没有跟读/)).not.toBeInTheDocument();
+  expect(screen.getByText("正在读取练习记录…")).toBeVisible();
+});
+
+it("keeps successful history without claiming a zero streak when statistics fail",async()=>{
+  mocks.getStats.mockRejectedValueOnce(new Error("offline"));
+  render(<MemoryRouter><Profile/></MemoryRouter>);
+  expect(await screen.findByRole("heading",{name:"成就徽章"})).toBeVisible();
+  expect(screen.queryByText(/点燃你的第一团火苗/)).not.toBeInTheDocument();
+  expect(screen.getByText("统计暂时无法读取，已加载的记录仍可查看。")).toBeVisible();
+  expect(within(screen.getByText("三日连击").parentElement!).getByText("状态待更新")).toBeVisible();
+});
 
 it("shows the authoritative conversation total rather than the recent-history length",async()=>{
   mocks.getStats.mockResolvedValueOnce({total_sessions:78});

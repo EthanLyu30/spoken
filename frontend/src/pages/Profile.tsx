@@ -44,9 +44,10 @@ export default function Profile() {
   const [allBadges, setAllBadges] = useState(false);
   const settings = search.get("tab") === "voice";
   const words = useWords((s) => s.words);
+  const wordsKnown = useWords((s) => s.fetchedOnce && !s.error);
   const ensureLoaded = useWords((s) => s.ensureLoaded);
   const userId = useAuth((s) => s.user?.id ?? null);
-  const { sessions, stats, practice, status, errors, reload } = useProfileData(userId, !settings);
+  const { sessions, stats, practice, status, errors, pending, reload } = useProfileData(userId, !settings);
   const { hash } = useLocation();
 
   // Re-fetch when the account changes (login/logout) so stats/history follow
@@ -88,76 +89,95 @@ export default function Profile() {
     {
       icon: Star,
       title: "初次开口",
+      source: "sessions",
       desc: "完成第一次对话",
       earned: sessionCount >= 1,
     },
     {
       icon: Flame,
       title: "三日连击",
+      source: "stats",
       desc: "连续练习 3 天",
       earned: streak >= 3,
     },
     {
       icon: Flame,
       title: "一周不断",
+      source: "stats",
       desc: "连续练习 7 天",
       earned: streak >= 7,
     },
     {
       icon: MessageSquare,
       title: "话痨",
+      source: "sessions",
       desc: "累计 10 次对话",
       earned: sessionCount >= 10,
     },
     {
       icon: Sparkles,
       title: "词汇收藏家",
+      source: "words",
       desc: "收藏 10 个词",
       earned: wordCount >= 10,
     },
     {
       icon: Sparkles,
       title: "百词斩",
+      source: "words",
       desc: "收藏 50 个词",
       earned: wordCount >= 50,
     },
     {
       icon: Repeat,
       title: "复习标兵",
+      source: "words",
       desc: "复习过 10 个词",
       earned: reviewedCount >= 10,
     },
     {
       icon: Mic,
       title: "发音达人",
+      source: "practice",
       desc: "跟读得分 ≥ 90",
       earned: bestPron >= 90,
     },
     {
       icon: Timer,
       title: "口语考官",
+      source: "practice",
       desc: "完成 3 次Take an Interview",
       earned: interviewCount >= 3,
     },
     {
       icon: Trophy,
       title: "高分达人",
+      source: "sessions",
       desc: "单次总分 ≥ 90",
       earned: best >= 90,
     },
     {
       icon: Award,
       title: "场景探索者",
+      source: "sessions",
       desc: "体验 5 个不同场景",
       earned: distinct >= 5,
     },
     {
       icon: Rocket,
       title: "升级达人",
+      source: "stats",
       desc: "等级达到 Lv.3",
       earned: level >= 3,
     },
   ];
+  const sourceKnown:Record<string,boolean> = {
+    stats: stats !== null,
+    sessions: !pending.includes("sessions") && !errors.includes("sessions"),
+    practice: !pending.includes("practice") && !errors.includes("practice"),
+    words: wordsKnown,
+  };
+  const badgeKnown = (badge:typeof badges[number]) => badge.earned || sourceKnown[badge.source];
   const earnedCount = badges.filter((b) => b.earned).length;
 
   return (
@@ -223,27 +243,27 @@ export default function Profile() {
                 <div className="profile-stats mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <Stat
                     icon={<MessageSquare className="h-4 w-4" />}
-                    value={sessionCount}
+                    value={stats ? sessionCount : "—"}
                     label="对话练习次数"
                   />
                   <Stat
                     icon={<Sparkles className="h-4 w-4" />}
-                    value={wordCount}
+                    value={stats?.words_count ?? (wordsKnown ? wordCount : "—")}
                     label="收藏词"
                   />
                   <Stat
                     icon={<Flame className="h-4 w-4" />}
-                    value={streak}
+                    value={stats ? streak : "—"}
                     label="连续天数"
                   />
                   <Stat
                     icon={<Trophy className="h-4 w-4" />}
-                    value={avg || "—"}
+                    value={!sessions.length && (pending.includes("sessions") || errors.includes("sessions")) ? "—" : avg || "—"}
                     label="近期平均分"
                   />
                 </div>
 
-                <div className="profile-challenges">
+                {stats ? <div className="profile-challenges">
                   <StreakCard streak={streak} />
 
                   <section className="card mt-5 p-6">
@@ -265,7 +285,9 @@ export default function Profile() {
                       </div>
                     </div>
                   </section>
-                </div>
+                </div> : <p role="status" className="learning-notice">
+                  {pending.includes("stats") ? "正在读取统计…" : "统计暂时无法读取，已加载的记录仍可查看。"}
+                </p>}
 
                 <section id="badges" className="card mt-5 p-6">
                   <div className="mb-4 flex items-center justify-between">
@@ -273,7 +295,7 @@ export default function Profile() {
                       成就徽章
                     </h2>
                     <span className="text-sm font-semibold text-muted">
-                      {earnedCount}/{badges.length}
+                      {badges.every(badgeKnown) ? `${earnedCount}/${badges.length}` : `已确认 ${earnedCount} 枚`}
                     </span>
                     <button
                       type="button"
@@ -306,7 +328,7 @@ export default function Profile() {
                         >
                           {b.earned ? (
                             <b.icon className="h-6 w-6" />
-                          ) : (
+                          ) : !badgeKnown(b) ? <span aria-hidden="true">—</span> : (
                             <Lock className="h-5 w-5" />
                           )}
                         </span>
@@ -314,12 +336,13 @@ export default function Profile() {
                           {b.title}
                         </p>
                         <p className="text-[0.66rem] text-muted">{b.desc}</p>
+                        {!badgeKnown(b) && <p className="text-[0.66rem] text-muted">状态待更新</p>}
                       </div>
                     ))}
                   </div>
                 </section>
 
-                <PracticeHistory records={practice} />
+                <PracticeHistory records={practice} pending={pending.includes("practice")} unavailable={errors.includes("practice")} />
 
                 <div className="mt-6 text-center">
                   <button
@@ -603,7 +626,7 @@ function lineOption(
   };
 }
 
-function PracticeHistory({ records }: { records: PracticeRecord[] }) {
+function PracticeHistory({ records, pending, unavailable }: { records: PracticeRecord[]; pending: boolean; unavailable: boolean }) {
   const pron = records.filter((r) => r.kind === "pronunciation");
   const intv = records.filter((r) => r.kind === "interview");
   const interviewGroups = [
@@ -614,8 +637,9 @@ function PracticeHistory({ records }: { records: PracticeRecord[] }) {
   return (
     <section id="practice-history" className="card mt-5 p-6">
       <h2 className="font-display text-lg font-semibold text-ink">练习记录</h2>
+      {pending && <p role="status" className="mt-2 text-sm text-muted">正在读取练习记录…</p>}
       {records.length === 0 ? (
-        <p className="mt-2 text-sm text-muted">
+        pending ? null : unavailable ? <p role="status" className="mt-2 text-sm text-muted">练习记录暂时无法读取，请稍后重试。</p> : <p className="mt-2 text-sm text-muted">
           还没有跟读 / Take an Interview记录。去「金句」点跟读评分，或试试「Take
           an Interview」，这里就会出现你的成长曲线。
         </p>

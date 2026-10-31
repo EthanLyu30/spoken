@@ -48,6 +48,22 @@ it("resumes history requests when returning during a refresh with fast statistic
   expect(second.result.current.sessions[0]?.id).toBe(3);
   expect(api.getInsights).toHaveBeenCalledTimes(3);
 });
+
+it("retries every unfinished section when leaving before any refresh response arrives",async()=>{
+  const first=renderHook(()=>useProgressData("account-no-refresh-response"));
+  await waitFor(()=>expect(first.result.current.insightsPending).toBe(false));
+  for(const method of [api.getSessions,api.getPractice,api.getStats,api.getInsights])
+    method.mockReturnValueOnce(new Promise(()=>{}));
+  act(()=>first.result.current.reload());
+  await waitFor(()=>expect(first.result.current.sessionsPending).toBe(true));
+  first.unmount();
+  const second=renderHook(()=>useProgressData("account-no-refresh-response"));
+  await waitFor(()=>expect(api.getSessions).toHaveBeenCalledTimes(3));
+  expect(api.getPractice).toHaveBeenCalledTimes(3);
+  expect(api.getStats).toHaveBeenCalledTimes(3);
+  expect(api.getInsights).toHaveBeenCalledTimes(3);
+  second.unmount();
+});
 it("does not fail history when optional statistics fail", async () => {
   api.getStats.mockRejectedValue(new Error("offline"));
   const { result } = renderHook(() => useProgressData("device-b"));

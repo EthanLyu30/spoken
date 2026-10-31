@@ -41,6 +41,9 @@ export function readProgressCache(owner: string): ProgressData | undefined {
   const hit = cache.get(owner);
   return hit && Date.now() - hit.at < 30_000 ? hit.data : undefined;
 }
+export function discardProgressCache(owner: string): void {
+  cache.delete(owner);
+}
 export function writeProgressCache(
   owner: string,
   data: ProgressData,

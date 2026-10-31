@@ -53,6 +53,10 @@
 
 ### Release
 
-- [ ] Full frontend/backend, lint/type/build, one independent final review and one TDD fix pass for important findings.
+- [x] Full frontend/backend, lint/type/build, one independent final review and one TDD fix pass for important findings.
 - [ ] Verify protected-file hashes, merge/push main as EthanLyu30, check CI/deployment SHA and public non-private API behavior.
 - [ ] Report confirmed fixes, deferred date/badge/streak semantics, and exact blocked cleanup artifacts. Keep requested code/spec/plan; delete only permitted owned intermediates after verification.
+
+**Final review:** one independent review found two Important issues, no Critical or Minor: a refresh abandoned before its first response retained the old complete cache, and partial Profile loading could imply empty history/zero progress. Both were reproduced RED and repaired in one fix pass. Refresh now discards the old owner cache before requests; pending/unavailable practice and statistics have explicit placeholders; unconfirmed badges are labeled as awaiting data rather than locked. Previously readable values remain visible during refresh. Full frontend 281/281, backend 426/426, lint, TypeScript and production build passed.
+
+**Acceptance limits/backlog:** physical Edge/Chrome playback is unverified because Computer Use stopped on unreliable URL detection. Automated tests cover both Google and Microsoft Natural selection, complete utterances, late discovery and disposal. Logout after a reload cannot be guaranteed when the browser rejects removal of the old token; cross-tab authentication synchronization remains a separate baseline issue. Lifetime achievements depend on retained history windows; daily timezone and vocabulary-review streak definitions still require a consistent data contract. These are not marked fixed. No production user records were read during diagnosis. Cleanup remains blocked for both `.superpowers/sdd/2026-10-31-natural-voice-latency-repair` and `D:/personal_space/spoken/backend/.pytest_cache`; build/test caches and this task's diagnostics remain reported rather than deleted through an alternate mechanism.

@@ -10,6 +10,7 @@ import {
   progressGeneration,
   subscribeProgress,
   readProgressCache,
+  discardProgressCache,
   writeProgressCache,
   type ProgressData,
 } from "../lib/progressCache";
@@ -43,6 +44,9 @@ export function useProgressData(owner: string) {
   useEffect(() => {
     const controller = new AbortController();
     const cached = attempt === 0 ? readProgressCache(owner) : undefined;
+    // A refresh can be abandoned before any response updates the cache.
+    // Retain readable component state, but never leave an old complete entry.
+    if (!cached) discardProgressCache(owner);
     const generation = progressGeneration();
     setData(
       (previous) =>
