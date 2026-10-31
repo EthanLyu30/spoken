@@ -2,7 +2,7 @@ import { learningDay } from "./learningDay";
 import type {
   Insights,
   PracticeRecord,
-  SessionDetail,
+  ProgressSessions,
   SessionSummary,
   Stats,
 } from "./api";
@@ -14,7 +14,7 @@ export interface ProgressData {
   practice: PracticeRecord[];
   stats: Stats | null;
   insights: Insights | null;
-  latest: SessionDetail | null;
+  latest: ProgressSessions["latest"];
   errors: string[];
   practicePending: boolean;
   statsPending: boolean;

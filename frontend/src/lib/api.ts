@@ -5,18 +5,35 @@
  * (see vite.config.ts). In other environments, set VITE_API_BASE_URL.
  */
 import { useVoice } from "../store/voice";
-import { getToken, getAuthGeneration, assertAuthGeneration } from "./authToken";
-import { deviceTimezone } from "./learningDay";
+import { getToken, getAuthGeneration, assertAuthGeneration, subscribeAuthGeneration } from "./authToken";
+import { deviceTimezone, learningDay } from "./learningDay";
 import { getClientId } from "./clientId";
 import { readChatStream } from "./chatStream";
 import { transcribeDirect } from "./directAsr";
 import { withTimeout } from "./requestTimeout";
-import { invalidateProgress } from "./progressCache";
+import { invalidateProgress, progressGeneration, subscribeProgress } from "./progressCache";
+import { ReadResource } from "./readResource";
 import { traceHeaders } from "./telemetry";
 export { withTimeout } from "./requestTimeout";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const DEFAULT_TIMEOUT = 60_000; // generous: DeepSeek replies can be slow
+const metadata = new ReadResource();
+subscribeAuthGeneration(() => metadata.clear());
+subscribeProgress(() => metadata.clear());
+
+async function readMetadata<T>(path: string, signal?: AbortSignal, force = false): Promise<T> {
+  const auth = getAuthGeneration();
+  const device = getClientId();
+  // getClientId may itself reconcile a changed guest identity.
+  assertAuthGeneration(auth, signal);
+  const progress = progressGeneration();
+  const day = learningDay();
+  const valid = () => auth === getAuthGeneration() && progress === progressGeneration()
+    && day === learningDay() && device === getClientId() && auth === getAuthGeneration();
+  const key = JSON.stringify([auth, device, progress, day, BASE_URL, path]);
+  return metadata.read(key, sharedSignal => request<T>(path, { signal: sharedSignal }), valid, signal, force);
+}
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number) {
@@ -298,8 +315,8 @@ export function postSession(
 }
 
 /** Recent sessions, newest first. */
-export function getSessions(signal?: AbortSignal): Promise<SessionSummary[]> {
-  return request<SessionSummary[]>("/api/sessions", { signal });
+export function getSessions(signal?: AbortSignal, force = false): Promise<SessionSummary[]> {
+  return readMetadata<SessionSummary[]>("/api/sessions", signal, force);
 }
 
 export function getSession(id: number, signal?: AbortSignal): Promise<SessionDetail> {
@@ -579,15 +596,15 @@ export function savePractice(
   });
 }
 
-export function getPractice(kind?: string, limit = 100, signal?: AbortSignal): Promise<PracticeRecord[]> {
+export function getPractice(kind?: string, limit = 100, signal?: AbortSignal, force = false): Promise<PracticeRecord[]> {
   const q = new URLSearchParams({ limit: String(limit) });
   if (kind) q.set("kind", kind);
-  return request<PracticeRecord[]>(`/api/practice?${q.toString()}`, { signal });
+  return readMetadata<PracticeRecord[]>(`/api/practice?${q.toString()}`, signal, force);
 }
 
 /** Real activity stats: streak, level/XP, today vs goal, totals. */
-export function getStats(signal?: AbortSignal): Promise<Stats> {
-  return request<Stats>("/api/stats", { signal });
+export function getStats(signal?: AbortSignal, force = false): Promise<Stats> {
+  return readMetadata<Stats>("/api/stats", signal, force);
 }
 
 export interface SkillInsight {
@@ -609,8 +626,18 @@ export interface Insights {
 }
 
 /** Cross-session ability analysis: weakest dimension to focus on + per-skill trend. */
-export function getInsights(signal?: AbortSignal): Promise<Insights> {
-  return request<Insights>("/api/stats/insights", { signal });
+export function getInsights(signal?: AbortSignal, force = false): Promise<Insights> {
+  return readMetadata<Insights>("/api/stats/insights", signal, force);
+}
+
+export interface ProgressSessions {
+  sessions: SessionSummary[];
+  insights: Insights;
+  latest: { id: number; scores: SkillScore[] } | null;
+}
+
+export function getProgressSessions(signal?: AbortSignal, force = false): Promise<ProgressSessions> {
+  return readMetadata<ProgressSessions>("/api/progress/sessions", signal, force);
 }
 
 export interface Word {

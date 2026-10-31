@@ -2,10 +2,8 @@ import { learningDay, statsMatchDay } from "../lib/learningDay";
 import { useLearningDay } from "./useLearningDay";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
-  getInsights,
   getPractice,
-  getSession,
-  getSessions,
+  getProgressSessions,
   getStats,
 } from "../lib/api";
 import {
@@ -46,8 +44,11 @@ export function useProgressData(owner: string) {
   const [statsDay, setStatsDay] = useState(day);
   const statsDayRef = useRef(day);
   const [attempt, setAttempt] = useState(0);
+  const attempted = useRef(0);
   useEffect(() => {
     const controller = new AbortController();
+    const force = attempt !== attempted.current;
+    attempted.current = attempt;
     const requestDay = learningDay();
     const cached = attempt === 0 ? readProgressCache(owner) : undefined;
     // A refresh can be abandoned before any response updates the cache.
@@ -56,7 +57,7 @@ export function useProgressData(owner: string) {
     const generation = progressGeneration();
     setData(
       (previous) =>
-        cached ??
+        (cached ? { ...cached, sessionsPending: true, practicePending: true, statsPending: true, insightsPending: true } : undefined) ??
         (previous.owner === owner && previous.status === "ready"
           ? { ...previous, stats: statsDayRef.current === requestDay ? previous.stats : null, errors: [], sessionsPending: true, practicePending: true, statsPending: true, insightsPending: true }
           : empty(owner)),
@@ -81,37 +82,23 @@ export function useProgressData(owner: string) {
           ? {
               ...previous,
               ...patch,
-              errors: [...new Set([...previous.errors, part])],
+              errors: [...new Set([...previous.errors, part, ...(part === "sessions" ? ["insights"] : [])])],
             }
           : previous,
       );
     };
-    const loadLatest = (id: number) =>
-      getSession(id, controller.signal)
-        .then((latest) => update({ latest }))
-        .catch(() => failed("latest"));
-    if (!cached || cached.sessionsPending || cached.errors.includes("sessions"))
-      getSessions(controller.signal)
-        .then((sessions) => {
-          if (controller.signal.aborted) return;
-          update({ sessions, status: "ready", latest: null, sessionsPending: false });
-          if (sessions.length) void loadLatest(sessions[0].id);
-        })
-        .catch(() => failed("sessions", { status: "error", sessionsPending: false }));
-    else if (cached.sessions.length && !cached.latest)
-      void loadLatest(cached.sessions[0].id);
-    if (!cached?.stats || cached.statsPending || cached.errors.includes("stats"))
-      getStats(controller.signal)
-        .then((stats) => { if (learningDay() !== requestDay) return; if (!statsMatchDay(stats, requestDay)) { failed("stats", { statsPending: false }); return; } statsDayRef.current = requestDay; setStatsDay(requestDay); update({ stats, statsPending: false }); })
-        .catch(() => failed("stats", { statsPending: false }));
-    if (!cached || cached.practicePending || cached.errors.includes("practice"))
-      getPractice(undefined, 100, controller.signal)
-        .then((practice) => update({ practice, practicePending: false }))
-        .catch(() => failed("practice", { practicePending: false }));
-    if (!cached?.insights || cached.insightsPending || cached.errors.includes("insights"))
-      getInsights(controller.signal)
-        .then((insights) => update({ insights, insightsPending: false }))
-        .catch(() => failed("insights", { insightsPending: false }));
+    // Snapshot data is for immediate rendering only; the resource owns freshness.
+    getProgressSessions(controller.signal, force)
+      .then(({ sessions, insights, latest }) => {
+        update({ sessions, insights, latest, status: "ready", sessionsPending: false, insightsPending: false });
+      })
+      .catch(() => failed("sessions", { status: "error", sessionsPending: false, insightsPending: false }));
+    getStats(controller.signal, force)
+      .then((stats) => { if (learningDay() !== requestDay) return; if (!statsMatchDay(stats, requestDay)) { failed("stats", { statsPending: false }); return; } statsDayRef.current = requestDay; setStatsDay(requestDay); update({ stats, statsPending: false }); })
+      .catch(() => failed("stats", { statsPending: false }));
+    getPractice(undefined, 100, controller.signal, force)
+      .then((practice) => update({ practice, practicePending: false }))
+      .catch(() => failed("practice", { practicePending: false }));
     return () => controller.abort();
   }, [owner, attempt, revision, day]);
   return {

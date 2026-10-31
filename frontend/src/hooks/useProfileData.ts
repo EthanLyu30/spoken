@@ -1,6 +1,6 @@
 import { learningDay, statsMatchDay } from "../lib/learningDay";
 import { useLearningDay } from "./useLearningDay";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { subscribeProgress, progressGeneration } from "../lib/progressCache";
 import {
   getPractice,
@@ -37,8 +37,11 @@ export function useProfileData(owner: number | null, details = true) {
   const revision = useSyncExternalStore(subscribeProgress, progressGeneration, progressGeneration);
   const [data, setData] = useState<ProfileData>(() => empty(owner));
   const [attempt, setAttempt] = useState(0);
+  const attempted = useRef(0);
   useEffect(() => {
     const controller = new AbortController();
+    const force = attempt !== attempted.current;
+    attempted.current = attempt;
     const requestDay = learningDay();
     const sections = details ? ["sessions", "stats", "practice"] : ["stats"];
     setData(previous => ({...(previous.owner === owner && previous.status === "ready" ? previous : empty(owner)),pending:sections,errors:[]}));
@@ -52,10 +55,10 @@ export function useProfileData(owner: number | null, details = true) {
         return {...previous,...patch,pending,errors,status:readable ? "ready" : pending.length ? "loading" : "error"};
       });
     };
-    void getStats(controller.signal).then(stats=>{ if (learningDay() !== requestDay) return; if (!statsMatchDay(stats, requestDay)) { complete("stats",{},true); return; } setStatsDay(requestDay); complete("stats",{stats}); }).catch(()=>complete("stats",{},true));
+    void getStats(controller.signal, force).then(stats=>{ if (learningDay() !== requestDay) return; if (!statsMatchDay(stats, requestDay)) { complete("stats",{},true); return; } setStatsDay(requestDay); complete("stats",{stats}); }).catch(()=>complete("stats",{},true));
     if (details) {
-      void getSessions(controller.signal).then(sessions=>complete("sessions",{sessions})).catch(()=>complete("sessions",{},true));
-      void getPractice(undefined,100,controller.signal).then(practice=>complete("practice",{practice})).catch(()=>complete("practice",{},true));
+      void getSessions(controller.signal, force).then(sessions=>complete("sessions",{sessions})).catch(()=>complete("sessions",{},true));
+      void getPractice(undefined,100,controller.signal, force).then(practice=>complete("practice",{practice})).catch(()=>complete("practice",{},true));
     }
     return () => controller.abort();
   }, [owner, attempt, revision, details, day]);
