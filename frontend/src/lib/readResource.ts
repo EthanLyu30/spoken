@@ -68,7 +68,11 @@ export class ReadResource {
           if (entry && "flight" in entry && entry.flight === current) this.entries.delete(key);
           current.controller.abort();
         }
-        if (error !== undefined) reject(error); else resolve(value!);
+        if (error !== undefined) reject(error);
+        // The cache commit and finally chain settle in separate microtasks.
+        // Invalidation may see only a completed entry during that interval.
+        else if (signal?.aborted || current.controller.signal.aborted || !valid()) reject(abortError());
+        else resolve(value!);
       };
       const cancelled = () => finish(abortError());
       signal?.addEventListener("abort", cancelled, { once: true });

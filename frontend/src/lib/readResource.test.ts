@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { getStats, getPractice, getSession, getSessions, getInsights, getProgressSessions, postSession } from "./api";
-import { invalidateProgress } from "./progressCache";
-import { clearToken, setToken } from "./authToken";
+import { invalidateProgress, progressGeneration } from "./progressCache";
+import { clearToken, setToken, getAuthGeneration } from "./authToken";
+import { ReadResource } from "./readResource";
 const response = (data: unknown) => ({ ok: true, json: async () => data });
 beforeEach(() => { invalidateProgress(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); clearToken(); invalidateProgress(); });
@@ -116,4 +117,55 @@ it("does not dispatch for an already cancelled reader", async () => {
   const controller = new AbortController(); controller.abort();
   await expect(getStats(controller.signal)).rejects.toMatchObject({ name: "AbortError" });
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["auth", getAuthGeneration, () => setToken("settlement-account")],
+  ["mutation", progressGeneration, invalidateProgress],
+] as const)("rejects each reader after %s changes between cache commit and delivery, preserving a successor", async (_kind, generation, invalidate) => {
+  const resource = new ReadResource();
+  const original = generation();
+  const valid = () => original === generation();
+  const first = resource.read("stats", () => Promise.resolve(99), valid);
+  const second = resource.read("stats", () => Promise.resolve(100), valid);
+  const results = Promise.allSettled([first, second]);
+  let successor!: Promise<number>;
+  // The fulfilled loader's commit handler is already queued. This runs before
+  // its finally/delivery handlers, when clear() sees a completed entry.
+  queueMicrotask(() => {
+    invalidate();
+    resource.clear();
+    successor = resource.read("stats", () => Promise.resolve(4), () => true);
+  });
+  expect(await results).toEqual([
+    { status: "rejected", reason: expect.objectContaining({ name: "AbortError" }) },
+    { status: "rejected", reason: expect.objectContaining({ name: "AbortError" }) },
+  ]);
+  expect(await successor).toBe(4);
+  expect(await resource.read("stats", () => Promise.reject(new Error("successor cache lost")), () => true)).toBe(4);
+});
+
+it("rechecks a cached reader when its scope changes before queued delivery", async () => {
+  const resource = new ReadResource();
+  const original = progressGeneration();
+  const valid = () => original === progressGeneration();
+  await resource.read("stats", () => Promise.resolve(99), valid);
+  queueMicrotask(() => { invalidateProgress(); resource.clear(); });
+  await expect(resource.read("stats", () => Promise.resolve(100), valid)).rejects.toMatchObject({ name: "AbortError" });
+});
+
+it.each([
+  ["auth", () => setToken("api-settlement-account")],
+  ["mutation", invalidateProgress],
+] as const)("rejects API metadata when %s changes during resource settlement", async (_kind, invalidate) => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => {
+      // Let response decoding and the resource's cache commit complete, but
+      // invalidate before its finally chain delivers the value to subscribers.
+      queueMicrotask(() => queueMicrotask(() => queueMicrotask(invalidate)));
+      return { today_count: 99 };
+    },
+  }));
+  await expect(getStats()).rejects.toMatchObject({ name: "AbortError" });
 });
