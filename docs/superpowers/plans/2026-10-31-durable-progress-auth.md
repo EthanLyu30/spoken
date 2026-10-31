@@ -1,0 +1,66 @@
+# Durable Progress and Account Synchronization Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Make achievements and learning days reliable and synchronize account identity safely across tabs, then verify and publish main.
+
+**Architecture:** A durable metadata journal and permanent earned badges supply statistics independently of retained details. A frontend identity coordinator invalidates stale work before adopting another account. The frontend consumes the new stats contract and refreshes local-day state.
+
+**Tech Stack:** FastAPI, SQLAlchemy/SQLite/Postgres, Python ZoneInfo; React/TypeScript/Zustand/Vitest.
+
+**Spec:** docs/superpowers/specs/2026-10-31-durable-progress-auth-design.md
+
+## Global Constraints
+
+- Use device-local days; review counts toward learning streaks but not the three-speaking-practice daily goal.
+- Preserve existing detail retention, charts/insights, interview scoring/reference versions, user data and voice behavior.
+- Preserve protected dirty files in the D: checkout; no .env/keys/personal-record output, no force push, author EthanLyu30 <2454472858@qq.com>.
+- New event and source activity commit together; permanent owner/idempotency receipts prevent count inflation after pruning.
+- Canonical identity generation must guard old async completions and unsent follow-on writes; denied-storage credentials stay current-page only.
+- Root owns docs and release integration; implementers touch only their assigned source/test domain and do not spawn agents or push/merge/delete.
+
+## Review Focus
+
+- Concurrent duplicate saves, detail pruning and later registration claiming must not duplicate XP or leak ownership.
+- Word deletion/recollection, forgotten reviews, missing old timestamps and repeated migration must preserve evidence without inventing activity.
+- DST/midnight/timezone changes must not reuse yesterday's or another timezone's cache.
+- A→B→A identity transitions and old unmount/feedback/grading chains must not write A's content under B.
+- Partial network/storage failures must preserve working guest/login/progress behavior without resurrecting old credentials or rendering old private data.
+
+### Task 1: Durable activity, achievements and local-day backend
+
+**Files:** Create backend/app/models/progress.py, backend/app/services/progress.py, focused backend/tests/test_durable_progress.py (split migration tests if needed). Modify backend/app/db.py, models/__init__.py, services/{sessions,practice,words,users}.py, core/deps.py, api/{practice,sessions,words}.py, schemas/{practice,session}.py and requirements.txt as necessary. Backend only.
+
+- [ ] Add regression tests for lifetime counts/XP/badges after actual detail pruning; deleted/recollected vocabulary; review-only days and box=0; Shanghai midnight, New York DST and UTC fallback; repeated/concurrent backfill; original receipts after pruning and claiming; isolation and legacy null times. Run and record expected failures.
+- [ ] Implement the spec's permanent journal and earned badges, source-atomic writes and versioned backfill. Stable badge keys must match the spec. Introduce optional timezone argument/dependency with UTC fallback, preserving existing direct service callers. Stats extends existing fields with earned_badges:string[], timezone:string and local_date:string. Handle unique conflicts by rolling back incomplete source writes and reading the canonical receipt, not by silently counting a new source row.
+- [ ] Keep old SessionDetail responses for retained details; minimal expired receipts explicitly mark detail_available:false and preserve original id/scenario/date/overall. Do not regenerate expired text from a new payload. Registration claim merges events/badges transactionally. Migration uses supplied engine/connection, not a stale SessionLocal.
+- [ ] Run new and affected persistence/auth/practice/ownership suites, then full backend suite with D:/personal_space/spoken/backend/.venv/Scripts/python.exe. Self-review atomicity/concurrency and commit only assigned backend changes. Report new interfaces, tests and limitations.
+
+### Task 2: Canonical identity and cross-tab safety
+
+**Files:** frontend/src/lib/authToken.ts, store/auth.ts, main.tsx, App.tsx; a focused lib/authSync.ts if useful; store/words.ts or session.ts only for ownership safety; hooks/useInterviewSession.ts; pages/{Conversation,Report}.tsx; lib/sessionSave.ts; focused synchronization tests and existing ownership/storage/async-flow tests. Do not edit api.ts, progressCache.ts, Profile.tsx or progress/profile hooks: Task 3 owns them; request any required shared API seam through root.
+
+- [ ] Add failing regressions for external login/logout/storage.clear, latest durable token despite stale events, duplicates/no rebroadcast, A→B→A and same-account replacement, logout during login, old refresh success/401/profile completion, cache mismatch at startup, RAM fallback and throwing/missing BroadcastChannel.
+- [ ] Add failing regressions for conversation unmount→feedback→save, report retry, interview score→practice-save and vocabulary mutation resolving after identity changes; already-sent valid saves must retain existing behavior.
+- [ ] Implement canonical getToken snapshot and exported getAuthGeneration():number (generation increments on credential/identity transitions; unchanged reads do not increment). Export initialization/cleanup that main.tsx invokes before rendering. Synchronize by reading the latest durable token; optional BC carries invalidation only, never credentials. Keep denied-storage RAM fallback current-page only. Use operation revisions for overlapping login attempts.
+- [ ] Synchronously clear previous identity caches/session, gate account resolution and key owner-sensitive subtree by generation. Capture generation at workflow start and check before applying old results and before unsent follow-on mutations. Preserve benign transient refreshes and ordinary navigation persistence. Initial no-token guests must not wait on getMe.
+- [ ] Run affected auth/storage/ownership/conversation/report/interview/sessionSave tests and TypeScript check; self-review credential/request/UI consistency. Commit only assigned files, report interfaces and tests. Coordinate api.ts integration with root/Task 3 rather than editing it concurrently.
+
+### Task 3: Frontend lifetime badges and daily freshness integration
+
+**Files:** frontend/src/lib/api.ts, progressCache.ts; new lib/learningDay.ts and hook useLearningDay.ts if appropriate; hooks/{useProgressData,useProfileData}.ts, daily-stat consumers and pages/Profile.tsx; related frontend tests. Start after Task 1's interface is stable; do not edit Task 2's auth-owned files.
+
+- [ ] Add regressions for X-Timezone fallback/header, midnight/timezone/focus/visibility invalidation, partial-load and interrupted refresh preservation, earned badges beyond latest lists and unknown stats behavior, successful word deletion invalidation and stale async response rejection across account generations.
+- [ ] Extend Stats with the backend's earned_badges/timezone/local_date. All badge acquisition reads durable keys; do not derive lifetime negatives from limited lists. Missing legacy earned_badges means unknown status, not falsely locked. Preserve current presentation, existing recent averages/charts and useful partial data.
+- [ ] Send validated current device timezone in common requests; invalidate progress after deleteWord success. Include local day/timezone in cached statistics validity, refresh on midnight and focus/visibility changes without repeated unconditional refetches or a timer storm. Recheck date context before committing delayed stats responses. Use Task 2's getAuthGeneration for shared request response guards if needed; coordinate changes through root.
+- [ ] Run focused progress/profile/API/cache tests, then full frontend Vitest, ESLint, TypeScript and production build. Self-review desktop/mobile and partial failures, commit assigned files and report.
+
+### Task 4: Acceptance, cleanup diagnosis and authorized release
+
+Root integration work; no extra product feature scope.
+
+- [ ] Independently review each task and the complete branch; fix important findings with focused regressions. Validate 9 protected-file hashes before and after integrating main.
+- [ ] Record limited public benchmark connection/model/TTS stages and source-backed Render/Vercel limits. Never present audio duration as waiting, CLI probes as browser microphone/hearing tests, or warm samples as cold-start evidence. Browser tool failures must be reported accurately.
+- [ ] Investigate effective local command-rule checks and tool rejection boundaries. Verify exact owned artifact targets before native cleanup; if runtime policy still refuses, report retained artifacts and missing reason. Never replace denied deletion with Python/cmd/git clean or weaken security settings.
+- [ ] Run full tests, lint/typecheck/build; merge the verified branch into main without touching protected changes and push origin main using existing credentials/proxy. Verify author, GitHub CI, Render/Vercel deploy status, live frontend release and new OpenAPI stats fields/UTC-local-date behavior with a new anonymous read-only test owner.
+- [ ] Update this plan with measured acceptance evidence and limitations; remove only verified task intermediates after final verification.
