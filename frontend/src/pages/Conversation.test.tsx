@@ -2,9 +2,10 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ postChat: vi.fn(), postAsr: vi.fn(), streamChat: vi.fn(), speakText: vi.fn(), createSpeechQueue: vi.fn(), postFeedback: vi.fn(), postSession: vi.fn(), startVoiceCall: vi.fn() }));
+const mocks = vi.hoisted(() => ({ postChat: vi.fn(), postAsr: vi.fn(), streamChat: vi.fn(), speakText: vi.fn(), createSpeechQueue: vi.fn(), postFeedback: vi.fn(), postSession: vi.fn(), startVoiceCall: vi.fn(), startRecording: vi.fn() }));
 vi.mock("../lib/api", () => ({ ...mocks }));
 vi.mock("../lib/call", () => ({ startVoiceCall: mocks.startVoiceCall }));
+vi.mock("../lib/recorder", () => ({ startRecording: mocks.startRecording }));
 vi.mock("../lib/speech", () => ({ speakText: mocks.speakText, createSpeechQueue: mocks.createSpeechQueue }));
 vi.mock("../components/ChatBubble", () => ({ ChatBubble: ({ text }: { text: string }) => <div>{text}</div> }));
 vi.mock("../components/Buddy", () => ({ Buddy: () => null }));
@@ -122,4 +123,24 @@ it("does not fall back to a new-credential chat request when an old stream fails
   await Promise.resolve(); await Promise.resolve();
   expect(mocks.postChat).toHaveBeenCalledTimes(1);
   view.unmount();
+});
+
+it.each(["identity", "unmount"])("cancels the push-to-talk transcription signal on %s", async reason => {
+  const { setToken } = await import("../lib/authToken");
+  setToken("microphone-a");
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 202 })));
+  mocks.startRecording.mockResolvedValue({ stop: vi.fn().mockResolvedValue(new ArrayBuffer(1280)) });
+  let finish!: (value: string) => void;
+  mocks.postAsr.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  const user = userEvent.setup();
+  const view = render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", { name: "文字练习" }));
+  await user.click(screen.getByRole("button", { name: "开始录音" }));
+  await user.click(await screen.findByRole("button", { name: "结束录音" }));
+  await waitFor(() => expect(mocks.postAsr).toHaveBeenCalledOnce());
+  const signal = mocks.postAsr.mock.calls[0][1] as AbortSignal | undefined;
+  if (reason === "identity") setToken("microphone-b"); else view.unmount();
+  expect(signal?.aborted).toBe(true);
+  finish("");
 });

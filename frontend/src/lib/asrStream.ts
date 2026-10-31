@@ -13,6 +13,7 @@
 
 import { openDirectAsrStream } from "./directAsr";
 import { measureAsrStream } from "./telemetry";
+import { assertAuthGeneration, getAuthGeneration } from "./authToken";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -47,18 +48,34 @@ const FINAL_TIMEOUT_MS = 8000;
  * rejects if streaming is unavailable (unconfigured creds, network, timeout),
  * which is the signal to fall back to the buffered endpoint.
  */
-export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us"): Promise<AsrStream> {
-  try { return measureAsrStream(await openDirectAsrStream(cb, language), "direct"); }
-  catch { return measureAsrStream(await openRelayAsrStream(cb, language), "relay"); }
+export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us", signal?: AbortSignal): Promise<AsrStream> {
+  const generation = getAuthGeneration();
+  assertAuthGeneration(generation, signal);
+  try {
+    const stream = await openDirectAsrStream(cb, language, signal);
+    try { assertAuthGeneration(generation, signal); }
+    catch (error) { stream.close(); throw error; }
+    return measureAsrStream(stream, "direct", signal);
+  } catch (error) {
+    assertAuthGeneration(generation, signal);
+    if ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError") throw error;
+    const stream = await openRelayAsrStream(cb, language, signal);
+    try { assertAuthGeneration(generation, signal); }
+    catch (error) { stream.close(); throw error; }
+    return measureAsrStream(stream, "relay", signal);
+  }
 }
 
 export function openRelayAsrStream(
   cb: AsrStreamCallbacks,
   language = "en_us",
+  signal?: AbortSignal,
 ): Promise<AsrStream> {
+  const generation = getAuthGeneration();
   return new Promise<AsrStream>((resolve, reject) => {
     let ws: WebSocket;
     try {
+      assertAuthGeneration(generation, signal);
       ws = new WebSocket(streamUrl());
     } catch (err) {
       reject(err);
@@ -89,8 +106,15 @@ export function openRelayAsrStream(
       }
     }, READY_TIMEOUT_MS);
 
+    const cancelled = () => {
+      try { assertAuthGeneration(generation, signal); return false; }
+      catch (error) { reject(error); api.close(); return true; }
+    };
+    const onAbort = () => { cancelled(); };
+
     const api: AsrStream = {
       send: (pcm) => {
+        if (cancelled()) return;
         if (ws.readyState === WebSocket.OPEN) {
           try {
             ws.send(pcm);
@@ -101,6 +125,7 @@ export function openRelayAsrStream(
       },
       finishUtterance: () =>
         new Promise<string>((res) => {
+          if (cancelled()) { res(""); return; }
           if (ws.readyState !== WebSocket.OPEN) {
             res("");
             return;
@@ -126,6 +151,8 @@ export function openRelayAsrStream(
           }, FINAL_TIMEOUT_MS);
         }),
       close: () => {
+        clearTimeout(readyTimer);
+        signal?.removeEventListener("abort", onAbort);
         settlePending("");
         try {
           ws.send(JSON.stringify({ type: "close" }));
@@ -141,6 +168,7 @@ export function openRelayAsrStream(
     };
 
     ws.onopen = () => {
+      if (cancelled()) return;
       try {
         ws.send(JSON.stringify({ type: "start", language }));
       } catch {
@@ -149,6 +177,7 @@ export function openRelayAsrStream(
     };
 
     ws.onmessage = (ev) => {
+      if (cancelled()) return;
       let msg: { type?: string; text?: string; message?: string };
       try {
         msg = JSON.parse(typeof ev.data === "string" ? ev.data : "");
@@ -184,10 +213,13 @@ export function openRelayAsrStream(
     };
 
     ws.onclose = () => {
+      signal?.removeEventListener("abort", onAbort);
       clearTimeout(readyTimer);
       settlePending(""); // unblock any in-flight finishUtterance
       if (ready) cb.onClose?.();
       else reject(new Error("asr stream closed before ready"));
     };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
   });
 }

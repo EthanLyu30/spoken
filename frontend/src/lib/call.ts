@@ -11,6 +11,7 @@ import { flatten, floatToPcm16, resampleTo16k } from "./recorder";
 import { openAsrStream, type AsrStream } from "./asrStream";
 import { createCaptureProcessor, type CaptureProcessor } from "./audioCapture";
 import { bindInteraction, newInteractionId, reportTiming } from "./telemetry";
+import { assertAuthGeneration, getAuthGeneration, subscribeAuthGeneration } from "./authToken";
 
 export type CallPhase = "listening" | "thinking" | "speaking";
 
@@ -79,6 +80,10 @@ async function retryOnce<T>(fn: () => Promise<T>, signal: AbortSignal): Promise<
 }
 
 export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
+  const identityGeneration = getAuthGeneration();
+  const lifetime = new AbortController();
+  let keepAlive: ReturnType<typeof setInterval> | undefined;
+  let unsubscribeIdentity = () => {};
   const AudioCtx: typeof AudioContext =
     window.AudioContext ||
     (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -115,6 +120,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     let opened: AsrStream | null = null;
     const opening = (async () => {
       try {
+        assertAuthGeneration(identityGeneration, lifetime.signal);
         opened = await openAsrStream({
           onPartial: (t) => {
             if (!ended && !busy) cb.onPartial?.(t);
@@ -122,7 +128,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
           onClose: () => {
             if (asr === opened) asr = null;
           },
-        });
+        }, "en_us", lifetime.signal);
         if (ended || generation !== asrGeneration || busy || !started) {
           opened.close();
           return;
@@ -174,6 +180,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   };
 
   const handle = async (pcm: ArrayBuffer, useLocalAsr: boolean) => {
+    if (ended || identityGeneration !== getAuthGeneration()) return;
     const startedAt = performance.now();
     const interactionId = newInteractionId();
     let outcome: "ok" | "error" | "cancelled" = "ok";
@@ -198,14 +205,18 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
           text = "";
         }
       }
+      assertAuthGeneration(identityGeneration, signal);
       if (!text) {
         text = (
-          await retryOnce(() =>
-            cb.transcribe(pcm, useLocalAsr ? "local" : "cloud", signal),
+          await retryOnce(() => {
+            assertAuthGeneration(identityGeneration, signal);
+            return cb.transcribe(pcm, useLocalAsr ? "local" : "cloud", signal);
+          },
             signal,
           )
         ).trim();
       }
+      assertAuthGeneration(identityGeneration, signal);
       if (text && !ended && !signal.aborted) {
         // reply() generates and speaks the answer; it flips us to "speaking"
         // (via the callback) as soon as the first sentence starts. That's also
@@ -268,7 +279,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   };
 
   const onAudio = (buf: Float32Array) => {
-    if (ended || reconnecting) return;
+    if (ended || reconnecting || identityGeneration !== getAuthGeneration()) return;
     const frameMs = (buf.length / rate) * 1000;
     let sum = 0;
     for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
@@ -327,11 +338,12 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   };
 
   async function acquireMic() {
+    assertAuthGeneration(identityGeneration, lifetime.signal);
     const generation = graphGeneration;
     const acquired = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
     });
-    if (ended || generation !== graphGeneration) {
+    if (ended || generation !== graphGeneration || identityGeneration !== getAuthGeneration()) {
       acquired.getTracks().forEach((track) => track.stop());
       return false;
     }
@@ -345,14 +357,15 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   }
 
   async function buildGraph() {
+    assertAuthGeneration(identityGeneration, lifetime.signal);
     if (!stream) throw new Error("no stream");
     const generation = graphGeneration;
     const audioContext = new AudioCtx({ sampleRate: 16000 });
     ctx = audioContext;
     await audioContext.resume();
-    if (ended || generation !== graphGeneration) { await audioContext.close().catch(() => undefined); return false; }
+    if (ended || generation !== graphGeneration || identityGeneration !== getAuthGeneration()) { await audioContext.close().catch(() => undefined); return false; }
     const audioProcessor = await createCaptureProcessor(audioContext, onAudio);
-    if (ended || generation !== graphGeneration) {
+    if (ended || generation !== graphGeneration || identityGeneration !== getAuthGeneration()) {
       audioProcessor.disconnect();
       await audioContext.close().catch(() => undefined);
       return false;
@@ -418,33 +431,40 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     if (!ended) cb.onError("麦克风重连失败，请切回打字，或重新开始通话。");
   }
 
+  function end() {
+    if (ended) return;
+    ended = true;
+    unsubscribeIdentity();
+    lifetime.abort();
+    turnGeneration += 1;
+    turnController?.abort();
+    clearInterval(keepAlive);
+    keepAlive = undefined;
+    invalidateCloudStream();
+    teardownGraph();
+  }
+  // Installed before microphone acquisition; a late grant must release tracks
+  // even when React has not yet cleaned up the old call component.
+  unsubscribeIdentity = subscribeAuthGeneration(end);
   // Initial setup (errors propagate to the caller, which shows a hint).
   try {
     if (!(await acquireMic()) || !(await buildGraph())) throw new DOMException("Call cancelled", "AbortError");
   } catch (error) {
-    teardownGraph();
+    end();
     throw error;
   }
   cb.onPhase("listening");
+  assertAuthGeneration(identityGeneration, lifetime.signal);
 
   // Open cloud ASR at speech onset. An idle direct-provider socket expires
   // before a learner who pauses to think has sent any audio.
 
   // Keep the context alive: browsers suspend it when backgrounded / on device
   // changes, which would silently freeze the call.
-  const keepAlive = setInterval(() => {
+  keepAlive = setInterval(() => {
     if (ended || reconnecting) return;
     if (ctx && ctx.state === "suspended") ctx.resume().catch(() => undefined);
   }, KEEPALIVE_MS);
 
-  return {
-    end: () => {
-      ended = true;
-      turnGeneration += 1;
-      turnController?.abort();
-      clearInterval(keepAlive);
-      invalidateCloudStream();
-      teardownGraph();
-    },
-  };
+  return { end };
 }

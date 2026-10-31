@@ -43,3 +43,58 @@ describe("cloud ASR routing", () => {
     expect(stream.finishUtterance).toHaveBeenCalledOnce();
   });
 });
+
+it("does not upload to the relay after a pending direct attempt fails across A to B to A", async () => {
+  const { setToken } = await import("./authToken");
+  setToken("asr-a");
+  let reject!: (error: Error) => void;
+  direct.transcribe.mockReturnValue(new Promise((_resolve, r) => { reject = r; }));
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ text: "wrong owner" }))));
+  const checked = expect(postAsr(new ArrayBuffer(1280))).rejects.toMatchObject({ name: "AbortError" });
+  setToken("asr-b"); setToken("asr-a"); reject(new Error("network"));
+  await checked;
+  expect(fetch).not.toHaveBeenCalled();
+  vi.unstubAllGlobals();
+});
+
+it("does not open a relay socket after a direct handshake fails under an obsolete identity", async () => {
+  const { setToken } = await import("./authToken");
+  setToken("asr-stream-a");
+  let reject!: (error: Error) => void;
+  direct.open.mockReturnValue(new Promise((_resolve, r) => { reject = r; }));
+  const socket = vi.fn(function () { throw new Error("Unexpected relay socket"); });
+  vi.stubGlobal("WebSocket", socket);
+  const checked = expect(openAsrStream({ onPartial: vi.fn() })).rejects.toMatchObject({ name: "AbortError" });
+  setToken("asr-stream-b"); reject(new Error("network"));
+  await checked;
+  expect(socket).not.toHaveBeenCalled();
+  vi.unstubAllGlobals();
+});
+
+it("does not treat direct cancellation as a reason to try the relay", async () => {
+  const abort = new DOMException("Cancelled", "AbortError");
+  direct.transcribe.mockRejectedValue(abort);
+  vi.stubGlobal("fetch", vi.fn());
+  await expect(postAsr(new ArrayBuffer(1280))).rejects.toBe(abort);
+  expect(fetch).not.toHaveBeenCalled();
+  vi.unstubAllGlobals();
+});
+it("keeps same-owner streaming relay fallback available after a direct failure", async () => {
+  direct.open.mockRejectedValue(new Error("direct unavailable"));
+  const frames: unknown[] = [];
+  vi.stubGlobal("WebSocket", class {
+    static OPEN = 1;
+    readyState = 1;
+    onopen?: () => void;
+    onmessage?: (event: { data: string }) => void;
+    onclose?: () => void;
+    constructor() { queueMicrotask(() => { this.onopen?.(); this.onmessage?.({ data: JSON.stringify({ type: "ready" }) }); }); }
+    send(value: unknown) { frames.push(value); }
+    close() { this.readyState = 3; this.onclose?.(); }
+  });
+  const stream = await openAsrStream({ onPartial: vi.fn() });
+  const pcm = new ArrayBuffer(1280);
+  stream.send(pcm); stream.close();
+  expect(frames).toContain(pcm);
+  vi.unstubAllGlobals();
+});

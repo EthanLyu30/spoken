@@ -68,6 +68,38 @@ describe("direct cloud ASR transport", () => {
     expect(Socket.instances).toHaveLength(0);
   });
 
+  it.each(["fetch", "json"])("does not open a provider socket after identity changes during authorization %s", async stage => {
+    const { setToken } = await import("./authToken");
+    setToken("direct-a");
+    let finish!: (value: unknown) => void;
+    const waiting = new Promise(resolve => { finish = resolve; });
+    vi.mocked(fetch).mockImplementation(() => stage === "fetch"
+      ? waiting as Promise<Response>
+      : Promise.resolve({ ok: true, json: () => waiting } as Response));
+    const { openDirectAsrStream } = await import("./directAsr");
+    const checked = expect(openDirectAsrStream({ onPartial: vi.fn() })).rejects.toMatchObject({ name: "AbortError" });
+    await Promise.resolve();
+    setToken("direct-b"); setToken("direct-a");
+    const session = { url: "wss://iat-api.xfyun.cn/v2/iat?authorization=test", app_id: "public-app" };
+    finish(stage === "fetch" ? new Response(JSON.stringify(session)) : session);
+    await checked;
+    expect(Socket.instances).toHaveLength(0);
+    // Identity cancellation must not put the next owner's transport in cooldown.
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(session)));
+    const fresh = await ready();
+    fresh.stream.close();
+  });
+
+  it("does not send retained audio after an identity change before the first upload", async () => {
+    const { setToken } = await import("./authToken");
+    setToken("direct-upload-a");
+    const { stream, socket } = await ready();
+    setToken("direct-upload-b");
+    stream.send(new ArrayBuffer(1280));
+    expect(socket.frames).toHaveLength(0);
+    expect(socket.readyState).toBe(Socket.CLOSED);
+  });
+
   it("does not accept a tail-only transcript after a provider error", async () => {
     const { stream, socket } = await ready();
     stream.send(new ArrayBuffer(1280));

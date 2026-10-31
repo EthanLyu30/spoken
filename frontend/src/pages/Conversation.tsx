@@ -32,7 +32,7 @@ import {
   type UserTurnMetaMap,
 } from "../lib/conversationTurns";
 import { createPracticeId, persistSessionOnce } from "../lib/sessionSave";
-import { getAuthGeneration } from "../lib/authToken";
+import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
 import {
   speakText,
   createSpeechQueue,
@@ -122,6 +122,7 @@ export default function Conversation() {
   const goingToReportRef = useRef(false); // true when leaving via 看小结 (report saves)
   const practiceIdRef = useRef(createPracticeId());
   const requestControllerRef = useRef<AbortController | null>(null);
+  const transcriptionControllerRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const callAttemptRef = useRef(0);
   const mutedRef = useRef(muted);
@@ -217,9 +218,12 @@ export default function Conversation() {
   // the background so the practice counts.
   useEffect(() => {
     mountedRef.current = true;
+    const unsubscribeIdentity = subscribeAuthGeneration(() => transcriptionControllerRef.current?.abort());
     const practiceId = practiceIdRef.current;
     return () => {
       mountedRef.current = false;
+      unsubscribeIdentity();
+      transcriptionControllerRef.current?.abort();
       callAttemptRef.current += 1;
       requestControllerRef.current?.abort();
       speakingRef.current?.stop();
@@ -364,10 +368,12 @@ export default function Conversation() {
       if (!rec) return;
       setTranscribing(true);
       setError(null);
+      const controller = new AbortController();
+      transcriptionControllerRef.current = controller;
       try {
         const pcm = await rec.stop();
         if (!isCurrent()) return;
-        const spokenText = (await transcribeSpeech(pcm)).trim();
+        const spokenText = (await transcribeSpeech(pcm, controller.signal)).trim();
         if (!isCurrent()) return;
         if (spokenText) {
           // Speaking app: send the recognized speech right away (combining any
@@ -388,6 +394,7 @@ export default function Conversation() {
       } catch {
         if (isCurrent()) setError("语音识别失败，请检查麦克风权限或后端，或直接打字。");
       } finally {
+        if (transcriptionControllerRef.current === controller) transcriptionControllerRef.current = null;
         if (isCurrent()) setTranscribing(false);
       }
     } else {

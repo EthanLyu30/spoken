@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openRelayAsrStream } from "./asrStream";
+import { setToken } from "./authToken";
 
 class Socket {
   static OPEN = 1;
@@ -61,6 +62,26 @@ describe("streaming ASR final boundaries", () => {
     expect(await final).toBe("coffee please");
     expect(socket.readyState).toBe(Socket.OPEN);
     stream.close();
+  });
+
+  it("does not start a delayed relay handshake after the identity changes", async () => {
+    setToken("relay-a");
+    const checked = expect(openRelayAsrStream({ onPartial: vi.fn() })).rejects.toMatchObject({ name: "AbortError" });
+    const socket = Socket.instances.at(-1)!;
+    setToken("relay-b"); setToken("relay-a");
+    socket.onopen?.();
+    await checked;
+    expect(socket.sent).not.toContain(JSON.stringify({ type: "start", language: "en_us" }));
+    expect(socket.readyState).toBe(Socket.CLOSED);
+  });
+
+  it("does not upload new frames from a stale relay stream", async () => {
+    setToken("relay-upload-a");
+    const { stream, socket } = await ready();
+    setToken("relay-upload-b");
+    stream.send(new ArrayBuffer(1280));
+    expect(socket.sent.some(value => value instanceof ArrayBuffer)).toBe(false);
+    expect(socket.readyState).toBe(Socket.CLOSED);
   });
 
   it("rejects a tail-only final after the relay fails midway through recording", async () => {

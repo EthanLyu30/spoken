@@ -5,7 +5,7 @@
  * (see vite.config.ts). In other environments, set VITE_API_BASE_URL.
  */
 import { useVoice } from "../store/voice";
-import { getToken, getAuthGeneration } from "./authToken";
+import { getToken, getAuthGeneration, assertAuthGeneration } from "./authToken";
 import { deviceTimezone } from "./learningDay";
 import { getClientId } from "./clientId";
 import { readChatStream } from "./chatStream";
@@ -363,20 +363,27 @@ export async function fetchTtsStream(
 
 /** Transcribe 16 kHz mono PCM via the backend (iFlytek ASR). */
 export async function postAsr(pcm: ArrayBuffer, signal?: AbortSignal): Promise<string> {
-  signal?.throwIfAborted();
+  const generation = getAuthGeneration();
+  assertAuthGeneration(generation, signal);
   try {
-    return await transcribeDirect(pcm, signal);
+    const text = await transcribeDirect(pcm, signal);
+    assertAuthGeneration(generation, signal);
+    return text;
   } catch (error) {
-    if (signal?.aborted) throw error;
+    assertAuthGeneration(generation, signal);
+    if ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError") throw error;
   }
+  assertAuthGeneration(generation, signal);
   const res = await fetch(`${BASE_URL}/api/asr`, {
     method: "POST",
     headers: { "Content-Type": "application/octet-stream", ...traceHeaders(signal) },
     body: pcm,
     signal: withTimeout(signal, 45_000),
   });
+  assertAuthGeneration(generation, signal);
   if (!res.ok) throw new Error(`asr failed: ${res.status}`);
   const data = (await res.json()) as { text: string };
+  assertAuthGeneration(generation, signal);
   return data.text;
 }
 

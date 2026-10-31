@@ -89,6 +89,38 @@ describe("voice call ASR engine boundaries", () => {
     } finally { call.end(); }
   });
 
+  it("releases a delayed microphone grant after the original call identity changes", async () => {
+    const { setToken } = await import("./authToken");
+    setToken("call-mic-a");
+    let grant!: (value: MediaStream) => void;
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValue(new Promise(resolve => { grant = resolve; }));
+    const track = { stop: vi.fn(), onended: null };
+    const checked = expect(startVoiceCall({ onPhase: vi.fn(), transcribe: vi.fn(), reply: vi.fn(), onError: vi.fn() })).rejects.toMatchObject({ name: "AbortError" });
+    setToken("call-mic-b"); setToken("call-mic-a");
+    grant({ getTracks: () => [track], getAudioTracks: () => [track] } as unknown as MediaStream);
+    await checked;
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(mocks.openAsrStream).not.toHaveBeenCalled();
+  });
+
+  it("aborts a pending cloud stream handshake synchronously when call ownership changes", async () => {
+    const { setToken } = await import("./authToken");
+    setToken("call-stream-a");
+    let opened!: (value: { send: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn>; finishUtterance: ReturnType<typeof vi.fn> }) => void;
+    mocks.openAsrStream.mockReturnValue(new Promise(resolve => { opened = resolve; }));
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => false, transcribe: vi.fn(), reply: vi.fn(), onError: vi.fn() });
+    try {
+      pushFrame(0.1);
+      const signal = mocks.openAsrStream.mock.calls[0][2] as AbortSignal | undefined;
+      setToken("call-stream-b");
+      expect(signal?.aborted).toBe(true);
+      const stream = { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn() };
+      opened(stream);
+      await vi.waitFor(() => expect(stream.close).toHaveBeenCalledOnce());
+      expect(stream.send).not.toHaveBeenCalled();
+    } finally { call.end(); }
+  });
+
   it("measures end-of-utterance to first playback and correlates the complete turn without content", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
     vi.stubGlobal("fetch", fetcher);

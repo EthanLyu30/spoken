@@ -1,5 +1,5 @@
 import type { AsrStream, AsrStreamCallbacks } from "./asrStream";
-import { getToken } from "./authToken";
+import { getToken, getAuthGeneration, assertAuthGeneration } from "./authToken";
 import { getClientId } from "./clientId";
 import { withTimeout } from "./requestTimeout";
 import { bindInteraction, getInteraction, measureAsrStream, traceHeaders } from "./telemetry";
@@ -10,19 +10,24 @@ let unavailableUntil = 0;
 
 /** One provider session per utterance; signed handshakes are memory-only. */
 export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en_us", signal?: AbortSignal): Promise<AsrStream> {
-  signal?.throwIfAborted();
+  const generation = getAuthGeneration();
+  assertAuthGeneration(generation, signal);
   if (Date.now() < unavailableUntil) throw new Error("Direct ASR is cooling down");
   try {
     const token = getToken();
+    const headers = { "X-Client-Id": getClientId(), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...traceHeaders(signal) };
+    assertAuthGeneration(generation, signal);
     const response = await fetch(`${BASE_URL}/api/asr/session`, {
-      method: "POST", headers: { "X-Client-Id": getClientId(), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...traceHeaders(signal) },
+      method: "POST", headers,
       signal: withTimeout(signal, 3_000), cache: "no-store",
     });
+    assertAuthGeneration(generation, signal);
     if (!response.ok) throw new Error("ASR authorization unavailable");
     const session = await response.json() as { url: string; app_id: string };
+    assertAuthGeneration(generation, signal);
     const url = new URL(session.url);
     if (url.protocol !== "wss:" || url.hostname !== "iat-api.xfyun.cn" || url.pathname !== "/v2/iat" || !session.app_id) throw new Error("Invalid ASR destination");
-    signal?.throwIfAborted();
+    assertAuthGeneration(generation, signal);
 
     return await new Promise<AsrStream>((resolve, reject) => {
       const ws = new WebSocket(session.url);
@@ -45,11 +50,17 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
         signal?.removeEventListener("abort", close);
         try { ws.close(); } catch { /* already disconnected */ }
         if (ready) cb.onClose?.();
-        else reject(signal?.reason ?? new Error("ASR connection closed"));
+        else reject(signal?.reason ?? (generation !== getAuthGeneration()
+          ? new DOMException("Identity changed", "AbortError") : new Error("ASR connection closed")));
+      };
+      const cancelled = () => {
+        if (!signal?.aborted && generation === getAuthGeneration()) return false;
+        close();
+        return true;
       };
       const fail = () => {
         if (retired) return;
-        if (!signal?.aborted) unavailableUntil = Date.now() + 30_000;
+        if (!signal?.aborted && generation === getAuthGeneration()) unavailableUntil = Date.now() + 30_000;
         close();
       };
       const sendFrame = (pcm: Uint8Array) => {
@@ -64,7 +75,7 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
       };
       const api: AsrStream = {
         send: (pcm) => {
-          if (retired || ws.readyState !== WebSocket.OPEN) return;
+          if (cancelled() || retired || ws.readyState !== WebSocket.OPEN) return;
           const joined = new Uint8Array(pending.length + pcm.byteLength);
           joined.set(pending); joined.set(new Uint8Array(pcm), pending.length); pending = joined;
           try {
@@ -72,7 +83,7 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
           } catch { fail(); }
         },
         finishUtterance: () => new Promise<string>((done) => {
-          if (retired || pendingFinal) { done(""); return; }
+          if (cancelled() || retired || pendingFinal) { done(""); return; }
           pendingFinal = done;
           try {
             if (pending.length) { sendFrame(pending); pending = new Uint8Array(0); }
@@ -83,9 +94,9 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
         }),
         close,
       };
-      ws.onopen = () => { if (retired) return; ready = true; clearTimeout(readyTimer); resolve(api); };
+      ws.onopen = () => { if (cancelled() || retired) return; ready = true; clearTimeout(readyTimer); resolve(api); };
       ws.onmessage = (event) => {
-        if (retired) return;
+        if (cancelled() || retired) return;
         try {
           const message = JSON.parse(String(event.data));
           if (message.code !== 0) { fail(); return; }
@@ -117,25 +128,28 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
       if (signal?.aborted) close();
     });
   } catch (error) {
-    if (!signal?.aborted) unavailableUntil = Date.now() + 30_000;
+    if (!signal?.aborted && generation === getAuthGeneration() && !((error instanceof Error || error instanceof DOMException) && error.name === "AbortError")) unavailableUntil = Date.now() + 30_000;
     throw error;
   }
 }
 
 /** Upload a retained complete clip directly; callers retain their relay fallback. */
 export async function transcribeDirect(pcm: ArrayBuffer, signal?: AbortSignal): Promise<string> {
+  const generation = getAuthGeneration();
   let disconnected = false;
   const stream = measureAsrStream(await openDirectAsrStream({ onPartial: () => undefined, onClose: () => { disconnected = true; } }, "en_us", signal), "direct", signal);
   bindInteraction(stream, getInteraction(signal));
   try {
+    assertAuthGeneration(generation, signal);
     for (let offset = 0; offset < pcm.byteLength; offset += FRAME) {
-      signal?.throwIfAborted();
+      assertAuthGeneration(generation, signal);
       if (disconnected) throw new Error("Direct ASR disconnected");
       stream.send(pcm.slice(offset, offset + FRAME));
       await new Promise(resolve => setTimeout(resolve, 10));
     }
+    assertAuthGeneration(generation, signal);
     const text = await stream.finishUtterance();
-    signal?.throwIfAborted();
+    assertAuthGeneration(generation, signal);
     if (!text) throw new Error("Direct ASR returned no transcript");
     return text;
   } finally { stream.close(); }

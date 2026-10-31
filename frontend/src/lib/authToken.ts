@@ -15,6 +15,11 @@ export function getToken(): string | null {
   return currentToken;
 }
 export function getAuthGeneration(): number { getToken(); return generation; }
+/** Retain workflow identity across awaits, including transport fallback chains. */
+export function assertAuthGeneration(expected: number, signal?: AbortSignal): void {
+  signal?.throwIfAborted();
+  if (expected !== getAuthGeneration()) throw new DOMException("Identity changed", "AbortError");
+}
 export function subscribeAuthGeneration(listener: Listener): () => void {
   listeners.add(listener);
   return () => { listeners.delete(listener); };
