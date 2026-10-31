@@ -172,7 +172,8 @@ def conditions(hours=24, source="server", operation=None, model=None, release=No
 
 def serialize(record, *, detail=False):
     out = {key: getattr(record, key) for key in ("trace_id", "interaction_id", "operation", "source", "outcome", "duration_ms",
-        "http_status", "ttft_ms", "model", "input_tokens", "output_tokens", "release")}
+        "http_status", "ttft_ms", "model", "input_tokens", "output_tokens", "release",
+        "error_type", "error_cause_type")}
     out["started_at"] = record.started_at.isoformat(timespec="milliseconds") + "Z"
     if detail:
         out["spans"] = json.loads(record.spans_json)

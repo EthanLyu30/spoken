@@ -18,7 +18,9 @@ class Base(DeclarativeBase):
 
 _url = get_settings().database_url
 _connect_args = {"check_same_thread": False} if _url.startswith("sqlite") else {}
-engine = create_engine(_url, connect_args=_connect_args, future=True)
+# Managed databases may terminate idle connections while the app stays alive.
+# Check on checkout; never replay an application transaction after failure.
+engine = create_engine(_url, connect_args=_connect_args, future=True, pool_pre_ping=True)
 SessionLocal = sessionmaker(
     bind=engine, autoflush=False, expire_on_commit=False, class_=Session
 )
@@ -89,6 +91,22 @@ def init_db() -> None:
     _migrate_sqlite()
     _migrate_users()
     _migrate_session_identity()
+    _migrate_telemetry_errors()
+
+
+def _migrate_telemetry_errors() -> None:
+    """Add content-free diagnostics without changing historical records."""
+    with engine.begin() as conn:
+        if _url.startswith("sqlite"):
+            existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(telemetry_records)")}
+            if not existing:
+                return
+            for column in ("error_type", "error_cause_type"):
+                if column not in existing:
+                    conn.exec_driver_sql(f"ALTER TABLE telemetry_records ADD COLUMN {column} VARCHAR(100)")
+        else:
+            for column in ("error_type", "error_cause_type"):
+                conn.exec_driver_sql(f"ALTER TABLE telemetry_records ADD COLUMN IF NOT EXISTS {column} VARCHAR(100)")
 
 
 def _migrate_session_identity() -> None:

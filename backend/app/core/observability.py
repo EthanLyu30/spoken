@@ -49,6 +49,8 @@ class TraceContext:
         self.end_at = None
         self.outcome = "ok"
         self.http_status = None
+        self.error_type = None
+        self.error_cause_type = None
         self.spans = []
         self.active_spans = {}
 
@@ -60,9 +62,16 @@ class TraceContext:
     def __exit__(self, kind, exc, tb):
         if exc is not None:
             self.outcome = _outcome(exc)
+            self.capture_error(exc)
         self.duration_ms = max(0, ((self.end_at if self.end_at is not None else perf_counter()) - self.start) * 1000)
         _parent.reset(self._parent_token)
         _current.reset(self._token)
+
+    def capture_error(self, exc):
+        # Class names only: exception strings may contain SQL, answers or keys.
+        self.error_type = type(exc).__name__[:100]
+        cause = exc.__cause__
+        self.error_cause_type = type(cause).__name__[:100] if cause is not None else None
 
     def record(self):
         elapsed = self.duration_ms if self.duration_ms is not None else (perf_counter()-self.start)*1000
@@ -82,6 +91,7 @@ class TraceContext:
         return {"trace_id": self.trace_id, "interaction_id": self.interaction_id, "started_at": self.started_at,
                 "operation": self.operation[:120], "source": self.source,
                 "outcome": self.outcome, "http_status": self.http_status,
+                "error_type": self.error_type, "error_cause_type": self.error_cause_type,
                 "duration_ms": elapsed,
                 "ttft_ms": min(first) if first else None,
                 "input_tokens": sum(m["input_tokens"] for m in models) if complete else None,
@@ -131,9 +141,11 @@ def trace_attribute(key, value):
 
 
 def trace_error(kind="error"):
-    if isinstance(kind, BaseException):
-        kind = _outcome(kind)
     trace = _current.get()
+    if isinstance(kind, BaseException):
+        if trace:
+            trace.capture_error(kind)
+        kind = _outcome(kind)
     if trace and kind in {"error", "timeout", "cancelled"}:
         trace.outcome = kind
 

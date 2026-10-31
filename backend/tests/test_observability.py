@@ -10,6 +10,45 @@ from app.main import app
 from app.db import SessionLocal
 
 
+def test_root_failure_collects_class_names_without_exception_messages():
+    from app.core.observability import TraceContext, trace_error
+
+    try:
+        with TraceContext('GET /api/practice') as trace:
+            try:
+                raise ConnectionError('private connection string and password')
+            except ConnectionError as cause:
+                raise RuntimeError('private answer and SQL parameters') from cause
+    except RuntimeError:
+        pass
+    record = trace.record()
+    assert record['error_type'] == 'RuntimeError'
+    assert record['error_cause_type'] == 'ConnectionError'
+    assert 'private' not in json.dumps(record, default=str)
+    assert json.loads(record['spans_json']) == []
+
+    with TraceContext('POST /api/chat/stream') as caught:
+        trace_error(TimeoutError('private upstream response'))
+    assert caught.record()['error_type'] == 'TimeoutError'
+    assert caught.record()['outcome'] == 'timeout'
+
+
+def test_old_and_new_failure_details_preserve_unknowns():
+    from app.models.telemetry import TelemetryRecord
+    from app.services.telemetry import serialize
+
+    for error_type in (None, 'OperationalError'):
+        record = TelemetryRecord(trace_id='f' * 32, operation='GET /api/practice',
+            started_at=datetime.now(timezone.utc).replace(tzinfo=None), source='server',
+            outcome='error', duration_ms=6, spans_json='[]', release='qa',
+            error_type=error_type, error_cause_type='AdminShutdown' if error_type else None)
+        result = serialize(record, detail=True)
+        assert result['error_type'] == error_type
+        assert result['error_cause_type'] == ('AdminShutdown' if error_type else None)
+        assert result['http_status'] is None
+        assert result['spans'] == []
+
+
 def account(client, *, admin=False):
     email = f"qa-{uuid.uuid4().hex}@example.com"
     response = client.post('/api/auth/register', json={

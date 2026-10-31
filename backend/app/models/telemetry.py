@@ -30,6 +30,8 @@ class TelemetryRecord(Base):
     outcome: Mapped[str] = mapped_column(String(16))
     duration_ms: Mapped[float] = mapped_column(Float)
     http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_cause_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     ttft_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
