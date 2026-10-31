@@ -18,6 +18,16 @@ describe("voiceResolver", () => {
     vi.useRealTimers();
   });
 
+  it("cancels pending discovery immediately and removes its listener and timer", async () => {
+    vi.useFakeTimers();
+    const controller=new AbortController(), unsubscribe=vi.fn();
+    const pending=resolveVoiceMode("browser",{listEnglishVoices:()=>[],subscribe:()=>unsubscribe,timeoutMs:500},controller.signal);
+    controller.abort();
+    await expect(pending).resolves.toEqual({kind:"iflytek",automaticFallback:true});
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("uses explicit cloud mode immediately", async () => {
     await expect(
       resolveVoiceMode("iflytek", {

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from time import perf_counter
 
 import httpx
@@ -30,6 +31,15 @@ class DeepSeekError(RuntimeError):
     """Raised when a DeepSeek request cannot be completed."""
 
 
+def create_http_client() -> httpx.AsyncClient:
+    """Create within the owning event loop; never share clients across lifespans."""
+    return httpx.AsyncClient(
+        trust_env=False,
+        timeout=httpx.Timeout(60.0, connect=10.0),
+        limits=httpx.Limits(max_connections=20, max_keepalive_connections=10, keepalive_expiry=60.0),
+    )
+
+
 class DeepSeekClient:
     """Calls DeepSeek's chat-completions endpoint.
 
@@ -37,8 +47,19 @@ class DeepSeekClient:
     ``HTTP(S)_PROXY`` set in the environment (``trust_env=False``).
     """
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, settings: Settings | None = None, *, http_client: httpx.AsyncClient | None = None) -> None:
         self._settings = settings or get_settings()
+        self._http_client = http_client
+
+    @asynccontextmanager
+    async def _client(self):
+        if self._http_client is not None:
+            # Only application lifespan owns/tears down this connection pool.
+            yield self._http_client
+        else:
+            # Scripts and tests retain the standalone, per-call ownership path.
+            async with create_http_client() as client:
+                yield client
 
     @traced("deepseek.chat", provider="deepseek")
     async def chat(
@@ -72,10 +93,9 @@ class DeepSeekClient:
 
         request_start = perf_counter()
         try:
-            async with httpx.AsyncClient(
-                trust_env=False,
-                timeout=httpx.Timeout(60.0, connect=10.0),
-            ) as client:
+            async with self._client() as client:
+                # HTTPX post() fully reads and closes the response stream before
+                # returning, including cleanup on cancellation/read failure.
                 resp = await client.post(url, json=payload, headers=headers, extensions={"trace": HttpTimings()})
                 resp.raise_for_status()
                 data = resp.json()
@@ -130,9 +150,7 @@ class DeepSeekClient:
         request_start = perf_counter()
         first_text = True
         try:
-            async with httpx.AsyncClient(
-                trust_env=False, timeout=httpx.Timeout(60.0, connect=10.0)
-            ) as client:
+            async with self._client() as client:
                 async with client.stream("POST", url, json=payload, headers=headers, extensions={"trace": HttpTimings()}) as resp:
                     resp.raise_for_status()
                     completed = False

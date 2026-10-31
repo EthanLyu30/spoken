@@ -17,11 +17,13 @@ export interface VoiceResolutionSource {
 export async function resolveVoiceMode(
   engine: VoiceEngine,
   source: VoiceResolutionSource,
+  signal?: AbortSignal,
 ): Promise<ResolvedVoiceMode> {
   if (engine === "iflytek") {
     return { kind: "iflytek", automaticFallback: false };
   }
   if (engine === "local") return { kind: "iflytek", automaticFallback: true };
+  if (signal?.aborted) return { kind: "iflytek", automaticFallback: true };
   if (source.listEnglishVoices().length > 0) {
     return { kind: "browser" };
   }
@@ -35,13 +37,18 @@ export async function resolveVoiceMode(
       settled = true;
       window.clearTimeout(timer);
       unsubscribe();
+      signal?.removeEventListener("abort", aborted);
       resolve(result);
     };
+    const aborted = () => finish({ kind: "iflytek", automaticFallback: true });
+    signal?.addEventListener("abort", aborted, { once: true });
     unsubscribe = source.subscribe(() => {
       if (source.listEnglishVoices().length > 0) {
         finish({ kind: "browser" });
       }
     });
+    // A source may notify synchronously from subscribe().
+    if (settled) { unsubscribe(); return; }
     timer = window.setTimeout(
       () =>
         finish({

@@ -22,9 +22,9 @@ from app.core.observability import trace_error
 router = APIRouter(tags=["chat"])
 
 
-def get_client() -> DeepSeekClient:
+def get_client(request: Request) -> DeepSeekClient:
     """Dependency so tests can override the DeepSeek client."""
-    return DeepSeekClient()
+    return DeepSeekClient(http_client=getattr(request.app.state, "deepseek_http", None))
 
 
 def _resolve_scenario(req: ChatRequest):

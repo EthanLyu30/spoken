@@ -1,11 +1,14 @@
 """Text-to-speech endpoint: returns complete WAV audio of Pip's line."""
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from app.data import scenarios as catalog
 from app.schemas.tts import TtsRequest
 from app.services.xf_tts import XfTtsClient, XfTtsError, pcm16_to_wav
+from app.services.public_tts_cache import public_key
+from app.core.observability import span
+from app.core.performance import add
 
 router = APIRouter(tags=["tts"])
 
@@ -17,13 +20,21 @@ def get_tts_client() -> XfTtsClient:
 
 @router.post("/tts")
 async def tts(
-    req: TtsRequest, client: XfTtsClient = Depends(get_tts_client)
+    req: TtsRequest, request: Request, client: XfTtsClient = Depends(get_tts_client)
 ) -> Response:
     cfg = catalog.voice_for(req.scenario_id)
     # User overrides win; otherwise use the scenario's tuned voice.
     vcn = req.vcn or str(cfg["vcn"])
     speed = req.speed if req.speed is not None else int(cfg["speed"])  # type: ignore[arg-type]
     pitch = req.pitch if req.pitch is not None else int(cfg["pitch"])  # type: ignore[arg-type]
+    cache = getattr(request.app.state, "public_tts_cache", None)
+    key = public_key(req.text, req.scenario_id, vcn=vcn, speed=speed, pitch=pitch) if cache is not None else None
+    if key is not None:
+        cached = cache.get(key)
+        with span("tts.public_cache", cache_hit=cached is not None):
+            add("tts_cache_hit" if cached is not None else "tts_cache_miss", 1)
+        if cached is not None:
+            return Response(content=cached, media_type="audio/wav")
     try:
         # Collect the provider waveform and wrap it once as a complete WAV.
         pcm = await client.synthesize(
@@ -36,7 +47,10 @@ async def tts(
     except XfTtsError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     # Preserve the provider's complete waveform and natural sentence pauses.
-    return Response(content=pcm16_to_wav(pcm), media_type="audio/wav")
+    wav = pcm16_to_wav(pcm)
+    if key is not None:
+        cache.put(key, wav)
+    return Response(content=wav, media_type="audio/wav")
 
 
 @router.post("/tts/stream")

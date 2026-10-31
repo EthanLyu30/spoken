@@ -18,6 +18,11 @@ const names: Record<string, string> = {
   "asr.transcribe": "录音识别 · 浏览器总耗时", "speech.first_audio": "语音播放 · 首声等待",
   "speech.complete": "语音播放 · 完成（含播放）",
   "speech.playback": "语音播放 · 播放阶段（首声至结束）",
+  "speech.voice_resolution": "语音准备 · 最终文本后音色等待",
+  "speech.final_text_to_audio": "语音播放 · 最终文本至首声",
+  "speech.native_start": "浏览器语音 · 调用至实际开始",
+  "speech.cloud_fetch": "云语音 · 完整音频获取",
+  "speech.play_start": "音频播放 · play 至 playing",
   "voice.first_audio": "整轮语音 · 检测到说话结束至首声", "voice.complete": "整轮语音 · 完成（含播放）",
 };
 const ms = (n: number | null | undefined) => n == null ? "—" : n >= 1000 ? `${(n / 1000).toFixed(2)} s` : `${Math.round(n)} ms`;

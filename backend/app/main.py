@@ -4,7 +4,7 @@ Run locally with:
     uvicorn app.main:app --reload
 """
 
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.middleware import SelectiveGZipMiddleware
 from app.core.observability import TelemetryMiddleware
 from app.services.telemetry import TelemetrySink, RetentionWorker, configured_bootstrap_admin
+from app.services.deepseek import create_http_client
+from app.services.public_tts_cache import PublicTtsCache
 from app.api import admin, telemetry
 from app.api import (
     asr,
@@ -40,18 +42,25 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(application):
-    await asyncio.to_thread(configured_bootstrap_admin)
-    sink = TelemetrySink() if get_settings().telemetry_enabled else None
-    application.state.telemetry_sink = sink
-    retention = RetentionWorker()
-    application.state.telemetry_retention = retention
-    await retention.start()
     try:
-        yield
+        async with AsyncExitStack() as resources:
+            application.state.deepseek_http = await resources.enter_async_context(create_http_client())
+            cache = PublicTtsCache()
+            application.state.public_tts_cache = cache
+            resources.callback(cache.clear)
+            await asyncio.to_thread(configured_bootstrap_admin)
+            sink = TelemetrySink() if get_settings().telemetry_enabled else None
+            application.state.telemetry_sink = sink
+            if sink:
+                resources.push_async_callback(sink.close)
+            retention = RetentionWorker()
+            application.state.telemetry_retention = retention
+            resources.push_async_callback(retention.close)
+            await retention.start()
+            yield
     finally:
-        await retention.close()
-        if sink:
-            await sink.close()
+        application.state.deepseek_http = None
+        application.state.public_tts_cache = None
         application.state.telemetry_sink = None
         application.state.telemetry_retention = None
 

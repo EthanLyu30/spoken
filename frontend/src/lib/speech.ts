@@ -61,7 +61,7 @@ function pickBrowserVoice(uri: string | null): SpeechSynthesisVoice | null {
     (voice.lang.toLowerCase() === "en-us" ? 10 : 0);
   return [...voices].sort((a, b) => score(b) - score(a))[0] ?? null;
 }
-function speakBrowser(text: string, settings: VoiceSettings, onStarted: () => void): Speaking {
+function speakBrowser(text: string, settings: VoiceSettings, onStarted: (durationMs: number) => void): Speaking {
   const synth = window.speechSynthesis;
   const utterance = new SpeechSynthesisUtterance(text);
   const voice = pickBrowserVoice(settings.browserVoiceURI);
@@ -71,6 +71,7 @@ function speakBrowser(text: string, settings: VoiceSettings, onStarted: () => vo
   utterance.pitch = 0.6 + ((settings.pitch ?? 50) / 100) * 0.9;
   let failed = false, finished = false, started = false;
   let startupTimer = 0, completionTimer = 0;
+  let nativeRequestedAt = 0;
   let settle: () => void = () => {};
   const done = new Promise<void>(resolve => { settle = resolve; });
   const finish = () => {
@@ -95,18 +96,19 @@ function speakBrowser(text: string, settings: VoiceSettings, onStarted: () => vo
     window.clearTimeout(startupTimer);
     // Generous text/rate allowance; an incomplete utterance fails without replay.
     completionTimer = window.setTimeout(fail, Math.max(60_000, text.length * 150 / utterance.rate));
-    onStarted();
+    onStarted(performance.now() - nativeRequestedAt);
   };
   utterance.onend = () => { if (!finished) { failed = !started; finish(); } };
   utterance.onerror = fail;
   startupTimer = window.setTimeout(fail, 5_000);
-  try { synth.cancel(); synth.speak(utterance); }
+  try { synth.cancel(); nativeRequestedAt = performance.now(); synth.speak(utterance); }
   catch { fail(); }
   return { done, get failed() { return failed; }, stop: () => { if (!finished) cancelNative(); } };
 }
-function playUrl(url: string, onStarted: () => void): Speaking {
+function playUrl(url: string, onStarted: (durationMs: number) => void): Speaking {
   const audio = new Audio(url);
-  let failed = false, finished = false;
+  let failed = false, finished = false, started = false;
+  let playRequestedAt = 0;
   let settle: () => void = () => {};
   const done = new Promise<void>(resolve => { settle = resolve; });
   const cleanup = () => {
@@ -116,10 +118,14 @@ function playUrl(url: string, onStarted: () => void): Speaking {
     URL.revokeObjectURL(url);
     settle();
   };
-  audio.onplaying = onStarted;
+  audio.onplaying = () => {
+    if (finished || started) return;
+    started = true;
+    onStarted(performance.now() - playRequestedAt);
+  };
   audio.onended = cleanup;
   audio.onerror = () => { failed = true; cleanup(); };
-  try { void audio.play().catch(() => { failed = true; cleanup(); }); }
+  try { playRequestedAt = performance.now(); void audio.play().catch(() => { failed = true; cleanup(); }); }
   catch { failed = true; cleanup(); }
   return { done, get failed() { return failed; }, stop: () => {
     if (finished) return;
@@ -141,12 +147,15 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
   const cloudVoiceName = (vcn?: string | null) =>
     VOICE_OPTIONS.find(v => v.id === vcn)?.label.split(" · ")[0] ?? "场景音色";
   let buffered = "", noMore = false, stopped = false, settled = false, failed = false;
-  let firstAt: number | undefined;
+  let firstAt: number | undefined, finalTextAt: number | undefined;
   let engine: "browser" | "xfyun" | "local" | "unknown" = "unknown";
   let transport: "buffered" | "local" | "unknown" = "unknown";
   let active: Speaking | null = null;
   const controller = new AbortController();
   bindInteraction(controller.signal, interactionId);
+  // Discovery overlaps model generation; synthesis still requires final text.
+  // Local remains opt-in and prepares the same browser fallback if unavailable.
+  const preparedMode = resolveVoiceMode(settings.engine === "local" ? "browser" : settings.engine, voiceSource(), controller.signal);
   let provideText: (text: string) => void = () => {};
   const finalText = new Promise<string>(resolve => { provideText = resolve; });
   let markStarted: () => void = () => {};
@@ -158,6 +167,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
     firstAt = performance.now();
     playback.update({phase:"speaking"});
     reportTiming("speech.first_audio", firstAt - requestedAt, {engine, transport, interactionId});
+    if (finalTextAt !== undefined) reportTiming("speech.final_text_to_audio", firstAt - finalTextAt, {engine, transport, interactionId});
     markStarted();
   };
   const consumer = (async () => {
@@ -166,8 +176,6 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
       const text = (await finalText).trim();
       if (stopped || !text) return;
       playback.update({phase:"preparing"});
-      const mode = await resolveVoiceMode(settings.engine, voiceSource());
-      if (stopped) return;
       let url: string | undefined;
       const fallbackReason = settings.engine === "local" ? "local-unavailable" : settings.engine === "browser" ? "browser-unavailable" : null;
       if (settings.engine === "local" && isLocalSpeechModelReady("kokoro")) {
@@ -180,14 +188,30 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
           if (stopped) return;
         }
       }
-      const browserMode = !url && settings.engine === "local"
-        ? await resolveVoiceMode("browser",voiceSource()) : mode;
+      const resolutionStart = performance.now();
+      // Never freeze an early empty list: English/Natural voices may arrive
+      // during model/local synthesis even after the discovery timer expired.
+      let browserMode = !url ? await preparedMode : null;
+      if (!stopped && browserMode && settings.engine !== "iflytek") {
+        if (listBrowserVoices().length > 0) browserMode = {kind:"browser"};
+        else if (browserMode.kind === "browser") {
+          // A device can also remove its earlier list; keep the English-only
+          // selection policy and the existing discovery deadline in that case.
+          browserMode = await resolveVoiceMode("browser", voiceSource(), controller.signal);
+        }
+      }
+      if (!stopped && !url) reportTiming("speech.voice_resolution", performance.now() - resolutionStart, {
+        engine: browserMode?.kind === "browser" ? "browser" : "xfyun", transport: browserMode?.kind === "browser" ? "unknown" : "buffered", interactionId,
+      });
       if (stopped) { if (url) URL.revokeObjectURL(url); return; }
-      if (!url && browserMode.kind === "browser") {
+      if (!url && browserMode?.kind === "browser") {
         engine = "browser"; transport = "unknown";
         playback.update({effectiveEngine:"browser",voice:pickBrowserVoice(settings.browserVoiceURI)?.name ?? "英文音色",
           fallbackReason:settings.engine === "local" ? "local-unavailable" : null});
-        active = speakBrowser(text, settings, didStart);
+        active = speakBrowser(text, settings, duration => {
+          reportTiming("speech.native_start", duration, {engine, transport, interactionId});
+          didStart();
+        });
         await active.done;
         // A listed voice may still be unavailable. Retry the complete reply
         // only before any native sound starts, so partial speech never repeats.
@@ -204,10 +228,22 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
           };
           playback.update({effectiveEngine:"xfyun",voice:cloudVoiceName(overrides.vcn),
             fallbackReason});
-          url = await fetchTtsUrl(text, scenarioId, controller.signal, overrides);
+          const fetchStart = performance.now();
+          let fetched = false;
+          try {
+            url = await fetchTtsUrl(text, scenarioId, controller.signal, overrides);
+            fetched = true;
+          } finally {
+            reportTiming("speech.cloud_fetch", performance.now() - fetchStart, {
+              engine, transport, interactionId, outcome: stopped ? "cancelled" : fetched ? "ok" : "error",
+            });
+          }
         }
         if (stopped) { URL.revokeObjectURL(url); return; }
-        active = playUrl(url, didStart);
+        active = playUrl(url, duration => {
+          reportTiming("speech.play_start", duration, {engine, transport, interactionId});
+          didStart();
+        });
       }
       await active.done;
       failed = Boolean(active.failed) && !stopped;
@@ -216,6 +252,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
       failed = !stopped;
       if (!stopped) throw error;
     } finally {
+      controller.abort(); // Also releases unused/pending browser discovery.
       settled = true;
       playback.update({phase:stopped ? "cancelled" : failed || (buffered.trim() && firstAt === undefined) ? "error" : "completed"});
       if (buffered.trim()) {
@@ -233,7 +270,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
     get status() { return playback.status; },
     feed: full => { if (!stopped && !noMore) buffered = full; },
     end: full => {
-      if (!stopped && !noMore) { noMore = true; buffered = full; provideText(full); }
+      if (!stopped && !noMore) { noMore = true; buffered = full; finalTextAt = performance.now(); provideText(full); }
       return done;
     },
     started,

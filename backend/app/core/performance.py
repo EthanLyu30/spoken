@@ -11,6 +11,7 @@ METRICS = frozenset({
     "db_acquire", "db_query", "db_queries", "db_commit", "stats_cpu", "insights_cpu",
     "response_ready", "llm_tcp", "llm_tls", "llm_headers", "llm_first_text", "llm_total",
     "tts_connect", "tts_first_pcm", "tts_complete_pcm", "tts_close",
+    "tts_cache_hit", "tts_cache_miss",
 })
 
 
@@ -53,7 +54,7 @@ def measure(name, *, cpu=False):
 def server_timing(trace):
     with trace.performance_lock:
         values = numeric(trace.performance)
-    return ", ".join(f'{name};desc="{int(value)}"' if name == "db_queries" else f"{name};dur={value:.3f}"
+    return ", ".join(f'{name};desc="{int(value)}"' if name in {"db_queries", "tts_cache_hit", "tts_cache_miss"} else f"{name};dur={value:.3f}"
                      for name, value in sorted(values.items()))
 
 

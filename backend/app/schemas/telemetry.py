@@ -4,7 +4,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class BrowserTiming(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    operation: Literal["asr.transcribe", "asr.finalize", "speech.first_audio", "speech.playback", "speech.complete", "voice.first_audio", "voice.complete"]
+    operation: Literal["asr.transcribe", "asr.finalize", "speech.first_audio", "speech.playback", "speech.complete", "voice.first_audio", "voice.complete",
+                       "speech.voice_resolution", "speech.final_text_to_audio", "speech.native_start", "speech.cloud_fetch", "speech.play_start"]
     duration_ms: float = Field(ge=0, le=300_000, strict=True)
     outcome: Literal["ok", "error", "cancelled"] = "ok"
     engine: Literal["local", "xfyun", "browser", "unknown"] = "unknown"
