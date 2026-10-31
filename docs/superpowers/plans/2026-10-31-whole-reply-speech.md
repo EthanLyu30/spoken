@@ -38,12 +38,19 @@
 - [x] Implement single playback dispatch at `end`, reuse for one-shot speech, freeze engine for the utterance, and preserve cleanup and measurement.
 - [x] Update defaults/migration and user-facing whole-reply labels without promising uniform voice quality.
 - [x] Run full frontend/backend tests, lint, typecheck and production build; request one fresh read-only review.
-- [ ] Commit as EthanLyu30, fast-forward/push main preserving unrelated changes, and verify deployment.
+- [x] Commit as EthanLyu30, fast-forward/push main preserving unrelated changes, and verify deployment.
 - [ ] Verify real native / whole-cloud playback callbacks. Edge exposed voices but ended without start; the fix adds a whole-file fallback. Further browser control was stopped by the tool because the Windows browser URL could not be determined reliably. Do not claim listening acceptance.
-- [ ] Remove temporary test sources, audio, logs and servers; retain final screenshots and project docs.
+- [x] Remove temporary test sources, audio, logs and servers; retain project docs. Older build/test caches and old task artifacts whose deletion was previously blocked remain preserved; that cleanup is not reported as complete.
 
 ## Implementation verification
 
 - Frontend: 239 tests across 48 files; backend: 412 tests; ESLint, TypeScript and production build passed.
 - Independent review identified missing native callback deadlines and the old 800-character cloud contract. Both were reproduced with failing tests and fixed in one pass. Coverage includes cancelled startup, late callbacks, incomplete playback without automatic replay, a complete reply over 800 characters, and UTF-8 provider boundaries.
 - Real Edge listed 47 online English voices and zero local English voices; the original native test ended without a start event. This is a failed playback attempt, not acceptance. Browser tooling subsequently stopped because it could not reliably determine the Windows URL. No physical playback or hearing acceptance is claimed.
+
+## Release verification (2026-10-31)
+
+- Functional release `3c5bb40` is on `main`; both GitHub CI jobs passed. The served `www.spokenai.org` entry contains this release SHA, the browser-default store configuration and the whole-reply voice settings text.
+- Render deployment `7458644872` for the same SHA reported success; backend health is healthy and the public TTS schema exposes the new provider-bounded input contract.
+- One actual production API request submitted an 878-character English reply and returned HTTP 200 with a complete 16 kHz, mono, 16-bit WAV. Response time was 5.11 seconds and encoded audio duration was 84.82 seconds. These are file-response and media-duration checks, not measured browser first sound or physical playback.
+- The primary checkout's nine unrelated modified/untracked files retained their SHA-256 hashes through integration. The task's temporary helper sources, 13 scratch files and server were removed; port 5189 has no listener. No alternative UI control was used after the browser tool stopped.
