@@ -80,14 +80,43 @@ def test_tts_applies_user_overrides():
     try:
         resp = client.post(
             "/api/tts",
-            json={"text": "hi", "scenario_id": "interview", "vcn": "x3_enus_emma_assist", "speed": 40, "pitch": 60},
+            json={"text": "hi", "scenario_id": "interview", "vcn": "catherine", "speed": 40, "pitch": 60},
         )
         assert resp.status_code == 200
-        assert stub.vcn == "x3_enus_emma_assist"  # override beats scenario "henry"
+        assert stub.vcn == "catherine"  # override beats scenario "henry"
         assert stub.speed == 40
         assert stub.pitch == 60
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("voice", ["x5_enus_flossie_flow", "x3_enus_emma_assist", "x4_enus_luna_formal", "x4_enus_laura_education", "x4_lindsey_formal"])
+def test_legacy_cloud_voice_does_not_reach_provider_and_silently_fall_back_to_xiaoyan(voice):
+    stub = _StubTts()
+    app.dependency_overrides[get_tts_client] = lambda: stub
+    try:
+        response = client.post("/api/tts", json={"text": "Hello", "vcn": voice})
+        assert response.status_code == 200
+        assert stub.vcn == "catherine"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_unknown_cloud_voice_is_rejected_instead_of_silently_using_another_speaker():
+    stub = _StubTts()
+    app.dependency_overrides[get_tts_client] = lambda: stub
+    try:
+        response = client.post("/api/tts", json={"text": "Hello", "vcn": "spoken_invalid_voice_control"})
+        assert response.status_code == 422
+        assert not stub.texts
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_all_scenario_defaults_use_verified_english_voices():
+    from app.data import scenarios
+    assert scenarios.DEFAULT_VOICE["vcn"] == "catherine"
+    assert all(config["vcn"] in {"catherine", "henry"} for config in scenarios._VOICES.values())
 
 
 def test_tts_service_error_maps_to_503():

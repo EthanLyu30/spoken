@@ -1,6 +1,6 @@
 import type { VoiceEngine } from "../store/voice";
 
-export const AUTO_CLOUD_VOICE = "x4_lindsey_formal";
+export const AUTO_CLOUD_VOICE = "catherine";
 export const AUTO_CLOUD_SPEED = 58;
 export const AUTO_CLOUD_PITCH = 52;
 

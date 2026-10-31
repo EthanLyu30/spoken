@@ -18,6 +18,7 @@ import websockets
 
 from app.core.config import Settings, get_settings
 from app.core.observability import traced_stream
+from app.data.tts_voices import normalize_cloud_voice
 from app.services.xf_auth import build_auth_url
 
 _HOST = "tts-api.xfyun.cn"
@@ -122,7 +123,7 @@ class XfTtsClient:
         self,
         text: str,
         *,
-        vcn: str = "x5_enus_flossie_flow",
+        vcn: str = "catherine",
         aue: str = "raw",  # raw -> 16k PCM (gapless); lame -> mp3
         speed: int = 54,  # 0-100, 50 = neutral
         pitch: int = 52,  # 0-100, 50 = neutral
@@ -131,6 +132,11 @@ class XfTtsClient:
         s = self._s
         if not (s.xf_app_id and s.xf_api_key and s.xf_api_secret):
             raise XfTtsError("iFlytek credentials are not configured")
+
+        try:
+            vcn = normalize_cloud_voice(vcn)
+        except ValueError as exc:
+            raise XfTtsError("Unsupported English cloud voice") from exc
 
         url = build_auth_url(_HOST, _PATH, s.xf_api_key, s.xf_api_secret)
         frame = {

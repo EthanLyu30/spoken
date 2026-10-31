@@ -342,7 +342,7 @@ export default function Profile() {
 
 const ENGINES: { id: VoiceEngine; label: string; hint: string }[] = [
   { id: "browser", label: "浏览器语音", hint: "默认 · 整段朗读，音色因设备而异" },
-  { id: "iflytek", label: "云端语音", hint: "整段生成后播放 · 可选音色" },
+  { id: "iflytek", label: "云端语音", hint: "整段生成后播放 · 已核验英文男 / 女声" },
   { id: "local", label: "本地 AI 语音（实验）", hint: "本机朗读与识别 · 首次需下载模型" },
 ];
 

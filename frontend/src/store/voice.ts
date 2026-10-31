@@ -3,6 +3,12 @@ import { persist } from "zustand/middleware";
 
 export type VoiceEngine = "browser" | "iflytek" | "local";
 
+/** Verified distinct English waveforms; unsupported IDs can silently use Xiaoyan. */
+export const VOICE_OPTIONS: { id: string; label: string }[] = [
+  { id: "catherine", label: "Catherine · 英文女声" },
+  { id: "henry", label: "Henry · 英文男声" },
+];
+
 /**
  * User overrides for Pip's read-aloud voice.
  *
@@ -43,21 +49,14 @@ export const useVoice = create<VoiceState>()(
     }),
     {
       name: "spoken-voice",
-      version: 1,
-      migrate: (persisted) => {
+      version: 2,
+      migrate: (persisted, version) => {
         const saved = persisted && typeof persisted === "object" ? persisted as Partial<VoiceState> : {};
-        return { ...saved, engine: saved.engine === "local" ? "local" : "browser" } as VoiceState;
+        const engine = version < 1 ? saved.engine === "local" ? "local" : "browser"
+          : saved.engine === "local" || saved.engine === "iflytek" ? saved.engine : "browser";
+        const vcn = VOICE_OPTIONS.some(voice => voice.id === saved.vcn) ? saved.vcn : null;
+        return { ...saved, engine, vcn } as VoiceState;
       },
     },
   ),
 );
-
-/** Selectable iFlytek English voices (only licensed/working ones). */
-export const VOICE_OPTIONS: { id: string; label: string }[] = [
-  { id: "x5_enus_flossie_flow", label: "Flossie · 活泼女声" },
-  { id: "x3_enus_emma_assist", label: "Emma · 柔和女声" },
-  { id: "x4_enus_luna_formal", label: "Luna · 知性女声" },
-  { id: "x4_enus_laura_education", label: "Laura · 清晰女声" },
-  { id: "x4_lindsey_formal", label: "Lindsey · 自然女声" },
-  { id: "henry", label: "Henry · 沉稳男声" },
-];

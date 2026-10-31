@@ -119,7 +119,7 @@ it("reports the actual cloud fallback voice and phase instead of pretending the 
   await vi.waitFor(()=>expect(audios).toHaveLength(1));
   expect(q).toHaveProperty("status.effectiveEngine","xfyun");
   expect(q).toHaveProperty("status.fallbackReason","browser-unavailable");
-  expect(q).toHaveProperty("status.voice","Lindsey");
+  expect(q).toHaveProperty("status.voice","Catherine");
   audios[0].onplaying?.();
   expect(q).toHaveProperty("status.phase","speaking");
   audios[0].onended?.(); await done;

@@ -1,6 +1,7 @@
 """Request schema for text-to-speech."""
 
 from pydantic import BaseModel, Field, field_validator
+from app.data.tts_voices import normalize_cloud_voice
 
 
 class TtsRequest(BaseModel):
@@ -12,6 +13,11 @@ class TtsRequest(BaseModel):
     vcn: str | None = None
     speed: int | None = Field(default=None, ge=0, le=100)
     pitch: int | None = Field(default=None, ge=0, le=100)
+
+    @field_validator("vcn")
+    @classmethod
+    def validate_voice(cls, value: str | None) -> str | None:
+        return normalize_cloud_voice(value) if value is not None else None
 
     @field_validator("text")
     @classmethod

@@ -54,9 +54,16 @@
 
 ### Release and acceptance
 
+**Additional live finding and repair:** Voice selection could not be accepted by HTTP 200 alone. Lindsey, Flossie, Emma and Luna produced exactly the same 138,630-byte PCM as `xiaoyan` and an intentionally invalid voice ID (digest prefix `6daf949d858d`). Laura could not be verified due a connection failure. Henry and Catherine produced distinct waveforms both supplier-direct and in production. The unsupported/unverified options were removed; scenario and automatic cloud defaults now use Catherine, with Henry retained. Known old IDs explicitly map to Catherine for old-client compatibility; unknown IDs are rejected before contacting the supplier. Voice preference migration preserves explicit engine, browser voice and prosody settings. The configured speaker IDs must correspond to enabled voices; see [the supplier's API requirements](https://static.xfyun.cn/doc/tts/online_tts/API.html). No new provider or credentials were added.
+
+- [x] Reproduce the voice mismatch with real supplier and live WAV comparisons, including invalid-ID and Xiaoyan controls.
+- [x] Observe seven backend and one preference-migration regression failures, implement canonical English voices and compatibility, then verify backend 420/420 and frontend 259/259, lint, TypeScript and production build.
+
 - [x] Full frontend/backend tests, lint, TypeScript and production build; one fresh read-only branch review, one TDD fix pass if required.
 - [ ] Preserve the primary checkout's nine unrelated files, integrate and push main as EthanLyu30, verify CI and public deployment.
 - [ ] Measure real Chrome native speech if browser access permits; measure cloud first sound separately from media duration. Do not claim physical hearing from callbacks.
 - [ ] Remove owned diagnostic artifacts after verification, preserve final evidence and report previously blocked caches.
 
 **Review and release evidence:** One independent review found an interrupted-preload bug: re-enabling local mode after Kokoro finished while disabled could leave Moonshine idle. The regression `resumes recognition preparation when re-enabled after pronunciation finished while disabled` failed before the fix and passed after making bootstrap restartable and limiting automatic scheduling to engine transitions. Full frontend: 258/258; backend: 413/413; lint, TypeScript and production build passed. Physical Chrome and real local model performance remain outside automatic acceptance. Before release, the old live cloud endpoint returned one 35-second read timeout, followed by successful complete WAVs in 4.53 and 3.82 seconds; warmed health latency was 0.32 seconds. The cloud shutdown fix does not establish that all production network delays have been eliminated.
+
+The first deployment (`ef3b099`) passed CI and both deployment checks. With the same original voice/text/speed/pitch, the live complete-WAV request took 2.67 and 2.41 seconds after the close-budget repair, versus 3.82 seconds for the warmed old deployment. These are small-sample HTTP measurements, excluding browser audio startup and hearing; 4.33 seconds of spoken audio is playback duration rather than waiting. Voice-catalog correction requires the subsequent deployment and a fresh two-voice comparison.
