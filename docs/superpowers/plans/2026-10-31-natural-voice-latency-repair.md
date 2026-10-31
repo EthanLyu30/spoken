@@ -54,7 +54,9 @@
 
 ### Release and acceptance
 
-- [ ] Full frontend/backend tests, lint, TypeScript and production build; one fresh read-only branch review, one TDD fix pass if required.
+- [x] Full frontend/backend tests, lint, TypeScript and production build; one fresh read-only branch review, one TDD fix pass if required.
 - [ ] Preserve the primary checkout's nine unrelated files, integrate and push main as EthanLyu30, verify CI and public deployment.
 - [ ] Measure real Chrome native speech if browser access permits; measure cloud first sound separately from media duration. Do not claim physical hearing from callbacks.
 - [ ] Remove owned diagnostic artifacts after verification, preserve final evidence and report previously blocked caches.
+
+**Review and release evidence:** One independent review found an interrupted-preload bug: re-enabling local mode after Kokoro finished while disabled could leave Moonshine idle. The regression `resumes recognition preparation when re-enabled after pronunciation finished while disabled` failed before the fix and passed after making bootstrap restartable and limiting automatic scheduling to engine transitions. Full frontend: 258/258; backend: 413/413; lint, TypeScript and production build passed. Physical Chrome and real local model performance remain outside automatic acceptance. Before release, the old live cloud endpoint returned one 35-second read timeout, followed by successful complete WAVs in 4.53 and 3.82 seconds; warmed health latency was 0.32 seconds. The cloud shutdown fix does not establish that all production network delays have been eliminated.

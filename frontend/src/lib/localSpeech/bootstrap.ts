@@ -30,7 +30,10 @@ export function createLocalSpeechBootstrap(
         if (dependencies.enabled?.() === false) { started = false; return; }
         await dependencies.preload({ includeKokoro: !hasEnglishVoice,
           ...(dependencies.priority ? {priority:dependencies.priority} : {}),
-        }).catch(() => { started = false; });
+        }).catch(() => undefined);
+        // Completed or interrupted preparation can be resumed on the next
+        // explicit local-mode selection. The coordinator deduplicates ready models.
+        started = false;
       })();
     });
   };
@@ -48,7 +51,9 @@ let subscribed = false;
 export function bootstrapLocalSpeechModels(): void {
   if (!subscribed) {
     subscribed = true;
-    useVoice.subscribe((state) => { if (state.engine === "local") startLocalModels(); });
+    useVoice.subscribe((state, previous) => {
+      if (state.engine === "local" && previous.engine !== "local") startLocalModels();
+    });
   }
   startLocalModels();
 }
