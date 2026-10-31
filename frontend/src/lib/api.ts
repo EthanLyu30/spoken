@@ -413,14 +413,20 @@ export async function postPronunciation(
   pcm: ArrayBuffer,
   signal?: AbortSignal,
 ): Promise<PronunciationResult> {
-  const res = await fetch(`${BASE_URL}/api/pronunciation?text=${encodeURIComponent(text)}`, {
+  const generation = getAuthGeneration();
+  const init: RequestInit = {
     method: "POST",
     headers: { "Content-Type": "application/octet-stream" },
     body: pcm,
     signal: withTimeout(signal, 45_000),
-  });
+  };
+  assertAuthGeneration(generation, signal);
+  const res = await fetch(`${BASE_URL}/api/pronunciation?text=${encodeURIComponent(text)}`, init);
+  assertAuthGeneration(generation, signal);
   if (!res.ok) throw new Error(`pronunciation failed: ${res.status}`);
-  return (await res.json()) as PronunciationResult;
+  const result = (await res.json()) as PronunciationResult;
+  assertAuthGeneration(generation, signal);
+  return result;
 }
 
 /** Suggest a few natural things the learner could say next. */

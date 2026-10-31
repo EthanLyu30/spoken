@@ -6,6 +6,7 @@ counters. Helpers never commit: the caller owns the activity transaction.
 """
 
 from datetime import datetime, timedelta, timezone
+from itertools import islice
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -35,6 +36,19 @@ def timezone_name(value: str | None) -> str:
 def _insert(db: Session, model, values: dict) -> None:
     insert = sqlite_insert if db.get_bind().dialect.name == "sqlite" else pg_insert
     db.execute(insert(model).values(**values).on_conflict_do_nothing())
+
+
+def _insert_many(db: Session, model, rows) -> None:
+    """Real multirow SQL, bounded below SQLite's historical 999-bind limit.
+
+    Passing rows to execute() would use executemany, which can still issue one
+    server operation per row. VALUES batches bound both memory and round trips.
+    """
+    insert = sqlite_insert if db.get_bind().dialect.name == "sqlite" else pg_insert
+    batch_size = 900 // len(model.__table__.columns)
+    rows = iter(rows)
+    while batch := list(islice(rows, batch_size)):
+        db.execute(insert(model).values(batch).on_conflict_do_nothing())
 
 
 def lock_owner(db: Session, client_id: str) -> None:
@@ -99,11 +113,10 @@ def stats_and_awards(db: Session, client_id: str, timezone_value: str | None = N
         "scenarios_5": len({e.scenario_id for e in conversations if e.scenario_id}) >= 5,
         "level_3": level >= 3,
     }
-    for key, earned in achievements.items():
-        if earned:
-            _insert(db, EarnedBadge, {"client_id": client_id, "badge_key": key, "earned_at": utcnow()})
-    badges = list(db.scalars(select(EarnedBadge.badge_key).where(EarnedBadge.client_id == client_id)
-                            .order_by(EarnedBadge.badge_key)))
+    badges = set(db.scalars(select(EarnedBadge.badge_key).where(EarnedBadge.client_id == client_id)))
+    newly_earned = {key for key, earned in achievements.items() if earned} - badges
+    _insert_many(db, EarnedBadge, ({"client_id": client_id, "badge_key": key, "earned_at": utcnow()}
+                                 for key in sorted(newly_earned)))
     return {
         "streak_days": streak,
         "today_count": sum(e.occurred_at is not None and _local_date(e.occurred_at, zone) == today
@@ -115,10 +128,36 @@ def stats_and_awards(db: Session, client_id: str, timezone_value: str | None = N
         "total_sessions": len(conversations),
         "total_practice": len(practices),
         "words_count": db.scalar(select(func.count(WordEntry.id)).where(WordEntry.client_id == client_id)) or 0,
-        "earned_badges": badges,
+        "earned_badges": sorted(badges | newly_earned),
         "timezone": zone_name,
         "local_date": today.isoformat(),
     }
+
+
+def _legacy_events(db: Session):
+    # Every row has the same nullable column shape, including batches crossing
+    # source types. Unknown legacy dates stay NULL; source text is never loaded.
+    empty = {column.name: None for column in LearningEvent.__table__.columns}
+    for row in db.execute(select(PracticeSession.id, PracticeSession.client_id,
+            PracticeSession.client_session_id, PracticeSession.created_at,
+            PracticeSession.scenario_id, PracticeSession.overall).execution_options(yield_per=90)):
+        yield empty | dict(event_key=f"legacy:session:{row.id}", client_id=row.client_id,
+            event_type="session", source_id=row.id, client_session_id=row.client_session_id,
+            occurred_at=row.created_at, scenario_id=row.scenario_id, score=row.overall)
+    for row in db.execute(select(PracticeRecord.id, PracticeRecord.client_id,
+            PracticeRecord.created_at, PracticeRecord.kind, PracticeRecord.score).execution_options(yield_per=90)):
+        yield empty | dict(event_key=f"legacy:practice:{row.id}", client_id=row.client_id,
+            event_type="practice", source_id=row.id, occurred_at=row.created_at,
+            kind=row.kind, score=row.score)
+    for row in db.execute(select(WordEntry.id, WordEntry.client_id, WordEntry.created_at,
+            WordEntry.text, WordEntry.last_reviewed, WordEntry.box).execution_options(yield_per=90)):
+        yield empty | dict(event_key=f"legacy:word:{row.id}", client_id=row.client_id,
+            event_type="word_collected", source_id=row.id, occurred_at=row.created_at,
+            word_text=row.text.strip())
+        if row.last_reviewed is not None or (row.box or 0) > 0:
+            yield empty | dict(event_key=f"legacy:review:{row.id}", client_id=row.client_id,
+                event_type="word_reviewed", source_id=row.id, occurred_at=row.last_reviewed,
+                word_text=row.text.strip())
 
 
 def _backfill_connection(conn: Connection) -> None:
@@ -130,22 +169,7 @@ def _backfill_connection(conn: Connection) -> None:
         lock_owner(db, "__progress_migration_v1__")
         if db.get(ProgressMigration, 1) is not None:
             return
-        for row in db.scalars(select(PracticeSession)):
-            _insert(db, LearningEvent, dict(event_key=f"legacy:session:{row.id}", client_id=row.client_id,
-                    event_type="session", source_id=row.id, client_session_id=row.client_session_id,
-                    occurred_at=row.created_at, scenario_id=row.scenario_id, score=row.overall))
-        for row in db.scalars(select(PracticeRecord)):
-            _insert(db, LearningEvent, dict(event_key=f"legacy:practice:{row.id}", client_id=row.client_id,
-                    event_type="practice", source_id=row.id, occurred_at=row.created_at,
-                    kind=row.kind, score=row.score))
-        for row in db.scalars(select(WordEntry)):
-            _insert(db, LearningEvent, dict(event_key=f"legacy:word:{row.id}", client_id=row.client_id,
-                    event_type="word_collected", source_id=row.id, occurred_at=row.created_at,
-                    word_text=row.text.strip()))
-            if row.last_reviewed is not None or (row.box or 0) > 0:
-                _insert(db, LearningEvent, dict(event_key=f"legacy:review:{row.id}", client_id=row.client_id,
-                        event_type="word_reviewed", source_id=row.id, occurred_at=row.last_reviewed,
-                        word_text=row.text.strip()))
+        _insert_many(db, LearningEvent, _legacy_events(db))
         for owner in db.scalars(select(LearningEvent.client_id).distinct()):
             stats_and_awards(db, owner)
         db.add(ProgressMigration(version=1))
