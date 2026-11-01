@@ -56,10 +56,11 @@ async def client_timing(request: Request):
         raise HTTPException(status_code=422, detail="Invalid telemetry payload") from None
     sink = getattr(request.app.state, "telemetry_sink", None)
     if sink:
+        native = event.model_dump(include={"reason", "error_code", "state_before", "state_after", "voice_type", "voice_matched"}, exclude_none=True)
         sink.submit({"trace_id": secrets.token_hex(16), "interaction_id": event.interaction_id, "started_at": datetime.now(timezone.utc).replace(tzinfo=None),
             "operation": event.operation, "source": "browser", "outcome": event.outcome,
             "duration_ms": event.duration_ms, "release": event.release, "model": f"{event.engine}/{event.transport}", "spans_json": json.dumps([
                 {"id": secrets.token_hex(8), "parent_id": None, "name": event.operation, "offset_ms": 0,
-                 "duration_ms": event.duration_ms, "outcome": event.outcome, "attributes": {"engine": event.engine, "transport": event.transport}}
+                 "duration_ms": event.duration_ms, "outcome": event.outcome, "attributes": {"engine": event.engine, "transport": event.transport, **native}}
             ])})
     return Response(status_code=202)

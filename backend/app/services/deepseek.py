@@ -15,16 +15,24 @@ import httpx
 
 from app.core.config import Settings, get_settings
 from app.core.observability import traced, traced_stream, trace_attribute
-from app.core.performance import HttpTimings, elapsed
+from app.core.performance import HttpTimings, elapsed, add, current
 
 
 def _usage(data):
     usage = data.get("usage") if isinstance(data, dict) else None
     if isinstance(usage, dict):
-        for source, target in (("prompt_tokens", "input_tokens"), ("completion_tokens", "output_tokens")):
+        for source, target in (("prompt_tokens", "input_tokens"), ("completion_tokens", "output_tokens"),
+                               ("prompt_cache_hit_tokens", "prompt_cache_hit_tokens"),
+                               ("prompt_cache_miss_tokens", "prompt_cache_miss_tokens")):
             value = usage.get(source)
             if type(value) is int and 0 <= value <= 10_000_000:
                 trace_attribute(target, value)
+                if source in {"prompt_cache_hit_tokens", "prompt_cache_miss_tokens"}:
+                    # Usage is a total, not a per-chunk increment.
+                    trace = current()
+                    if trace is not None:
+                        with trace.performance_lock:
+                            trace.performance["llm_" + source] = value
 
 
 class DeepSeekError(RuntimeError):
@@ -149,6 +157,7 @@ class DeepSeekClient:
 
         request_start = perf_counter()
         first_text = True
+        last_text_at = None
         try:
             async with self._client() as client:
                 async with client.stream("POST", url, json=payload, headers=headers, extensions={"trace": HttpTimings()}) as resp:
@@ -160,6 +169,11 @@ class DeepSeekClient:
                         data = line[5:].strip()
                         if data == "[DONE]":
                             completed = True
+                            done_at = perf_counter()
+                            add("llm_done", max(0, (done_at - request_start) * 1000))
+                            if last_text_at is not None:
+                                add("llm_last_text", max(0, (last_text_at - request_start) * 1000))
+                                add("llm_tail", max(0, (done_at - last_text_at) * 1000))
                             elapsed("llm_total", request_start)
                             break
                         try:
@@ -167,12 +181,17 @@ class DeepSeekClient:
                             _usage(packet)
                             if isinstance(packet, dict) and packet.get("error"):
                                 raise DeepSeekError("DeepSeek reported a streaming error")
-                            delta = packet["choices"][0]["delta"].get("content")
+                            choice = packet["choices"][0]
+                            reason = choice.get("finish_reason")
+                            if reason is not None and reason != "stop":
+                                raise DeepSeekError("DeepSeek stream did not complete successfully")
+                            delta = choice["delta"].get("content")
                         except (json.JSONDecodeError, KeyError, IndexError, TypeError):
                             continue
                         if delta:
+                            last_text_at = perf_counter()
                             if first_text:
-                                elapsed("llm_first_text", request_start)
+                                add("llm_first_text", max(0, (last_text_at - request_start) * 1000))
                                 first_text = False
                             yield delta
                     if not completed:

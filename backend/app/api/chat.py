@@ -18,6 +18,7 @@ from app.services.deepseek import DeepSeekClient, DeepSeekError
 from app.services.dialogue import build_messages
 from app.services.speaking_scope import dialogue_redirect
 from app.core.observability import trace_error
+from app.core.performance import current, numeric
 
 router = APIRouter(tags=["chat"])
 
@@ -98,7 +99,12 @@ async def chat_stream(
                 yield frame("error", {"message": "回复中断，请重试这一回合。"})
             return
         if events:
-            yield frame("done", {})
+            trace = current()
+            timings = {}
+            if trace is not None:
+                with trace.performance_lock:
+                    timings = {k: v for k, v in numeric(trace.performance).items() if k.startswith("llm_")}
+            yield frame("done", {"timings": timings} if timings else {})
 
     return StreamingResponse(
         gen(),
