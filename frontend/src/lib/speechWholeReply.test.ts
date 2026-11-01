@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ fetchTtsUrl: vi.fn(), fetchTtsStream: vi.fn(), synthesize: vi.fn(), modelError:vi.fn(), localReady: false,
-  settings: { engine: "iflytek", vcn: null, speed: null as number | null, pitch: null as number | null, browserVoiceURI: null as string | null } }));
+  settings: { engine: "iflytek", vcn: null as string | null, speed: null as number | null, pitch: null as number | null, browserVoiceURI: null as string | null } }));
 vi.mock("./api", () => ({ fetchTtsUrl: mocks.fetchTtsUrl, fetchTtsStream: mocks.fetchTtsStream }));
 vi.mock("../store/voice", async actual => ({ ...await actual<object>(), useVoice: { getState: () => mocks.settings } }));
 vi.mock("./localSpeech/runtime", () => ({ isLocalSpeechModelReady: () => mocks.localReady,localSpeechCoordinator:{markError:mocks.modelError} }));
@@ -30,7 +30,7 @@ const revoke = vi.fn();
 let samples: Record<string, unknown>[] = [];
 beforeEach(() => {
   audios.length = 0; utterances.length = 0; samples = [];
-  mocks.settings.engine = "iflytek"; mocks.settings.browserVoiceURI = null; mocks.settings.speed = null; mocks.settings.pitch = null; mocks.localReady = false;
+  mocks.settings.engine = "iflytek"; mocks.settings.vcn = null; mocks.settings.browserVoiceURI = null; mocks.settings.speed = null; mocks.settings.pitch = null; mocks.localReady = false;
   mocks.fetchTtsUrl.mockReset().mockResolvedValue("blob:whole");
   mocks.fetchTtsStream.mockReset(); mocks.synthesize.mockReset(); mocks.modelError.mockReset(); nativeCancel.mockClear(); revoke.mockClear();
   vi.stubGlobal("AudioContext", undefined); vi.stubGlobal("Audio", AudioDouble);
@@ -40,6 +40,47 @@ beforeEach(() => {
   Object.defineProperty(URL,"revokeObjectURL",{configurable:true,value:revoke});
 });
 afterEach(() => { stopSpeaking(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it("preconnects expected cloud during generation and passes its ticket with current final preferences", async () => {
+  vi.useFakeTimers();
+  const fetcher=vi.fn(async()=>Response.json({ticket:"d".repeat(32)}));
+  vi.stubGlobal("fetch",fetcher);
+  const preparation=prepareSpeech();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
+  mocks.settings.vcn="henry";
+  mocks.settings.speed=42;
+  const speaking=speakText("Final whole reply.","cafe",{preparation});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(audios).toHaveLength(1);
+  expect(mocks.fetchTtsUrl).toHaveBeenCalledWith("Final whole reply.","cafe",expect.any(AbortSignal),{vcn:"henry",speed:42,pitch:undefined},"d".repeat(32));
+  audios[0].onplaying?.();audios[0].onended?.();await speaking.done;
+});
+
+it("keeps available browser voices free of cloud preparation requests", async () => {
+  mocks.settings.engine="browser";
+  const fetcher=vi.fn();vi.stubGlobal("fetch",fetcher);
+  const preparation=prepareSpeech();
+  await Promise.resolve();
+  expect(fetcher).not.toHaveBeenCalled();
+  preparation.dispose();
+});
+
+it("uses a late browser voice instead of a prepared cloud connection", async () => {
+  vi.useFakeTimers();mocks.settings.engine="browser";
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([]);
+  const fetcher=vi.fn(async()=>Response.json({ticket:"e".repeat(32)}));vi.stubGlobal("fetch",fetcher);
+  const preparation=prepareSpeech();
+  await vi.advanceTimersByTimeAsync(600);
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([{name:"Late Natural",voiceURI:"late",lang:"en-US"} as SpeechSynthesisVoice]);
+  const speaking=speakText("Final reply.","cafe",{preparation});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(utterances).toHaveLength(1);
+  expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
+  expect(preparation.takeCloudTicket?.()).toBeUndefined();
+  utterances[0].onstart?.();utterances[0].onend?.();await speaking.done;
+});
 
 it("buffers generated text and sends exactly one complete cloud request at end", async () => {
   const q = createSpeechQueue("cafe"); q.feed("First. "); q.feed("First. Second.");

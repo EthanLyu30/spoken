@@ -180,6 +180,19 @@ async function pendingTypedReply() {
   await user.click(screen.getByRole("button", {name: /^发送$/}));
   return {user, view, complete};
 }
+it("does not prepare cloud speech for a reply sent while already muted", async () => {
+  const user=userEvent.setup();
+  mocks.streamChat.mockImplementationOnce(async(_id,_history,onText)=>{onText("Muted reply.");return "Muted reply.";});
+  render(<MemoryRouter future={{v7_startTransition:true,v7_relativeSplatPath:true}} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation/>}/></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button",{name:"关闭朗读"}));
+  await user.click(screen.getByRole("button",{name:"文字练习"}));
+  await user.type(screen.getByRole("textbox",{name:"英文回复"}),"A coffee.");
+  await user.click(screen.getByRole("button",{name:/^发送$/}));
+  await screen.findByText("Muted reply.");
+  expect(mocks.prepareSpeech).not.toHaveBeenCalled();
+  expect(mocks.speakText.mock.calls.map(([text])=>text)).toEqual(["Hello"]);
+});
 it("keeps manual replay independent while a fresh reply is generating", async () => {
   const {user, complete} = await pendingTypedReply();
   const stop = vi.fn();

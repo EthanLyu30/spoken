@@ -313,7 +313,7 @@ export default function Conversation() {
     bindInteraction(ctrl.signal, newInteractionId());
     const submittedAt = performance.now();
     replyPreparationRef.current?.preparation?.dispose();
-    const preparation = prepareSpeech(ctrl.signal);
+    const preparation = mutedRef.current ? undefined : prepareSpeech(ctrl.signal);
     requestControllerRef.current = ctrl;
     autoSpeakAllowedRef.current = false;
     speakingRef.current?.stop();
@@ -381,7 +381,7 @@ export default function Conversation() {
       }
     } finally {
       if (!accepted) {
-        preparation.dispose();
+        preparation?.dispose();
         if (replyPreparationRef.current?.controller === ctrl) replyPreparationRef.current = null;
       }
       if (requestControllerRef.current === ctrl)
@@ -530,9 +530,9 @@ export default function Conversation() {
             queue.stop();
             if (signal.aborted || started || !isCurrent()) throw err;
             // Streaming unavailable -> plain endpoint; speak the whole reply.
-            const preparation = prepareSpeech(signal);
+            const preparation = mutedRef.current ? undefined : prepareSpeech(signal);
             callPreparationRef.current?.dispose();
-            callPreparationRef.current = preparation;
+            callPreparationRef.current = preparation ?? null;
             try {
               const r = await postChat(id, next, signal, custom);
               signal.throwIfAborted();
@@ -559,7 +559,7 @@ export default function Conversation() {
                   callQueueRef.current = null;
               }
             } finally {
-              preparation.dispose();
+              preparation?.dispose();
               if (callPreparationRef.current === preparation) callPreparationRef.current = null;
             }
           } finally {

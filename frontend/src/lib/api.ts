@@ -339,9 +339,11 @@ export async function fetchTtsUrl(
   scenarioId?: string,
   signal?: AbortSignal,
   overrides?: TtsOverrides,
+  warmupTicket?: string,
 ): Promise<string> {
   const voice = useVoice.getState();
   const body: Record<string, unknown> = { text, scenario_id: scenarioId };
+  if (warmupTicket) body.warmup_ticket = warmupTicket;
   const vcn = overrides?.vcn ?? voice.vcn;
   const speed = overrides?.speed ?? voice.speed;
   const pitch = overrides?.pitch ?? voice.pitch;

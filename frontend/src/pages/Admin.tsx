@@ -15,6 +15,7 @@ const names: Record<string, string> = {
   "POST /api/interview/score": "Interview · 四题评分", "POST /api/asr": "录音识别",
   "POST /api/asr/session": "直连识别 · 授权", "POST /api/tts/stream": "语音合成 · 流式",
   "POST /api/tts": "语音合成", "asr.finalize": "语音识别 · 收尾等待",
+  "POST /api/tts/prepare": "云语音 · 按需预连接",
   "asr.transcribe": "录音识别 · 浏览器总耗时", "speech.first_audio": "语音播放 · 建队列至开始回调",
   "speech.complete": "语音播放 · 完成（含播放）",
   "speech.playback": "语音播放 · 播放阶段（首声至结束）",

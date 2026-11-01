@@ -6,6 +6,7 @@ import { autoCloudOverrides, resolveVoiceMode } from "./voiceResolver";
 import { float32ToWavBlob } from "./localSpeech/audio";
 import { isLocalSpeechModelReady, localSpeechCoordinator } from "./localSpeech/runtime";
 import { bindInteraction, reportTiming, NATIVE_ERRORS, type NativeDiagnostic } from "./telemetry";
+import { prepareCloudSpeech, type CloudSpeechPreparation } from "./cloudSpeechPreparation";
 
 export interface Speaking {
   readonly status?: SpeechPlayback;
@@ -168,20 +169,27 @@ let current: Speaking | null = null;
 export interface SpeechPreparation {
   consume: () => ReturnType<typeof resolveVoiceMode> | undefined;
   dispose: () => void;
+  takeCloudTicket?: () => string | undefined;
 }
-/** Discovery only: does not own playback or snapshot user preferences. */
+/** Discovery and optional handshake only; never owns playback or synthesizes text. */
 export function prepareSpeech(signal?: AbortSignal): SpeechPreparation {
   const controller = new AbortController();
   let consumed = false;
-  const dispose = () => { controller.abort(); signal?.removeEventListener("abort", dispose); };
+  let cloud: CloudSpeechPreparation | undefined;
+  const dispose = () => { controller.abort(); cloud?.dispose(); signal?.removeEventListener("abort", dispose); };
   if (signal?.aborted) dispose();
   else signal?.addEventListener("abort", dispose, {once: true});
   const mode = resolveVoiceMode("browser", voiceSource(), controller.signal);
+  const settings = useVoice.getState();
+  if (!controller.signal.aborted && (settings.engine === "iflytek" ||
+    (listBrowserVoices().length === 0 && (settings.engine !== "local" || !isLocalSpeechModelReady("kokoro"))))) {
+    cloud = prepareCloudSpeech(controller.signal);
+  }
   return {dispose, consume: () => {
     if (consumed || controller.signal.aborted) return undefined;
     consumed = true;
     return mode;
-  }};
+  }, takeCloudTicket: () => controller.signal.aborted ? undefined : cloud?.take()};
 }
 export interface SpeechContext {
   preparation?: SpeechPreparation;
@@ -208,7 +216,6 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string, c
   controller.signal.addEventListener("abort", () => preparation?.dispose(), {once: true});
   const preparedMode = (settings.engine !== "iflytek" ? preparation?.consume() : undefined)
     ?? resolveVoiceMode(settings.engine === "local" ? "browser" : settings.engine, voiceSource(), controller.signal);
-  if (settings.engine === "iflytek") preparation?.dispose();
   let provideText: (text: string) => void = () => {};
   const finalText = new Promise<string>(resolve => { provideText = resolve; });
   let markStarted: () => void = () => {};
@@ -259,6 +266,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string, c
       });
       if (stopped) { if (url) URL.revokeObjectURL(url); return; }
       if (!url && browserMode?.kind === "browser") {
+        preparation?.dispose();
         engine = "browser"; transport = "unknown";
         playback.update({effectiveEngine:"browser",voice:pickBrowserVoice(settings.browserVoiceURI)?.name ?? "英文音色",
           fallbackReason:settings.engine === "local" ? "local-unavailable" : null});
@@ -284,7 +292,9 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string, c
           const fetchStart = performance.now();
           let fetched = false;
           try {
-            url = await fetchTtsUrl(text, scenarioId, controller.signal, overrides);
+            const ticket = preparation?.takeCloudTicket?.();
+            preparation?.dispose();
+            url = await fetchTtsUrl(text, scenarioId, controller.signal, overrides, ticket);
             fetched = true;
           } finally {
             reportTiming("speech.cloud_fetch", performance.now() - fetchStart, {
@@ -292,6 +302,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string, c
             });
           }
         }
+        preparation?.dispose();
         if (stopped) { URL.revokeObjectURL(url); return; }
         active = playUrl(url, duration => {
           reportTiming("speech.play_start", duration, {engine, transport, interactionId});
