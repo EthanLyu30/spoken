@@ -156,3 +156,21 @@ it("shows a same-owner scoring failure and permits another recording", async () 
   await screen.findByRole("button", { name: "停止评分" });
   expect(startRecording).toHaveBeenCalledTimes(2);
 });
+
+it("keeps pronunciation feedback and retries a lost save without recording or scoring again", async () => {
+  const view=await record();
+  fireEvent.click(screen.getByRole("button",{name:"停止评分"}));await finishScore();
+  await act(async()=>{saving.resolve(new Response("{}",{status:503}));});
+  expect(screen.getByText("91")).toBeVisible();
+  expect(screen.getByRole("alert")).toBeVisible();
+  const key=(saves[0].body as {client_request_id:string}).client_request_id;
+  expect(key).toEqual(expect.any(String));
+  saving=deferred<Response>();fireEvent.click(screen.getByRole("button",{name:"重试保存"}));
+  await waitFor(()=>expect(saves).toHaveLength(2));
+  expect((saves[1].body as {client_request_id:string}).client_request_id).toBe(key);
+  await act(async()=>{saving.resolve(new Response("{}"));});
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(startRecording).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(fetch).mock.calls.filter(([url])=>String(url).includes("/api/pronunciation"))).toHaveLength(1);
+  view.unmount();
+});

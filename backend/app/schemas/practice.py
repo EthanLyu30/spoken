@@ -10,6 +10,7 @@ class PracticeCreate(BaseModel):
     score: float = Field(ge=0, le=100)  # Native scale: pronunciation 100; interview 5, legacy 6.
     title: str = Field(default="", max_length=200)
     detail: str = Field(default="", max_length=48000)
+    client_request_id: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class PracticeRecordOut(BaseModel):

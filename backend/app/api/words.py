@@ -9,6 +9,7 @@ from app.db import get_db
 from app.schemas.word import Word, WordCreate, WordReview, WordUpdate
 from app.services import words as repo
 from app.services.deepseek import DeepSeekClient
+from app.services.request_receipts import RequestConflict
 
 router = APIRouter(tags=["words"])
 
@@ -61,7 +62,10 @@ def review_word(
     if entry is None:
         raise HTTPException(status_code=404, detail="Word not found")
     try:
-        return Word.model_validate(repo.review_word(db, entry, payload.remembered, timezone))
+        return Word.model_validate(repo.review_word(db, entry, payload.remembered, timezone,
+                                                   payload.client_request_id))
+    except RequestConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Word not found") from exc
 

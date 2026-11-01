@@ -9,7 +9,7 @@ from app.models.practice import PracticeRecord
 from app.models.session import PracticeSession
 from app.models.user import User
 from app.models.word import WordEntry
-from app.services import progress
+from app.services import progress, request_receipts
 
 # Every owner-scoped table keyed by client_id; claiming rewrites the owner.
 _OWNED = (WordEntry, PracticeSession, PracticeRecord)
@@ -40,6 +40,7 @@ def claim_device_data(db: Session, device_id: str, owner_id: str) -> None:
     try:
         for owner in sorted((device_id, owner_id)):
             progress.lock_owner(db, owner)
+        request_receipts.claim(db, device_id, owner_id)
         progress.claim_progress(db, device_id, owner_id)
         for model in _OWNED:
             db.execute(

@@ -261,3 +261,40 @@ it("pauses simulation on the prompt deadline without automatically recording", a
   expect(result.current.idx).toBe(0);expect(mocks.startRecording).toHaveBeenCalledTimes(1);
   await act(async()=>result.current.startAnswer());expect(result.current.qPhase).toBe("recording");
 });
+
+it.each(["practice", "simulation"] as const)("retries a lost %s save with one receipt and no regrading", async mode => {
+  if(mode === "simulation") vi.useFakeTimers();
+  mocks.scoreInterview.mockResolvedValue({overall:4,results:[]});
+  mocks.savePractice.mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce({id:1});
+  const {result}=renderHook(()=>useInterviewSession("save-retry"));
+  await act(async()=>result.current.begin(mode));
+  for(let i=0;i<4;i++) {
+    if(mode === "simulation") await act(async()=>vi.advanceTimersByTimeAsync(45_000));
+    else {
+      await act(async()=>result.current.startAnswer());await act(async()=>result.current.finishAnswer());await act(async()=>result.current.acceptAnswer());
+    }
+  }
+  expect(result.current).toMatchObject({phase:"results",saveError:true,result:{overall:4}});
+  await act(async()=>result.current.retrySave());
+  expect(result.current.saveError).toBe(false);expect(mocks.scoreInterview).toHaveBeenCalledTimes(1);
+  const key=mocks.savePractice.mock.calls[0][5];expect(key).toEqual(expect.any(String));
+  expect(mocks.savePractice.mock.calls[1][5]).toBe(key);
+  act(()=>result.current.exit());await act(async()=>result.current.begin("practice"));
+  for(let i=0;i<4;i++) {
+    await act(async()=>result.current.startAnswer());await act(async()=>result.current.finishAnswer());await act(async()=>result.current.acceptAnswer());
+  }
+  expect(mocks.savePractice.mock.calls[2][5]).not.toBe(key);
+});
+
+it("allows a fresh run after owner and credential replacement while discarding the old run",async()=>{
+  const {setToken}=await import("../lib/authToken");setToken("owner-replacement-a");
+  let finishOld!:(value:typeof deck)=>void;
+  mocks.getInterviewSet.mockReturnValueOnce(new Promise(resolve=>{finishOld=resolve;})).mockResolvedValueOnce(deck);
+  const {result,rerender}=renderHook(({owner})=>useInterviewSession(owner),{initialProps:{owner:"account-a"}});
+  let old!:Promise<void>;act(()=>{old=result.current.begin("practice");});
+  act(()=>setToken("owner-replacement-b"));rerender({owner:"account-b"});
+  await act(async()=>result.current.begin("practice"));
+  expect(result.current).toMatchObject({phase:"quiz",owner:"account-b",idx:0});
+  await act(async()=>{finishOld({...deck,topic:"old owner"});await old;});
+  expect(result.current.deck?.topic).toBe("运动");
+});

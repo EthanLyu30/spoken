@@ -4,6 +4,7 @@ import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { postPronunciation, savePractice, type PronunciationResult } from "../lib/api";
 import { PronunciationFeedback } from "./PronunciationFeedback";
 import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
+import { createPracticeId } from "../lib/sessionSave";
 
 interface RecordingOperation {
   generation: number;
@@ -17,11 +18,15 @@ export function PronounceButton({ text }: { text: string }) {
   const [result, setResult] = useState<PronunciationResult | null>(null);
   const [err, setErr] = useState(false);
   const operationRef = useRef<RecordingOperation | null>(null);
+  const saveRef = useRef<{generation:number; key:string; score:number; text:string; pending:boolean} | null>(null);
+  const [saveError, setSaveError] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     function cancel() {
       const operation = operationRef.current;
       operationRef.current = null;
+      saveRef.current = null;
       operation?.controller.abort();
       // stop() releases the stream/context; a pending grant is released below.
       void operation?.recorder?.stop().catch(() => undefined);
@@ -31,6 +36,8 @@ export function PronounceButton({ text }: { text: string }) {
       setState("idle");
       setResult(null);
       setErr(false);
+      setSaveError(false);
+      setSaving(false);
     });
     return () => { unsubscribe(); cancel(); };
   }, []);
@@ -38,6 +45,23 @@ export function PronounceButton({ text }: { text: string }) {
   function isCurrent(operation: RecordingOperation) {
     return operationRef.current === operation &&
       operation.generation === getAuthGeneration() && !operation.controller.signal.aborted;
+  }
+
+  async function persist() {
+    const save = saveRef.current;
+    if (!save || save.pending || save.generation !== getAuthGeneration()) return;
+    save.pending = true;
+    setSaving(true);
+    setSaveError(false);
+    const current = () => saveRef.current === save && save.generation === getAuthGeneration();
+    try {
+      // Keep the dispatched write alive when navigation cancels recording.
+      await savePractice("pronunciation", save.score, save.text, "", undefined, save.key);
+    } catch {
+      if (current()) setSaveError(true);
+    } finally {
+      if (current()) {save.pending=false;setSaving(false);}
+    }
   }
 
   async function onClick() {
@@ -56,7 +80,8 @@ export function PronounceButton({ text }: { text: string }) {
         if (!isCurrent(operation)) return;
         setResult(r);
         // Once dispatched, a valid save survives navigation or identity changes.
-        savePractice("pronunciation", r.overall, text).catch(() => undefined);
+        saveRef.current = {generation:operation.generation,key:createPracticeId(),score:r.overall,text,pending:false};
+        void persist();
       } catch {
         if (isCurrent(operation)) setErr(true);
       } finally {
@@ -73,6 +98,8 @@ export function PronounceButton({ text }: { text: string }) {
       setState("starting");
       setErr(false);
       setResult(null);
+      saveRef.current = null;
+      setSaveError(false);
       try {
         const rec = await startRecording();
         if (!isCurrent(next)) {
@@ -96,7 +123,7 @@ export function PronounceButton({ text }: { text: string }) {
       <button
         type="button"
         onClick={onClick}
-        disabled={state === "starting" || state === "scoring"}
+        disabled={state === "starting" || state === "scoring" || saving || saveError}
         className="inline-flex items-center gap-1 text-[0.66rem] font-bold uppercase tracking-wide opacity-60 transition-opacity hover:opacity-100"
       >
         {state === "scoring" ? (
@@ -110,6 +137,8 @@ export function PronounceButton({ text }: { text: string }) {
       </button>
       {err && <span className="ml-2 text-[0.66rem] font-semibold text-[#e6503d]">评测失败，重试</span>}
       {result && <PronunciationFeedback result={result} title="跟读评分" />}
+      {saving && <p role="status">正在保存评分…</p>}
+      {saveError && <div><p role="alert">评分尚未确认保存，请重试。</p><button type="button" onClick={() => void persist()}>重试保存</button></div>}
     </div>
   );
 }

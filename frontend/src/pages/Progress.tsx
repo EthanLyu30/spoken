@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
@@ -24,6 +24,7 @@ import { getPracticeDetail, type InterviewScore } from "../lib/api";
 import { getScenario } from "../data/scenarios";
 import { tokens } from "../lib/tokens";
 import { interviewProgressSummary } from "../lib/interviewScoring";
+import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
 
 const EChart = lazy(() =>
   import("../components/EChart").then((module) => ({ default: module.EChart })),
@@ -67,6 +68,22 @@ export default function Progress() {
   } | null>(null);
   const [reviewError, setReviewError] = useState(false);
   const [reviewLoading, setReviewLoading] = useState<number | null>(null);
+  const detailRequest = useRef<{revision:number; controller:AbortController | null}>({revision:0,controller:null});
+  const currentOwner = useRef(owner);
+  currentOwner.current = owner;
+  const cancelReview = useCallback(() => {
+    detailRequest.current.revision++;
+    detailRequest.current.controller?.abort();
+    detailRequest.current.controller=null;
+  }, []);
+  const closeReview = useCallback(() => {
+    cancelReview();setReview(null);setReviewError(false);setReviewLoading(null);
+  }, [cancelReview]);
+  useEffect(() => {
+    closeReview();
+    const unsubscribe=subscribeAuthGeneration(closeReview);
+    return () => {unsubscribe();cancelReview();};
+  }, [owner, closeReview, cancelReview]);
   const interview = practice.filter((p) => p.kind === "interview");
   const average = mean(sessions.map((s) => s.overall));
   const interviewSummary = interviewProgressSummary(interview);
@@ -159,19 +176,26 @@ export default function Progress() {
     .filter((item) => filter === "all" || item.kind === filter)
     .sort((a, b) => b.at.localeCompare(a.at));
   async function openReview(id: number) {
+    cancelReview();
+    const controller=new AbortController();
+    detailRequest.current.controller=controller;
+    const revision=detailRequest.current.revision;
+    const generation=getAuthGeneration();
     setReviewLoading(id);
     setReviewError(false);
     const expectedOwner = owner;
+    const current = () => currentOwner.current === expectedOwner && generation === getAuthGeneration() && detailRequest.current.revision === revision && !controller.signal.aborted;
     try {
-      const record = await getPracticeDetail(id);
+      const record = await getPracticeDetail(id,controller.signal);
+      if (!current()) return;
       const detail = JSON.parse(record.detail);
       if (!Array.isArray(detail.results) || !detail.results.length)
         throw new Error("legacy record");
       setReview({ owner: expectedOwner, result: detail });
     } catch {
-      setReviewError(true);
+      if (current()) setReviewError(true);
     } finally {
-      setReviewLoading(null);
+      if (current()) setReviewLoading(null);
     }
   }
   return (
@@ -467,11 +491,11 @@ export default function Progress() {
           )}
         </section>
         {review?.owner === owner && (
-          <ReviewDialog onClose={() => setReview(null)}>
+          <ReviewDialog onClose={closeReview}>
             <InterviewResults
               result={review.result}
               onRestart={() => navigate("/interview")}
-              onExit={() => setReview(null)}
+              onExit={closeReview}
               exitLabel="关闭回顾"
             />
           </ReviewDialog>

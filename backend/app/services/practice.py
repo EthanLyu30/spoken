@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from sqlalchemy import case, delete, desc, select
 from sqlalchemy.orm import Session, selectinload
+import json
 
 from app.core.performance import measure
 from app.models.practice import PracticeRecord
 from app.models.session import PracticeSession
 from app.schemas.practice import PracticeCreate, PracticeRecordOut
-from app.services import progress
+from app.services import progress, request_receipts
 
 TODAY_GOAL = 3
 XP_PER_LEVEL = 250
@@ -20,8 +21,18 @@ INSIGHTS_RECENT = 8
 
 
 def create_record(db: Session, client_id: str, payload: PracticeCreate,
-                  timezone: str | None = None) -> PracticeRecord:
-    progress.lock_owner(db, client_id)
+                  timezone: str | None = None) -> PracticeRecord | PracticeRecordOut:
+    fingerprint = request_receipts.payload_hash(payload.model_dump(exclude={"client_request_id"}))
+    try:
+        progress.lock_owner(db, client_id)
+        previous = request_receipts.find(db, client_id, "practice", payload.client_request_id, fingerprint)
+        if previous is not None:
+            result = PracticeRecordOut.model_validate(json.loads(previous.response_metadata))
+            db.commit()
+            return result
+    except Exception:
+        db.rollback()
+        raise
     record = PracticeRecord(
         client_id=client_id,
         kind=payload.kind,
@@ -32,8 +43,10 @@ def create_record(db: Session, client_id: str, payload: PracticeCreate,
     db.add(record)
     try:
         db.flush()
-        progress.record_event(db, client_id, "practice", source_id=record.id,
+        event = progress.record_event(db, client_id, "practice", source_id=record.id,
                               occurred_at=record.created_at, kind=record.kind, score=record.score)
+        request_receipts.remember(db, client_id, "practice", payload.client_request_id,
+            fingerprint, event, PracticeRecordOut.model_validate(record).model_dump(mode="json"))
         progress.stats_and_awards(db, client_id, timezone)
         db.commit()
     except Exception:

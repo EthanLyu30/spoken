@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { BookOpen, Check, Plus, Trash2, Volume2 } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
@@ -10,10 +10,11 @@ import { useWords } from "../store/words";
 import { speakText } from "../lib/speech";
 import { getScenario } from "../data/scenarios";
 import { themeFor } from "../lib/theme";
+import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
 
 /** A word is due for review when it isn't mastered and its due date has passed. */
 function isDue(w: Word): boolean {
-  if (w.mastered) return false;
+  if (w.id < 0 || w.mastered) return false;
   if (!w.due_at) return true;
   const due = new Date(w.due_at.endsWith("Z") ? w.due_at : `${w.due_at}Z`);
   return Number.isNaN(due.getTime()) || due.getTime() <= Date.now();
@@ -39,6 +40,7 @@ export default function WordBag() {
   useEffect(() => {
     ensureLoaded();
   }, [ensureLoaded]);
+  useEffect(() => subscribeAuthGeneration(() => setReview(false)), []);
 
   function addWord() {
     const text = newWord.trim();
@@ -62,7 +64,7 @@ export default function WordBag() {
 
   function startReview() {
     const dueNow = active.filter(isDue);
-    const pool = dueNow.length ? dueNow : active.filter((w) => !w.mastered);
+    const pool = dueNow.length ? dueNow : active.filter((w) => w.id > 0 && !w.mastered);
     if (!pool.length) return;
     setDeck(pool);
     setReviewKey((key) => key + 1);
@@ -83,7 +85,7 @@ export default function WordBag() {
             type="button"
             className="ui-button"
             onClick={() => (review ? setReview(false) : startReview())}
-            disabled={!active.some((w) => !w.mastered)}
+            disabled={!active.some((w) => w.id > 0 && !w.mastered)}
           >
             <BookOpen />
             {review ? "列表" : dueCount > 0 ? `复习 ${dueCount}` : "开始复习"}
@@ -271,7 +273,7 @@ export default function WordBag() {
             <button
               type="button"
               className="ui-button"
-              disabled={!active.some((w) => !w.mastered)}
+              disabled={!active.some((w) => w.id > 0 && !w.mastered)}
               onClick={startReview}
             >
               开始复习
@@ -298,12 +300,18 @@ function ReviewDeck({
   onDone,
 }: {
   deck: Word[];
-  review: (id: number, remembered: boolean) => void;
+  review: (id: number, remembered: boolean) => Promise<void>;
   onDone: () => void;
 }) {
   const [i, setI] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [stats, setStats] = useState({ know: 0, again: 0 });
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const choice = useRef<boolean | null>(null);
+  const locked = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const w = deck[i];
 
   if (!w) {
@@ -324,13 +332,32 @@ function ReviewDeck({
     );
   }
 
-  function answer(remembered: boolean) {
-    review(w.id, remembered); // optimistic — the store syncs the SRS schedule in the background
-    setStats((s) =>
-      remembered ? { ...s, know: s.know + 1 } : { ...s, again: s.again + 1 },
-    );
-    setFlipped(false);
-    setI((x) => x + 1);
+  async function answer(remembered: boolean) {
+    if (locked.current) return;
+    locked.current = true;
+    const generation = getAuthGeneration();
+    const selected = choice.current ?? remembered;
+    choice.current = selected;
+    setSaving(true);
+    setSaveError(false);
+    const current = () => mounted.current && generation === getAuthGeneration();
+    try {
+      await review(w.id, selected);
+      if (!current()) return;
+      setStats(s => selected ? {...s,know:s.know+1} : {...s,again:s.again+1});
+      setFlipped(false);
+      setI(x => x + 1);
+      choice.current = null;
+    } catch (error) {
+      if (current()) {
+        // A previous deck may have left an ambiguous save. Recover its original
+        // choice before retrying the same receipt, rather than trapping retries.
+        if (error && typeof error === "object" && "remembered" in error && typeof error.remembered === "boolean") choice.current = error.remembered;
+        setSaveError(true);
+      }
+    } finally {
+      if (current()) {locked.current = false;setSaving(false);}
+    }
   }
 
   return (
@@ -367,11 +394,13 @@ function ReviewDeck({
         <span className="text-xs text-muted">点卡片翻面看释义</span>
       </div>
       <div className="flex gap-3">
-        <Button variant="soft" onClick={() => answer(false)}>
+        <Button variant="soft" disabled={saving || saveError} onClick={() => void answer(false)}>
           忘了
         </Button>
-        <Button onClick={() => answer(true)}>记得 ✓</Button>
+        <Button disabled={saving || saveError} onClick={() => void answer(true)}>记得 ✓</Button>
       </div>
+      {saving && <p role="status">正在保存复习…</p>}
+      {saveError && <div><p role="alert">上次选择“{choice.current ? "记得" : "忘了"}”尚未确认保存，请重试。</p><Button onClick={() => void answer(choice.current ?? false)}>重试保存</Button></div>}
     </section>
   );
 }

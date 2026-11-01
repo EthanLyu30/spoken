@@ -8,6 +8,7 @@ from app.core.deps import get_client_id, get_timezone
 from app.db import get_db
 from app.schemas.practice import Insights, PracticeCreate, PracticeRecordOut, Stats
 from app.services import practice as repo
+from app.services.request_receipts import RequestConflict
 from app.models.practice import PracticeRecord
 from app.schemas.practice import PracticeDetailOut
 
@@ -21,7 +22,10 @@ def save_practice(
     client_id: str = Depends(get_client_id),
     timezone: str = Depends(get_timezone),
 ) -> PracticeRecordOut:
-    return PracticeRecordOut.model_validate(repo.create_record(db, client_id, payload, timezone))
+    try:
+        return PracticeRecordOut.model_validate(repo.create_record(db, client_id, payload, timezone))
+    except RequestConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/practice", response_model=list[PracticeRecordOut])

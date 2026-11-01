@@ -11,6 +11,7 @@ import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { transcribeSpeech } from "../lib/transcribe";
 import { speakText, stopSpeaking } from "../lib/speech";
 import { getAuthGeneration } from "../lib/authToken";
+import { createPracticeId } from "../lib/sessionSave";
 
 export type InterviewMode = "practice" | "simulation";
 type Phase = "intro" | "loading" | "quiz" | "scoring" | "results" | "error";
@@ -56,7 +57,7 @@ const initial = (owner: string): State => ({
 
 /** All asynchronous work belongs to a run and an identity, including mic grants. */
 export function useInterviewSession(owner: string) {
-  const generation = useRef(getAuthGeneration()).current;
+  const generation = getAuthGeneration();
   const [state, setState] = useState<State>(() => initial(owner));
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -68,6 +69,8 @@ export function useInterviewSession(owner: string) {
   const controller = useRef<AbortController | null>(null);
   const locked = useRef(false);
   const pcm = useRef<ArrayBuffer | null>(null);
+  const saveId = useRef("");
+  const savePending = useRef(false);
   const playbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const active = (run: number) =>
     generation === getAuthGeneration() && version.current === run && ownerRef.current === owner;
@@ -92,6 +95,8 @@ export function useInterviewSession(owner: string) {
     void rec?.stop().catch(() => undefined);
     locked.current = false;
     pcm.current = null;
+    savePending.current = false;
+    saveId.current = "";
   }
   useEffect(() => {
     setState(initial(owner));
@@ -301,7 +306,9 @@ export function useInterviewSession(owner: string) {
     mode: InterviewMode,
     run: number,
   ) {
-    if (!active(run)) return;
+    if (!active(run) || savePending.current) return;
+    savePending.current = true;
+    saveId.current ||= createPracticeId();
     update({ saving: true });
     try {
       // request() snapshots the current identity synchronously. Once sent, this
@@ -317,12 +324,17 @@ export function useInterviewSession(owner: string) {
           source_title: deck.source_title,
           source_url: deck.source_url,
         }),
+        undefined,
+        saveId.current,
       );
       if (active(run)) update({ saveError: false });
     } catch {
       if (active(run)) update({ saveError: true });
     } finally {
-      if (active(run)) update({ saving: false });
+      if (active(run)) {
+        savePending.current = false;
+        update({ saving: false });
+      }
     }
   }
   async function score(

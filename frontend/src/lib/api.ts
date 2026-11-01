@@ -533,10 +533,11 @@ export function savePractice(
   title = "",
   detail = "",
   signal?: AbortSignal,
+  clientRequestId?: string,
 ): Promise<PracticeRecord> {
   return request<PracticeRecord>("/api/practice", {
     method: "POST",
-    body: JSON.stringify({ kind, score, title, detail }),
+    body: JSON.stringify({ kind, score, title, detail, client_request_id: clientRequestId }),
     signal,
   });
 }
@@ -627,10 +628,10 @@ export function getDueWords(kind?: string, signal?: AbortSignal): Promise<Word[]
 }
 
 /** Record an SRS review: remembered pushes the next review out, forgot resets it. */
-export function reviewWord(id: number, remembered: boolean, signal?: AbortSignal): Promise<Word> {
+export function reviewWord(id: number, remembered: boolean, signal?: AbortSignal, clientRequestId?: string): Promise<Word> {
   return request<Word>(`/api/words/${id}/review`, {
     method: "POST",
-    body: JSON.stringify({ remembered }),
+    body: JSON.stringify({ remembered, client_request_id: clientRequestId }),
     signal,
   });
 }

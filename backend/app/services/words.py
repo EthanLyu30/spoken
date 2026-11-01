@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.models.word import WordEntry
 from app.services.deepseek import DeepSeekClient, DeepSeekError
-from app.services import progress
+from app.services import progress, request_receipts
+from app.schemas.word import Word
 
 # Leitner intervals (days) by box level; remembering bumps the box up.
 SRS_INTERVALS_DAYS = [0, 1, 2, 4, 8, 16, 30]
@@ -111,9 +112,25 @@ def list_due(db: Session, client_id: str, kind: str | None = None) -> list[WordE
 
 
 def review_word(db: Session, entry: WordEntry, remembered: bool,
-                timezone: str | None = None) -> WordEntry:
+                timezone: str | None = None, client_request_id: str | None = None) -> WordEntry | Word:
     """Apply a Leitner review: remembered -> longer interval, forgot -> reset."""
     _lock_entry(db, entry)
+    # A deleted word's numeric ID can be recycled by SQLite. Bind the key to
+    # this incarnation so an old review cannot replay onto a replacement.
+    fingerprint = request_receipts.payload_hash({"word_id": entry.id, "remembered": remembered,
+        "word_text": entry.text, "created_at": entry.created_at.isoformat()})
+    try:
+        previous = request_receipts.find(db, entry.client_id, "word_review", client_request_id, fingerprint)
+        if previous is not None:
+            # The word is mutable: a newer successful review may have changed
+            # its schedule. Replay acknowledges the old operation while returning
+            # the current owner-locked state, never historical scheduling.
+            result = Word.model_validate(entry)
+            db.commit()
+            return result
+    except Exception:
+        db.rollback()
+        raise
     box = entry.box or 0
     box = min(box + 1, len(SRS_INTERVALS_DAYS) - 1) if remembered else 0
     now = datetime.utcnow()
@@ -122,8 +139,10 @@ def review_word(db: Session, entry: WordEntry, remembered: bool,
     entry.due_at = now + timedelta(days=SRS_INTERVALS_DAYS[box])
     try:
         db.flush()
-        progress.record_event(db, entry.client_id, "word_reviewed", source_id=entry.id,
+        event = progress.record_event(db, entry.client_id, "word_reviewed", source_id=entry.id,
                               occurred_at=now, word_text=entry.text.strip())
+        request_receipts.remember(db, entry.client_id, "word_review", client_request_id,
+            fingerprint, event, {})
         progress.stats_and_awards(db, entry.client_id, timezone)
         db.commit()
     except Exception:
