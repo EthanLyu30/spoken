@@ -13,6 +13,7 @@ class TtsRequest(BaseModel):
     vcn: str | None = None
     speed: int | None = Field(default=None, ge=0, le=100)
     pitch: int | None = Field(default=None, ge=0, le=100)
+    warmup_ticket: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
     @field_validator("vcn")
     @classmethod

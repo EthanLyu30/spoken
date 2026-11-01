@@ -18,6 +18,21 @@ def get_tts_client() -> XfTtsClient:
     return XfTtsClient()
 
 
+@router.post("/tts/prepare")
+async def prepare_tts(request: Request, response: Response, client: XfTtsClient = Depends(get_tts_client)):
+    response.headers["Cache-Control"] = "no-store"
+    pool = getattr(request.app.state, "tts_warmup_pool", None)
+    if pool is None:
+        raise HTTPException(503, "语音准备暂不可用。", headers={"Cache-Control": "no-store"})
+    try:
+        ticket = pool.reserve(client.connection)
+    except Exception:
+        raise HTTPException(503, "语音准备暂不可用。", headers={"Cache-Control": "no-store"}) from None
+    if ticket is None:
+        raise HTTPException(429, "语音准备繁忙，请使用普通合成。", headers={"Cache-Control": "no-store"})
+    return {"ticket": ticket}
+
+
 @router.post("/tts")
 async def tts(
     req: TtsRequest, request: Request, client: XfTtsClient = Depends(get_tts_client)
@@ -27,6 +42,7 @@ async def tts(
     vcn = req.vcn or str(cfg["vcn"])
     speed = req.speed if req.speed is not None else int(cfg["speed"])  # type: ignore[arg-type]
     pitch = req.pitch if req.pitch is not None else int(cfg["pitch"])  # type: ignore[arg-type]
+    pool = getattr(request.app.state, "tts_warmup_pool", None)
     cache = getattr(request.app.state, "public_tts_cache", None)
     key = public_key(req.text, req.scenario_id, vcn=vcn, speed=speed, pitch=pitch) if cache is not None else None
     if key is not None:
@@ -34,7 +50,10 @@ async def tts(
         with span("tts.public_cache", cache_hit=cached is not None):
             add("tts_cache_hit" if cached is not None else "tts_cache_miss", 1)
         if cached is not None:
+            if pool is not None and req.warmup_ticket:
+                pool.discard(req.warmup_ticket)
             return Response(content=cached, media_type="audio/wav")
+    prepared = pool.take(req.warmup_ticket) if pool is not None and req.warmup_ticket else None
     try:
         # Collect the provider waveform and wrap it once as a complete WAV.
         pcm = await client.synthesize(
@@ -43,9 +62,13 @@ async def tts(
             speed=speed,
             pitch=pitch,
             aue="raw",
+            **({"connection": prepared} if prepared is not None else {}),
         )
     except XfTtsError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    finally:
+        if prepared is not None:
+            await prepared.close()
     # Preserve the provider's complete waveform and natural sentence pauses.
     wav = pcm16_to_wav(pcm)
     if key is not None:

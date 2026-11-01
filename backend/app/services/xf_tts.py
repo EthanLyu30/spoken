@@ -115,6 +115,13 @@ class XfTtsClient:
     def __init__(self, settings: Settings | None = None) -> None:
         self._s = settings or get_settings()
 
+    def connection(self):
+        s = self._s
+        if not (s.xf_app_id and s.xf_api_key and s.xf_api_secret):
+            raise XfTtsError("iFlytek credentials are not configured")
+        url = build_auth_url(_HOST, _PATH, s.xf_api_key, s.xf_api_secret)
+        return websockets.connect(url, max_size=2 * 1024 * 1024, open_timeout=10, close_timeout=0.15)
+
     async def synthesize(
         self, text: str, **kwargs,
     ) -> bytes:
@@ -130,6 +137,7 @@ class XfTtsClient:
         speed: int = 54,  # 0-100, 50 = neutral
         pitch: int = 52,  # 0-100, 50 = neutral
         volume: int = 80,  # 0-100
+        connection=None,
     ) -> AsyncIterator[bytes]:
         s = self._s
         if not (s.xf_app_id and s.xf_api_key and s.xf_api_secret):
@@ -140,7 +148,6 @@ class XfTtsClient:
         except ValueError as exc:
             raise XfTtsError("Unsupported English cloud voice") from exc
 
-        url = build_auth_url(_HOST, _PATH, s.xf_api_key, s.xf_api_secret)
         frame = {
             "common": {"app_id": s.xf_app_id},
             "business": {
@@ -164,7 +171,8 @@ class XfTtsClient:
         try:
             # The provider's status=2 is the audio boundary. Do not hold a complete
             # WAV for a slow close ACK; active synthesis retains its 30s deadline.
-            async with asyncio.timeout(30), measured_tts_connection(websockets.connect(url, max_size=2 * 1024 * 1024, open_timeout=10, close_timeout=0.15)) as ws:
+            context = connection if connection is not None else measured_tts_connection(self.connection())
+            async with asyncio.timeout(30), context as ws:
                 await ws.send(json.dumps(frame))
                 async for message in ws:
                     resp = json.loads(message)
