@@ -20,3 +20,9 @@ it("shows the actual browser fallback and surfaces native startup failure", () =
   expect(screen.getByRole("alert")).toHaveTextContent("浏览器朗读未能完成");
   expect(screen.getByRole("alert")).toHaveTextContent("请重试或选择其他可用音色");
 });
+
+it("suppresses inline errors when the App owns the shared error alert",()=>{
+  const playback=beginSpeechPlayback("browser");playback.update({phase:"error",fallbackReason:"browser-unavailable"});
+  render(<SpeechPlaybackStatus suppressInlineErrors />);
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});

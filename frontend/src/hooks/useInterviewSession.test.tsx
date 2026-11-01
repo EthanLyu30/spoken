@@ -233,3 +233,31 @@ it("does not send grading results after a synchronous credential change before R
   expect(mocks.savePractice).not.toHaveBeenCalled();
   expect(result.current.result).toBeNull();
 });
+
+it("pauses simulation after failed prompt narration until explicit text-only continuation", async () => {
+  mocks.speakText.mockReturnValue({done:Promise.resolve(),failed:true,stop:vi.fn()});
+  const {result}=renderHook(()=>useInterviewSession("failed-prompt"));
+  await act(async()=>result.current.begin("simulation","exercise"));
+  expect(mocks.startRecording).toHaveBeenCalledTimes(1); // Permission preflight only.
+  expect(result.current).toMatchObject({phase:"quiz",qPhase:"ready",left:45,answers:[]});
+  expect(result.current.error).toContain("朗读未能完成");
+  expect(result.current.error).toContain("开始回答");
+  await act(async()=>result.current.startAnswer());
+  expect(mocks.startRecording).toHaveBeenCalledTimes(2);
+  expect(result.current.qPhase).toBe("recording");expect(result.current.error).toBeNull();
+});
+it("pauses simulation on the prompt deadline without automatically recording", async () => {
+  vi.useFakeTimers();const stop=vi.fn();
+  mocks.speakText.mockReturnValue({done:new Promise<void>(()=>{}),failed:false,stop});
+  const {result}=renderHook(()=>useInterviewSession("timed-out-prompt"));
+  let pending!:Promise<void>;
+  await act(async()=>{pending=result.current.begin("simulation","exercise");await Promise.resolve();await Promise.resolve();});
+  expect(result.current.qPhase).toBe("listening");
+  await act(async()=>{await vi.advanceTimersByTimeAsync(20_000);await pending;});
+  expect(stop).toHaveBeenCalledOnce();expect(mocks.startRecording).toHaveBeenCalledTimes(1);
+  expect(result.current).toMatchObject({qPhase:"ready",left:45,answers:[]});
+  expect(result.current.error).toContain("朗读未能完成");
+  await act(async()=>vi.advanceTimersByTimeAsync(45_000));
+  expect(result.current.idx).toBe(0);expect(mocks.startRecording).toHaveBeenCalledTimes(1);
+  await act(async()=>result.current.startAnswer());expect(result.current.qPhase).toBe("recording");
+});

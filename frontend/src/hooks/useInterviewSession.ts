@@ -121,16 +121,20 @@ export function useInterviewSession(owner: string) {
     });
     if (mode === "simulation") {
       const speech = speakText(deck.questions[idx]);
-      await Promise.race([
-        speech.done,
-        new Promise<void>((resolve) => {
-          playbackTimer.current = setTimeout(resolve, 20_000);
+      const narrated = await Promise.race([
+        speech.done.then(() => !speech.failed, () => false),
+        new Promise<boolean>((resolve) => {
+          playbackTimer.current = setTimeout(() => resolve(false), 20_000);
         }),
       ]);
       if (playbackTimer.current) clearTimeout(playbackTimer.current);
       playbackTimer.current = null;
       if (!active(run)) return;
       speech.stop();
+      if (!narrated) {
+        update({qPhase:"ready",error:"题目朗读未能完成，模拟已暂停。请阅读屏幕题目，准备好后点击“开始回答”继续；本题尚未计时。"});
+        return;
+      }
       await record(deck, idx, answers, mode, run);
     }
   }

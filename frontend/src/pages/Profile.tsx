@@ -499,7 +499,7 @@ function VoiceSettings() {
         )}
         {previewing ? "停止试听" : "试听"}
       </button>
-      <SpeechPlaybackStatus />
+      <SpeechPlaybackStatus suppressInlineErrors />
     </section>
   );
 }

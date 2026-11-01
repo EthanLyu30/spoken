@@ -5,6 +5,7 @@ import { Onboarding } from "./components/Onboarding";
 import { AppHeader } from "./components/AppHeader";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { SiteVisitTracker } from "./components/SiteVisitTracker";
+import { SpeechPlaybackError } from "./components/SpeechPlaybackStatus";
 import { useAuth } from "./store/auth";
 
 // Route-level code splitting: each page ships as its own chunk and loads on
@@ -41,6 +42,7 @@ export default function App() {
   return (
     <DictionaryProvider key={generation}>
       <SiteVisitTracker />
+      <SpeechPlaybackError />
       <div className={`app-route route-${section}`}>
         {!focused && <AppHeader />}
         <RouteErrorBoundary key={location.pathname}>

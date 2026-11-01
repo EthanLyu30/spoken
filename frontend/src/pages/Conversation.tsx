@@ -736,7 +736,7 @@ export default function Conversation() {
             >
               {stageStatus}
             </p>
-              <SpeechPlaybackStatus />
+              <SpeechPlaybackStatus suppressInlineErrors />
             {showVoiceSettings && (
               <div className="mt-3 w-full rounded-2xl border border-border bg-surface p-3 text-left shadow-soft">
                 <label
