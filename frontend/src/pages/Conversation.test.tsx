@@ -264,3 +264,43 @@ it("ends the active call on identity change so independent fallback discovery is
   const {setToken}=await import("../lib/authToken");setToken("call-owner-changed");
   expect(end).toHaveBeenCalledOnce();expect(controller.signal.aborted).toBe(true);
 });
+
+
+it("releases call fallback discovery immediately when muted during the pending plain request", async () => {
+  const {prepareSpeech} = await vi.importActual<typeof import("../lib/speech")>("../lib/speech");
+  mocks.prepareSpeech.mockImplementation(prepareSpeech);
+  const addEventListener=vi.fn(), removeEventListener=vi.fn(), speak=vi.fn();
+  vi.stubGlobal("SpeechSynthesisUtterance",class {});
+  vi.stubGlobal("speechSynthesis",{getVoices:()=>[],addEventListener,removeEventListener,speak});
+  const queue={started:new Promise(() => {}),feed:vi.fn(),end:vi.fn().mockResolvedValue(undefined),stop:vi.fn()};
+  mocks.createSpeechQueue.mockReturnValue(queue);
+  mocks.streamChat.mockRejectedValueOnce(new Error("Unavailable"));
+  const user=userEvent.setup();
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button",{name:"开始语音对话"}));
+  let complete!: (value:{reply:string})=>void;
+  mocks.postChat.mockReturnValueOnce(new Promise(resolve=>{complete=resolve;}));
+  const callbacks=mocks.startVoiceCall.mock.calls[0][0] as CallCallbacks;
+  const timer=vi.spyOn(window,"setTimeout");
+  const clear=vi.spyOn(window,"clearTimeout");
+  const controller=new AbortController();
+  const pending=callbacks.reply("Coffee.",new ArrayBuffer(2),()=>{},controller.signal);
+  try {
+    await waitFor(()=>expect(mocks.postChat).toHaveBeenCalledTimes(2));
+    const discoveryTimer=timer.mock.results[timer.mock.calls.findIndex(([,delay])=>delay===500)].value;
+    expect(addEventListener).toHaveBeenCalledWith("voiceschanged",expect.any(Function));
+    expect(removeEventListener).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button",{name:"关闭朗读"}));
+    expect(removeEventListener).toHaveBeenCalledWith("voiceschanged",addEventListener.mock.calls[0][1]);
+    expect(clear).toHaveBeenCalledWith(discoveryTimer);
+    expect(mocks.prepareSpeech.mock.results[0].value.consume()).toBeUndefined();
+    expect(speak).not.toHaveBeenCalled();
+    complete({reply:"Muted final reply."});await pending;
+    expect(queue.end).toHaveBeenCalledWith("");
+    expect(mocks.speakText.mock.calls.map(([text])=>text)).toEqual(["Hello"]);
+  } finally {
+    controller.abort();complete?.({reply:"Cleanup"});await pending.catch(()=>undefined);
+    timer.mockRestore();clear.mockRestore();
+  }
+});

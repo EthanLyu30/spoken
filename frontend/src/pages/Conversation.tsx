@@ -116,6 +116,7 @@ export default function Conversation() {
   const speakingRef = useRef<Speaking | null>(null);
   const replyPreparationRef = useRef<(SpeechContext & {index: number; controller: AbortController}) | null>(null);
   const callQueueRef = useRef<SpeechQueue | null>(null);
+  const callPreparationRef = useRef<ReturnType<typeof prepareSpeech> | null>(null);
   const lastSpokenRef = useRef(-1);
   const autoSpeakAllowedRef = useRef(true);
   const recorderRef = useRef<ActiveRecorder | null>(null);
@@ -530,6 +531,8 @@ export default function Conversation() {
             if (signal.aborted || started || !isCurrent()) throw err;
             // Streaming unavailable -> plain endpoint; speak the whole reply.
             const preparation = prepareSpeech(signal);
+            callPreparationRef.current?.dispose();
+            callPreparationRef.current = preparation;
             try {
               const r = await postChat(id, next, signal, custom);
               signal.throwIfAborted();
@@ -555,7 +558,10 @@ export default function Conversation() {
                 if (callQueueRef.current === fallback)
                   callQueueRef.current = null;
               }
-            } finally { preparation.dispose(); }
+            } finally {
+              preparation.dispose();
+              if (callPreparationRef.current === preparation) callPreparationRef.current = null;
+            }
           } finally {
             signal.removeEventListener("abort", cancelSpeech);
             if (callQueueRef.current === queue) callQueueRef.current = null;
@@ -658,6 +664,7 @@ export default function Conversation() {
             onClick={() => {
               if (!muted) {
                 replyPreparationRef.current?.preparation?.dispose();
+                callPreparationRef.current?.dispose();
                 speakingRef.current?.stop();
                 callQueueRef.current?.stop();
               }
