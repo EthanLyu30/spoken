@@ -2,6 +2,12 @@
 
 口语陪练的 Web 前端：场景选择、实时语音对话与课后反馈。
 
+## 新回复语音等待
+
+浏览器以一个完整 utterance 朗读，云端回退播放完整音频；音色发现可与模型生成重叠。`chat.first_text` / `chat.complete` 分别记录首文和全文，`speech.native_start` 记录原生启动结果，`speech.request_to_audio` 记录提交到播放回调（不含录音识别时间）。回调不是物理声学测量。
+
+分段定义、受控回归和线上前后对比见 [新回复首声验收报告](../docs/performance/2026-11-01-fresh-reply-first-audio.md)。
+
 ## 设计系统
 
 视觉方案为 **「Pip — 你的口语陪练伙伴」**（温暖圆润 / 角色陪伴 / 闯关成长）：

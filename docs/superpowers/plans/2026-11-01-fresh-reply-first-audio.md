@@ -1,6 +1,6 @@
 # Fresh Reply First Audio Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Locate and reduce new dialogue generation/browser-start waiting without paid configuration or feature regressions.
 
@@ -30,26 +30,26 @@
 
 **Files:** backend/app/services/{deepseek,dialogue}.py, core/{performance,observability}.py, api/{chat,telemetry}.py, schemas/telemetry.py, focused tests.
 
-- [ ] Root records the public pre-change new-reply and Node Fetch baseline. Add failing tests for last-text/tail/done timing, bounded cache hit/miss usage counters, safe optional done timings and native-attempt enum/state fields. Existing clients ignore optional done data and older telemetry bodies remain valid.
-- [ ] Add last-delta/done timings and provider usage visibility, enabling documented stream usage where needed. Keep `[DONE]` completion and reject explicit unsuccessful stream finish reasons; preserve partial-error behavior and all non-dialogue callers. No raw error/content data enters diagnostics.
-- [ ] Define routine prompt candidate; root performs paired old/new provider evaluation before adoption. Preserve shared policy exactly, untrusted scene isolation, forty-message history, max_tokens300 and temperature. Only adopt a smaller natural reply style when contextual/help examples and measured generation results support it; otherwise keep original prompt and document the outcome.
-- [ ] Extend browser telemetry with native_start-only optional fields: reason, bounded standard error code, state_before/state_after three-bit masks, classified voice_type and explicit-voice match flag. Fixed names/values only. Persist them into the existing bounded browser span and test unknown/content fields remain rejected.
-- [ ] Focused backend tests and self-review; full backend deferred to one coherent Task2 gate. Commit explicit paths after root grants window. Report task-1-report.md in the plan workspace.
+- [x] Root records the public pre-change new-reply and Node Fetch baseline. Add failing tests for last-text/tail/done timing, bounded cache hit/miss usage counters, safe optional done timings and native-attempt enum/state fields. Existing clients ignore optional done data and older telemetry bodies remain valid.
+- [x] Add last-delta/done timings and provider usage visibility, enabling documented stream usage where needed. Keep `[DONE]` completion and reject explicit unsuccessful stream finish reasons; preserve partial-error behavior and all non-dialogue callers. No raw error/content data enters diagnostics.
+- [x] Define routine prompt candidate; root performs paired old/new provider evaluation before adoption. Preserve shared policy exactly, untrusted scene isolation, forty-message history, max_tokens300 and temperature. Only adopt a smaller natural reply style when contextual/help examples and measured generation results support it; otherwise keep original prompt and document the outcome.
+- [x] Extend browser telemetry with native_start-only optional fields: reason, bounded standard error code, state_before/state_after three-bit masks, classified voice_type and explicit-voice match flag. Fixed names/values only. Persist them into the existing bounded browser span and test unknown/content fields remain rejected.
+- [x] Focused backend tests and self-review; full backend deferred to one coherent Task2 gate. Commit explicit paths after root grants window. Report task-1-report.md in the plan workspace.
 
 ### Task 2: New-reply preparation, native recovery and client completion boundaries
 
 **Files:** frontend/src/lib/{speech,voiceResolver,chatStream,api,telemetry}.ts, pages/Conversation.tsx, Admin labels if needed, focused tests; no backend edits without coordination.
 
-- [ ] Reproduce delayed reader.cancel completion with a valid done frame and actual Fetch timing where available. Safely initiate cleanup without awaiting it before delivering accepted final text; preserve abort/error/partial/UTF-8 behavior and avoid unhandled rejection/lock leaks.
-- [ ] Add a disposable voice preparation separate from global active playback. Start before typed/push-to-talk model requests and plain fallbacks; consume in existing final autoplay path, correlate opaque interaction IDs, and keep manual replay during generation, current preferences, mute/unmount/auth cleanup and send completion intact. No speech/audio fetch until final text.
-- [ ] Resume a paused native synthesizer before speaking; avoid redundant idle cancel if safe, preserve selected voice/limits and one utterance. Record one native_start outcome and fixed reason/state metadata on success, pre-start errors, no-start timeout, exceptions and cancellation. Started speech never replays in cloud. Emit client model first/last/done and request-to-start evidence with original metrics unchanged.
-- [ ] Cover meaningful typed/call/fallback/mute/replay/auth/preference transitions and native failures with regression tests. Then run one coherent full backend/frontend/lint/typecheck/build gate after holding source stable with root. Commit explicit paths after serialized window; report task-2-report.md.
+- [x] Reproduce delayed reader.cancel completion with a valid done frame and actual Fetch timing where available. Safely initiate cleanup without awaiting it before delivering accepted final text; preserve abort/error/partial/UTF-8 behavior and avoid unhandled rejection/lock leaks.
+- [x] Add a disposable voice preparation separate from global active playback. Start before typed/push-to-talk model requests and plain fallbacks; consume in existing final autoplay path, correlate opaque interaction IDs, and keep manual replay during generation, current preferences, mute/unmount/auth cleanup and send completion intact. No speech/audio fetch until final text.
+- [x] Resume a paused native synthesizer before speaking; avoid redundant idle cancel if safe, preserve selected voice/limits and one utterance. Record one native_start outcome and fixed reason/state metadata on success, pre-start errors, no-start timeout, exceptions and cancellation. Started speech never replays in cloud. Emit client model first/last/done and request-to-start evidence with original metrics unchanged.
+- [x] Cover meaningful typed/call/fallback/mute/replay/auth/preference transitions and native failures with regression tests. Then run one coherent full backend/frontend/lint/typecheck/build gate after holding source stable with root. Commit explicit paths after serialized window; report task-2-report.md.
 
 ### Task 3: Final comparison, acceptance, main release and cleanup
 
 Root orchestration.
 
-- [ ] Review each task plus one fresh whole-branch review. Address important findings through scoped fix/re-review; keep model experiments and actual/synthetic/browser evidence separate.
-- [ ] Compare same synthetic fresh replies/history via live endpoints; preserve all samples/errors, first/last/done/word counts and remaining native/hardware gaps. No opening-cache benefit in the primary results. No production learning writes.
+- [x] Review each task plus one fresh whole-branch review. Address important findings through scoped fix/re-review; keep model experiments and actual/synthetic/browser evidence separate.
+- [x] Compare same synthetic fresh replies/history via live endpoints; preserve all samples/errors, first/last/done/word counts and remaining native/hardware gaps. No opening-cache benefit in the primary results. No production learning writes.
 - [ ] Verify protected hashes, source identity, full coherent gates, then merge/push main already authorized. Verify Python3.11/Node20 CI, Render/Vercel and frontend release.
 - [ ] Retain final source/spec/plan/comparison only. Safely clean verified scratch/build/pytest/Vite/bytecode artifacts and report any cleanup blocked by browser policy. No force push, user-input deletion or host-owned worktree removal.
