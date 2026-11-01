@@ -27,14 +27,24 @@ const mutations = new Map<string, {
 }>();
 const queues = new Map<number, Promise<unknown>>();
 const mastery = new Map<number, {
+  row: Word;
   revision: number;
   confirmed: boolean;
+  pending: number;
 }>();
 const reviews = new Map<number, {
+  row: Word;
   remembered: boolean;
   key: string;
   pending?: Promise<void>;
 }>();
+function sameWord(left: Word, right?: Word): boolean {
+  return !!right && left.id === right.id && left.created_at === right.created_at && left.text === right.text;
+}
+function retireWord(row: Word) {
+  if (sameWord(row, reviews.get(row.id)?.row)) reviews.delete(row.id);
+  if (sameWord(row, mastery.get(row.id)?.row)) mastery.delete(row.id);
+}
 function mutation(text: string, delta: number) {
   const previous = mutations.get(text);
   mutations.set(text, { revision: ++revision, pending: (previous?.pending ?? 0) + delta });
@@ -93,6 +103,7 @@ export const useWords = create<WordsState>()(persist((set, get) => {
           await enqueue(intent.row.id, generation, () => deleteWord(intent.row.id));
           if (generation !== ownerGeneration)
             return;
+          retireWord(intent.row);
           intent.row = { ...intent.row, id: tempSeq-- };
           if (intent.desired)
             replace(text, intent.row);
@@ -134,7 +145,18 @@ export const useWords = create<WordsState>()(persist((set, get) => {
           return;
         set(s => {
           const protectedTexts = new Set([...mutations].filter(([, m]) => m.pending > 0 || m.revision > started).map(([text]) => text));
-          return { words: [...s.words.filter(w => protectedTexts.has(w.text)), ...rows.filter(w => !protectedTexts.has(w.text))], fetchedOnce: true, refreshing: false };
+          const local = s.words.filter(w => protectedTexts.has(w.text));
+          const protectedIds = new Set(local.map(w => w.id));
+          const words = [...local, ...rows.filter(w => !protectedTexts.has(w.text) && !protectedIds.has(w.id))];
+          // An authoritative row can replace an old SQLite id. Failed receipts
+          // belong to the original incarnation, while same-row retries survive.
+          for (const [id, operation] of reviews) {
+            if (!protectedTexts.has(operation.row.text) && !sameWord(operation.row, words.find(w => w.id === id))) reviews.delete(id);
+          }
+          for (const [id, status] of mastery) {
+            if (!status.pending && !protectedTexts.has(status.row.text)) mastery.delete(id);
+          }
+          return { words, fetchedOnce: true, refreshing: false };
         });
       }
       catch {
@@ -178,23 +200,33 @@ export const useWords = create<WordsState>()(persist((set, get) => {
       const generation = ownerGeneration, target = get().words.find(w => w.id === id);
       if (!target || id < 0)
         return;
-      const status = mastery.get(id) ?? { revision: 0, confirmed: target.mastered };
+      const previous = mastery.get(id);
+      const status = previous && sameWord(target, previous.row) ? previous : { row: target, revision: 0, confirmed: target.mastered, pending: 0 };
       mastery.set(id, status);
+      status.pending++;
       const current = ++status.revision, mastered = !target.mastered;
       mutation(target.text, 1);
       set(s => ({ words: s.words.map(w => w.id === id ? { ...w, mastered } : w) }));
-      void enqueue(id, generation, () => patchWord(id, mastered)).then(row => {
-        if (generation !== ownerGeneration)
+      void enqueue(id, generation, () => {
+        if (!sameWord(target, get().words.find(w => w.id === id))) throw new DOMException("Word changed", "AbortError");
+        return patchWord(id, mastered);
+      }).then(row => {
+        if (generation !== ownerGeneration || mastery.get(id) !== status || !sameWord(target, get().words.find(w => w.id === id)))
           return;
         status.confirmed = row.mastered;
         if (current === status.revision)
           set(s => ({ words: s.words.map(w => w.id === id ? { ...w, mastered: row.mastered } : w) }));
       }).catch(() => {
-        if (generation === ownerGeneration && current === status.revision)
+        if (generation === ownerGeneration && mastery.get(id) === status && current === status.revision && sameWord(target, get().words.find(w => w.id === id)))
           set(s => ({ words: s.words.map(w => w.id === id ? { ...w, mastered: status.confirmed } : w) }));
       }).finally(() => {
-        if (generation === ownerGeneration)
+        if (generation === ownerGeneration) {
           mutation(target.text, -1);
+          status.pending--;
+          // Idle writes no longer own a rollback baseline. The next toggle
+          // starts from whichever row the user can currently see.
+          if (!status.pending && mastery.get(id) === status) mastery.delete(id);
+        }
       });
     },
     review: async (id, remembered) => {
@@ -204,21 +236,28 @@ export const useWords = create<WordsState>()(persist((set, get) => {
       if (!target)
         throw new Error("单词已移除。");
       let operation = reviews.get(id);
+      if (operation && !sameWord(target, operation.row)) {
+        reviews.delete(id);
+        operation = undefined;
+      }
       if (operation && operation.remembered !== remembered)
         throw Object.assign(new Error("请先重试上次复习保存。"), { remembered: operation.remembered });
       if (operation?.pending)
         return operation.pending;
-      operation ??= { remembered, key: createPracticeId() };
+      operation ??= { row: target, remembered, key: createPracticeId() };
       reviews.set(id, operation);
       const attempt = operation;
       mutation(target.text, 1);
-      attempt.pending = enqueue(id, generation, () => reviewWord(id, remembered, undefined, attempt.key)).then(row => {
-        if (generation !== ownerGeneration)
+      attempt.pending = enqueue(id, generation, () => {
+        if (!sameWord(target, get().words.find(w => w.id === id))) throw new DOMException("Word changed", "AbortError");
+        return reviewWord(id, remembered, undefined, attempt.key);
+      }).then(row => {
+        if (generation !== ownerGeneration || reviews.get(id) !== attempt || !sameWord(target, get().words.find(w => w.id === id)))
           throw new DOMException("Owner changed", "AbortError");
         // A later optimistic mastery choice still owns that field.
         const desired = get().words.find(w => w.id === id)?.mastered;
         set(s => ({ words: s.words.map(w => w.id === id ? { ...row, mastered: desired ?? row.mastered } : w) }));
-        reviews.delete(id);
+        if (reviews.get(id) === attempt) reviews.delete(id);
       }).finally(() => {
         if (generation === ownerGeneration) {
           attempt.pending = undefined;

@@ -118,3 +118,65 @@ it("retains the failed review choice when a restarted deck selects the opposite 
   expect(api.reviewWord.mock.calls.map(call=>[call[1],call[3]])).toEqual([[true,expect.any(String)],[true,api.reviewWord.mock.calls[0][3]]]);
   expect(useWords.getState().words[0].box).toBe(1);
 });
+
+it("retires a failed review after confirmed removal even if the server recycles the entire row identity", async () => {
+  api.reviewWord.mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce({...word,box:0});
+  api.postWord.mockResolvedValue(word);
+  useWords.setState({words:[word]});
+  await expect(useWords.getState().review(1,true)).rejects.toThrow("response lost");
+  const oldKey=api.reviewWord.mock.calls[0][3];
+  useWords.getState().remove(1);await flush();
+  useWords.getState().collect({text:"hello"});await flush();
+  await expect(useWords.getState().review(1,false)).resolves.toBeUndefined();
+  expect(api.reviewWord.mock.calls[1][3]).not.toBe(oldKey);
+  expect(useWords.getState().words[0].box).toBe(0);
+});
+
+it.each([
+  {created_at:"2026-11-02T00:00:00Z"},
+  {text:"new word"},
+])("starts a fresh review receipt when authoritative refresh replaces recycled id: %j", async replacement => {
+  const next={...word,...replacement};
+  api.reviewWord.mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce({...next,box:0});
+  api.getWords.mockResolvedValue([next]);
+  useWords.setState({words:[word]});
+  await expect(useWords.getState().review(1,true)).rejects.toThrow("response lost");
+  const oldKey=api.reviewWord.mock.calls[0][3];
+  await useWords.getState().refresh();
+  await expect(useWords.getState().review(1,false)).resolves.toBeUndefined();
+  expect(api.reviewWord.mock.calls[1][3]).not.toBe(oldKey);
+  expect(useWords.getState().words[0]).toMatchObject({...next,box:0});
+});
+
+it("keeps a failed review receipt through authoritative refresh of the same incarnation", async () => {
+  api.reviewWord.mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce({...word,box:1});
+  api.getWords.mockResolvedValue([word]);
+  useWords.setState({words:[word]});
+  await expect(useWords.getState().review(1,true)).rejects.toThrow("response lost");
+  const key=api.reviewWord.mock.calls[0][3];
+  await useWords.getState().refresh();await useWords.getState().review(1,true);
+  expect(api.reviewWord.mock.calls[1][3]).toBe(key);
+  expect(useWords.getState().words[0].box).toBe(1);
+});
+
+it("rebases mastery rollback on the latest idle authoritative refresh", async () => {
+  api.patchWord.mockResolvedValueOnce({...word,mastered:true}).mockRejectedValueOnce(new Error("offline"));
+  api.getWords.mockResolvedValue([word]);
+  useWords.setState({words:[word]});
+  useWords.getState().toggleMaster(1);await flush();
+  expect(useWords.getState().words[0].mastered).toBe(true);
+  await useWords.getState().refresh();
+  useWords.getState().toggleMaster(1);await flush();
+  expect(useWords.getState().words[0].mastered).toBe(false);
+});
+
+it("does not reuse old mastery confirmation after confirmed removal and recycled-id re-add", async () => {
+  api.patchWord.mockResolvedValueOnce({...word,mastered:true}).mockRejectedValueOnce(new Error("offline"));
+  api.postWord.mockResolvedValue(word);
+  useWords.setState({words:[word]});
+  useWords.getState().toggleMaster(1);await flush();
+  useWords.getState().remove(1);await flush();
+  useWords.getState().collect({text:"hello"});await flush();
+  useWords.getState().toggleMaster(1);await flush();
+  expect(useWords.getState().words[0].mastered).toBe(false);
+});
