@@ -1,6 +1,6 @@
 # Cloud Speech Preconnect Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Overlap cloud connection setup with fresh reply generation while preserving whole audio and current fallback behavior.
 
@@ -41,11 +41,11 @@
 - `XfTtsClient.connection()` returns the existing provider connection context; `synthesize_stream(..., connection=None)` may consume a prepared context once.
 - `POST /tts/prepare -> {ticket: string}`; `/tts` optionally consumes `warmup_ticket`.
 
-- [ ] Write pool and integration tests proving ready sockets work, pending sockets fall through immediately, duplicate/expired/failed/closed tickets fall through, capacity/rate admission is bounded and shutdown closes both connecting/ready sockets.
-- [ ] Run tests and observe missing pool/preparation failures before implementation.
-- [ ] Implement the bounded resource owner and reuse original synthesis protocol with an optional connection context.
-- [ ] Verify same exact PCM and voice/speed/pitch behavior; missing optional fields retain legacy behavior; cache hits discard tickets.
-- [ ] Run focused and full backend suites, then commit the reviewed backend change.
+- [x] Write pool and integration tests proving ready sockets work, pending sockets fall through immediately, duplicate/expired/failed/closed tickets fall through, capacity/rate admission is bounded and shutdown closes both connecting/ready sockets.
+- [x] Run tests and observe missing pool/preparation failures before implementation.
+- [x] Implement the bounded resource owner and reuse original synthesis protocol with an optional connection context.
+- [x] Verify same exact PCM and voice/speed/pitch behavior; missing optional fields retain legacy behavior; cache hits discard tickets.
+- [x] Run focused and full backend suites, then commit the reviewed backend change.
 
 ### Task 2: Disposable new-reply cloud preparation
 
@@ -59,11 +59,11 @@
 - `fetchTtsUrl(text, scenarioId?, signal?, overrides?, warmupTicket?)`.
 - `SpeechPreparation.takeCloudTicket()` provides a synchronous one-shot optional ticket and preserves existing consume/dispose contracts.
 
-- [ ] First write and run failing tests: ready ticket once; pending ticket no wait; failed/old backend no ticket; aborted/disposed ticket unusable.
-- [ ] Implement prepare POST with a 1500 ms timeout and no auth/content payload; disposal detaches parent abort listeners.
-- [ ] First write and run failing integration tests: preparation during model wait only for expected cloud; late Natural voice and current voice preferences win; stop/mute prevents TTS; one complete audio request retains latest text.
-- [ ] Wire to existing independent preparation and complete-audio fetch, without changing immediate replay/preview defaults.
-- [ ] Run full frontend tests, lint, typecheck and build, then commit the reviewed frontend change.
+- [x] First write and run failing tests: ready ticket once; pending ticket no wait; failed/old backend no ticket; aborted/disposed ticket unusable.
+- [x] Implement prepare POST with a 1500 ms timeout and no auth/content payload; disposal detaches parent abort listeners.
+- [x] First write and run failing integration tests: preparation during model wait only for expected cloud; late Natural voice and current voice preferences win; stop/mute prevents TTS; one complete audio request retains latest text.
+- [x] Wire to existing independent preparation and complete-audio fetch, without changing immediate replay/preview defaults.
+- [x] Run full frontend tests, lint, typecheck and build, then commit the reviewed frontend change.
 
 ### Task 3: Production comparison and real-chat acceptance
 
@@ -71,10 +71,10 @@
 - Update `docs/performance/2026-11-01-in-app-new-chat-acceptance.md` with before/after evidence and limits.
 - Keep this plan's completion flags accurate.
 
-- [ ] Fresh review of changed resource/abort paths; resolve findings and rerun affected checks.
+- [x] Fresh review of changed resource/abort paths; resolve findings and rerun affected checks.
 - [ ] Verify commit identity EthanLyu30; preserve primary checkout's original nine changes by hashing before/after integration.
 - [ ] Verify server/client deployments before measurement; baseline omission and ready ticket comparison run against the same deployed backend.
 - [ ] Measure fixed complete texts in alternating arms (three texts, two rounds); retain misses/errors rather than selecting only hits.
 - [ ] Measure genuinely generated new replies and compare total model-plus-cloud file readiness separately from browser callbacks.
-- [ ] Continue in-app real chat acceptance, distinguishing effective speech engine and actual output from onplaying/onstart.
+- [x] Continue in-app real chat acceptance, distinguishing effective speech engine and actual output from onplaying/onstart.
 - [ ] Update report; clean exact task-generated artifacts after verification. Main push requires the requested acceptance; an unavailable required browser/audio check remains outstanding, not silently treated as passed.
