@@ -162,8 +162,17 @@ class DeepSeekClient:
             async with self._client() as client:
                 async with client.stream("POST", url, json=payload, headers=headers, extensions={"trace": HttpTimings()}) as resp:
                     resp.raise_for_status()
+                    headers_at = perf_counter()
+                    add("llm_response_headers", max(0, (headers_at - request_start) * 1000))
+                    add("llm_keepalives_before_text", 0)
+                    first_event = True
                     completed = False
                     async for line in resp.aiter_lines():
+                        if first_event and line:
+                            add("llm_first_event", max(0, (perf_counter() - request_start) * 1000))
+                            first_event = False
+                        if first_text and line.startswith(":"):
+                            add("llm_keepalives_before_text", 1)
                         if not line.startswith("data:"):
                             continue
                         data = line[5:].strip()
@@ -191,6 +200,7 @@ class DeepSeekClient:
                         if delta:
                             last_text_at = perf_counter()
                             if first_text:
+                                add("llm_headers_to_text", max(0, (last_text_at - headers_at) * 1000))
                                 add("llm_first_text", max(0, (last_text_at - request_start) * 1000))
                                 first_text = False
                             yield delta

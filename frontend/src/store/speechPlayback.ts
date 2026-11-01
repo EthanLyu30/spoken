@@ -4,10 +4,10 @@ import type { VoiceEngine } from "./voice";
 export interface SpeechPlayback {
   id: number;
   requestedEngine: VoiceEngine;
-  effectiveEngine: "browser" | "xfyun" | "local" | null;
+  effectiveEngine: "browser" | "local" | null;
   voice: string | null;
   phase: "waiting" | "preparing" | "speaking" | "completed" | "cancelled" | "error";
-  fallbackReason: "browser-unavailable" | "local-unavailable" | null;
+  fallbackReason: "browser-unavailable" | "browser-start-failed" | "local-unavailable" | null;
 }
 
 // Playback is transient device state, never a persisted voice preference.

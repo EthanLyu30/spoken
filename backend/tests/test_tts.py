@@ -5,112 +5,7 @@ import json
 
 import pytest
 
-from fastapi.testclient import TestClient
-
-from app.api.tts import get_tts_client
-from app.main import app
 from app.services.xf_tts import SAMPLE_RATE, XfTtsClient, XfTtsError, smooth_silences
-
-client = TestClient(app)
-
-
-class _StubTts:
-    def __init__(self, audio: bytes = b"\x00\x00\x01\x00\x02\x00\x03\x00") -> None:
-        self.audio = audio  # raw 16-bit PCM bytes
-        self.vcn: str | None = None
-        self.aue: str | None = None
-        self.speed: int | None = None
-        self.pitch: int | None = None
-        self.texts: list[str] = []
-
-    async def synthesize(self, text, *, vcn=None, aue="raw", speed=None, pitch=None, **_kwargs):
-        self.texts.append(text)
-        self.vcn = vcn
-        self.aue = aue
-        self.speed = speed
-        self.pitch = pitch
-        return self.audio
-
-
-def test_tts_returns_wav_audio():
-    stub = _StubTts()
-    app.dependency_overrides[get_tts_client] = lambda: stub
-    try:
-        resp = client.post("/api/tts", json={"text": "Hello there"})
-        assert resp.status_code == 200
-        assert resp.headers["content-type"] == "audio/wav"
-        # PCM is wrapped in a single WAV container for gapless playback.
-        assert resp.content[:4] == b"RIFF"
-        assert resp.content[8:12] == b"WAVE"
-        assert stub.aue == "raw"
-    finally:
-        app.dependency_overrides.clear()
-
-
-def test_whole_audio_preserves_provider_pcm_and_natural_pauses():
-    import io
-    import wave
-    tone = array.array('h', [8000, -8000] * 1600)
-    pause = array.array('h', [0] * 8000)
-    pcm = (tone + pause + tone).tobytes()
-    app.dependency_overrides[get_tts_client] = lambda: _StubTts(pcm)
-    try:
-        response = client.post('/api/tts', json={'text': 'First sentence. Second sentence.'})
-        assert response.status_code == 200
-        with wave.open(io.BytesIO(response.content), 'rb') as audio:
-            assert audio.readframes(audio.getnframes()) == pcm
-    finally:
-        app.dependency_overrides.clear()
-
-
-def test_tts_uses_scenario_voice():
-    stub = _StubTts()
-    app.dependency_overrides[get_tts_client] = lambda: stub
-    try:
-        resp = client.post("/api/tts", json={"text": "hi", "scenario_id": "interview"})
-        assert resp.status_code == 200
-        assert stub.vcn == "henry"
-    finally:
-        app.dependency_overrides.clear()
-
-
-def test_tts_applies_user_overrides():
-    stub = _StubTts()
-    app.dependency_overrides[get_tts_client] = lambda: stub
-    try:
-        resp = client.post(
-            "/api/tts",
-            json={"text": "hi", "scenario_id": "interview", "vcn": "catherine", "speed": 40, "pitch": 60},
-        )
-        assert resp.status_code == 200
-        assert stub.vcn == "catherine"  # override beats scenario "henry"
-        assert stub.speed == 40
-        assert stub.pitch == 60
-    finally:
-        app.dependency_overrides.clear()
-
-
-@pytest.mark.parametrize("voice", ["x5_enus_flossie_flow", "x3_enus_emma_assist", "x4_enus_luna_formal", "x4_enus_laura_education", "x4_lindsey_formal"])
-def test_legacy_cloud_voice_does_not_reach_provider_and_silently_fall_back_to_xiaoyan(voice):
-    stub = _StubTts()
-    app.dependency_overrides[get_tts_client] = lambda: stub
-    try:
-        response = client.post("/api/tts", json={"text": "Hello", "vcn": voice})
-        assert response.status_code == 200
-        assert stub.vcn == "catherine"
-    finally:
-        app.dependency_overrides.clear()
-
-
-def test_unknown_cloud_voice_is_rejected_instead_of_silently_using_another_speaker():
-    stub = _StubTts()
-    app.dependency_overrides[get_tts_client] = lambda: stub
-    try:
-        response = client.post("/api/tts", json={"text": "Hello", "vcn": "spoken_invalid_voice_control"})
-        assert response.status_code == 422
-        assert not stub.texts
-    finally:
-        app.dependency_overrides.clear()
 
 
 def test_all_scenario_defaults_use_verified_english_voices():
@@ -118,58 +13,6 @@ def test_all_scenario_defaults_use_verified_english_voices():
     assert scenarios.DEFAULT_VOICE["vcn"] == "catherine"
     assert all(config["vcn"] in {"catherine", "henry"} for config in scenarios._VOICES.values())
 
-
-def test_tts_service_error_maps_to_503():
-    class _Boom:
-        async def synthesize(self, text, **_kwargs):
-            raise XfTtsError("not configured")
-
-    app.dependency_overrides[get_tts_client] = lambda: _Boom()
-    try:
-        resp = client.post("/api/tts", json={"text": "Hello"})
-        assert resp.status_code == 503
-    finally:
-        app.dependency_overrides.clear()
-
-
-def test_tts_rejects_empty_text():
-    assert client.post("/api/tts", json={"text": ""}).status_code == 422
-
-
-def test_whole_reply_over_800_characters_is_synthesized_once_without_truncation():
-    text = "This complete English reply should be read in one continuous audio file. " * 14
-    assert len(text) > 800
-    stub = _StubTts()
-    app.dependency_overrides[get_tts_client] = lambda: stub
-    try:
-        response = client.post("/api/tts", json={"text": text})
-        assert response.status_code == 200
-        assert response.headers["content-type"] == "audio/wav"
-        assert stub.texts == [text]
-    finally:
-        app.dependency_overrides.clear()
-
-
-@pytest.mark.parametrize("text", ["a" * 7999, "界" * 2666], ids=["ascii-7999", "utf8-7998"])
-def test_whole_reply_accepts_text_below_provider_utf8_byte_limit(text):
-    stub = _StubTts()
-    app.dependency_overrides[get_tts_client] = lambda: stub
-    try:
-        assert client.post("/api/tts", json={"text": text}).status_code == 200
-        assert stub.texts == [text]
-    finally:
-        app.dependency_overrides.clear()
-
-
-@pytest.mark.parametrize("text", ["a" * 8000, "界" * 2667, "😀" * 2000], ids=["ascii-8000", "utf8-8001", "emoji-8000"])
-def test_whole_reply_rejects_provider_oversize_text_before_synthesis(text):
-    stub = _StubTts()
-    app.dependency_overrides[get_tts_client] = lambda: stub
-    try:
-        assert client.post("/api/tts", json={"text": text}).status_code == 422
-        assert stub.texts == []
-    finally:
-        app.dependency_overrides.clear()
 
 
 def test_smooth_silences_collapses_only_near_zero_internal_gap():
@@ -182,11 +25,13 @@ def test_smooth_silences_collapses_only_near_zero_internal_gap():
     assert len(out) >= len((tone + tone).tobytes()) + int(rate * 0.06) * 2
 
 
+
 def test_smooth_silences_preserves_low_energy_speech():
     rate = SAMPLE_RATE
     low_energy = array.array("h", [120, -120] * (rate // 2))  # 1 second
     pcm = low_energy.tobytes()
     assert smooth_silences(pcm) == pcm
+
 
 
 def test_smooth_silences_preserves_low_energy_speech_between_loud_segments():
@@ -197,6 +42,7 @@ def test_smooth_silences_preserves_low_energy_speech_between_loud_segments():
     assert smooth_silences(pcm) == pcm
 
 
+
 def test_smooth_silences_keeps_longer_sentence_pause():
     rate = SAMPLE_RATE
     tone = array.array("h", [5000, -5000] * (rate // 10))
@@ -205,36 +51,6 @@ def test_smooth_silences_keeps_longer_sentence_pause():
     kept_samples = len(out) // 2 - len(tone) * 2
     assert kept_samples >= int(rate * 0.18)
 
-
-def test_tts_stream_returns_pcm_and_preserves_scenario_options():
-    calls = []
-    class Stub:
-        async def synthesize_stream(self, text, **kwargs):
-            calls.append((text, kwargs))
-            yield b"\x01\x00"
-            yield b"\x02\x00"
-    app.dependency_overrides[get_tts_client] = Stub
-    try:
-        response = client.post("/api/tts/stream", json={"text": "Hello", "scenario_id": "interview", "speed": 44})
-        assert response.status_code == 200
-        assert response.headers["content-type"].startswith("audio/pcm")
-        assert response.content == b"\x01\x00\x02\x00"
-        assert calls[0][1]["vcn"] == "henry"
-        assert calls[0][1]["speed"] == 44
-    finally:
-        app.dependency_overrides.clear()
-
-
-def test_tts_stream_maps_startup_failure_to_503():
-    class Stub:
-        async def synthesize_stream(self, text, **kwargs):
-            raise XfTtsError("not configured")
-            yield b""  # async generator
-    app.dependency_overrides[get_tts_client] = Stub
-    try:
-        assert client.post("/api/tts/stream", json={"text": "Hello"}).status_code == 503
-    finally:
-        app.dependency_overrides.clear()
 
 
 def test_tts_service_yields_first_frame_before_upstream_finishes(monkeypatch):
@@ -266,6 +82,7 @@ def test_tts_service_yields_first_frame_before_upstream_finishes(monkeypatch):
         with pytest.raises(StopAsyncIteration):
             await anext(stream)
     asyncio.run(run())
+
 
 
 def test_complete_synthesis_does_not_wait_for_a_slow_close_handshake(monkeypatch):

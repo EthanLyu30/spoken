@@ -1,12 +1,10 @@
 /** Whole-reply speech: one native utterance or one complete audio file. */
-import { fetchTtsUrl } from "./api";
-import { useVoice, VOICE_OPTIONS } from "../store/voice";
+import { useVoice } from "../store/voice";
 import { beginSpeechPlayback, type SpeechPlayback } from "../store/speechPlayback";
-import { autoCloudOverrides, resolveVoiceMode } from "./voiceResolver";
+import { resolveVoiceMode } from "./voiceResolver";
 import { float32ToWavBlob } from "./localSpeech/audio";
 import { isLocalSpeechModelReady, localSpeechCoordinator } from "./localSpeech/runtime";
 import { bindInteraction, reportTiming, NATIVE_ERRORS, type NativeDiagnostic } from "./telemetry";
-import { prepareCloudSpeech, type CloudSpeechPreparation } from "./cloudSpeechPreparation";
 
 export interface Speaking {
   readonly status?: SpeechPlayback;
@@ -62,12 +60,11 @@ function pickBrowserVoice(uri: string | null): SpeechSynthesisVoice | null {
     (voice.lang.toLowerCase() === "en-us" ? 10 : 0);
   return [...voices].sort((a, b) => score(b) - score(a))[0] ?? null;
 }
-function speakBrowser(text: string, settings: VoiceSettings, onStarted: () => void, onOutcome: (duration: number, diagnostic: NativeDiagnostic, outcome: "ok" | "error" | "cancelled") => void): Speaking {
+function speakBrowser(text: string, settings: VoiceSettings, voice: SpeechSynthesisVoice, onStarted: () => void, onOutcome: (duration: number, diagnostic: NativeDiagnostic, outcome: "ok" | "error" | "cancelled") => void): Speaking {
   const synth = window.speechSynthesis;
   const utterance = new SpeechSynthesisUtterance(text);
-  const voice = pickBrowserVoice(settings.browserVoiceURI);
-  if (voice) utterance.voice = voice;
-  utterance.lang = voice?.lang ?? "en-US";
+  utterance.voice = voice;
+  utterance.lang = voice.lang;
   utterance.rate = 0.7 + ((settings.speed ?? 50) / 100) * 0.8;
   utterance.pitch = 0.6 + ((settings.pitch ?? 50) / 100) * 0.9;
   let failed = false, finished = false, started = false;
@@ -169,44 +166,35 @@ let current: Speaking | null = null;
 export interface SpeechPreparation {
   consume: () => ReturnType<typeof resolveVoiceMode> | undefined;
   dispose: () => void;
-  takeCloudTicket?: () => string | undefined;
 }
-/** Discovery and optional handshake only; never owns playback or synthesizes text. */
+/** Browser voice discovery only; never owns playback or synthesizes text. */
 export function prepareSpeech(signal?: AbortSignal): SpeechPreparation {
   const controller = new AbortController();
   let consumed = false;
-  let cloud: CloudSpeechPreparation | undefined;
-  const dispose = () => { controller.abort(); cloud?.dispose(); signal?.removeEventListener("abort", dispose); };
+  const dispose = () => { controller.abort(); signal?.removeEventListener("abort", dispose); };
   if (signal?.aborted) dispose();
   else signal?.addEventListener("abort", dispose, {once: true});
   const mode = resolveVoiceMode("browser", voiceSource(), controller.signal);
-  const settings = useVoice.getState();
-  if (!controller.signal.aborted && (settings.engine === "iflytek" ||
-    (listBrowserVoices().length === 0 && (settings.engine !== "local" || !isLocalSpeechModelReady("kokoro"))))) {
-    cloud = prepareCloudSpeech(controller.signal);
-  }
   return {dispose, consume: () => {
     if (consumed || controller.signal.aborted) return undefined;
     consumed = true;
     return mode;
-  }, takeCloudTicket: () => controller.signal.aborted ? undefined : cloud?.take()};
+  }};
 }
 export interface SpeechContext {
   preparation?: SpeechPreparation;
   interactionId?: string;
   submittedAt?: number;
 }
-export function createSpeechQueue(scenarioId?: string, interactionId?: string, context?: SpeechContext): SpeechQueue {
+export function createSpeechQueue(_scenarioId?: string, interactionId?: string, context?: SpeechContext): SpeechQueue {
   current?.stop();
   const requestedAt = performance.now();
   const settings = useVoice.getState();
   const playback = beginSpeechPlayback(settings.engine);
-  const cloudVoiceName = (vcn?: string | null) =>
-    VOICE_OPTIONS.find(v => v.id === vcn)?.label.split(" · ")[0] ?? "场景音色";
   let buffered = "", noMore = false, stopped = false, settled = false, failed = false;
   let firstAt: number | undefined, finalTextAt: number | undefined;
-  let engine: "browser" | "xfyun" | "local" | "unknown" = "unknown";
-  let transport: "buffered" | "local" | "unknown" = "unknown";
+  let engine: "browser" | "local" | "unknown" = "unknown";
+  let transport: "local" | "unknown" = "unknown";
   let active: Speaking | null = null;
   const controller = new AbortController();
   bindInteraction(controller.signal, interactionId);
@@ -214,8 +202,8 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string, c
   // Local remains opt-in and prepares the same browser fallback if unavailable.
   const preparation = context?.preparation;
   controller.signal.addEventListener("abort", () => preparation?.dispose(), {once: true});
-  const preparedMode = (settings.engine !== "iflytek" ? preparation?.consume() : undefined)
-    ?? resolveVoiceMode(settings.engine === "local" ? "browser" : settings.engine, voiceSource(), controller.signal);
+  const preparedMode = preparation?.consume()
+    ?? resolveVoiceMode("browser", voiceSource(), controller.signal);
   let provideText: (text: string) => void = () => {};
   const finalText = new Promise<string>(resolve => { provideText = resolve; });
   let markStarted: () => void = () => {};
@@ -238,7 +226,6 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string, c
       if (stopped || !text) return;
       playback.update({phase:"preparing"});
       let url: string | undefined;
-      const fallbackReason = settings.engine === "local" ? "local-unavailable" : settings.engine === "browser" ? "browser-unavailable" : null;
       if (settings.engine === "local" && isLocalSpeechModelReady("kokoro")) {
         try {
           engine = "local"; transport = "local";
@@ -253,7 +240,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string, c
       // Never freeze an early empty list: English/Natural voices may arrive
       // during model/local synthesis even after the discovery timer expired.
       let browserMode = !url ? await preparedMode : null;
-      if (!stopped && browserMode && settings.engine !== "iflytek") {
+      if (!stopped && browserMode) {
         if (listBrowserVoices().length > 0) browserMode = {kind:"browser"};
         else if (browserMode.kind === "browser") {
           // A device can also remove its earlier list; keep the English-only
@@ -262,55 +249,33 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string, c
         }
       }
       if (!stopped && !url) reportTiming("speech.voice_resolution", performance.now() - resolutionStart, {
-        engine: browserMode?.kind === "browser" ? "browser" : "xfyun", transport: browserMode?.kind === "browser" ? "unknown" : "buffered", interactionId,
+        engine: browserMode?.kind === "browser" ? "browser" : "unknown", transport: "unknown", interactionId,
       });
       if (stopped) { if (url) URL.revokeObjectURL(url); return; }
-      if (!url && browserMode?.kind === "browser") {
+      const browserVoice = !url && browserMode?.kind === "browser" ? pickBrowserVoice(settings.browserVoiceURI) : null;
+      if (browserVoice) {
         preparation?.dispose();
         engine = "browser"; transport = "unknown";
-        playback.update({effectiveEngine:"browser",voice:pickBrowserVoice(settings.browserVoiceURI)?.name ?? "英文音色",
+        playback.update({effectiveEngine:"browser",voice:browserVoice.name,
           fallbackReason:settings.engine === "local" ? "local-unavailable" : null});
-        active = speakBrowser(text, settings, didStart, (duration, diagnostic, outcome) => {
+        active = speakBrowser(text, settings, browserVoice, didStart, (duration, diagnostic, outcome) => {
           reportTiming("speech.native_start", duration, {engine: "browser", transport: "unknown", interactionId, outcome, ...diagnostic});
         });
-        await active.done;
-        // A listed voice may still be unavailable. Retry the complete reply
-        // only before any native sound starts, so partial speech never repeats.
-        if (!stopped && active.failed && firstAt === undefined) {
-          active = null;
-        }
-      }
-      if (!active) {
-        if (!url) {
-          if (stopped) return;
-          engine = "xfyun"; transport = "buffered";
-          const overrides = settings.engine !== "iflytek" ? autoCloudOverrides(settings) : {
-            vcn:settings.vcn ?? undefined,speed:settings.speed ?? undefined,pitch:settings.pitch ?? undefined,
-          };
-          playback.update({effectiveEngine:"xfyun",voice:cloudVoiceName(overrides.vcn),
-            fallbackReason});
-          const fetchStart = performance.now();
-          let fetched = false;
-          try {
-            const ticket = preparation?.takeCloudTicket?.();
-            preparation?.dispose();
-            url = await fetchTtsUrl(text, scenarioId, controller.signal, overrides, ticket);
-            fetched = true;
-          } finally {
-            reportTiming("speech.cloud_fetch", performance.now() - fetchStart, {
-              engine, transport, interactionId, outcome: stopped ? "cancelled" : fetched ? "ok" : "error",
-            });
-          }
-        }
+      } else if (url) {
         preparation?.dispose();
         if (stopped) { URL.revokeObjectURL(url); return; }
         active = playUrl(url, duration => {
           reportTiming("speech.play_start", duration, {engine, transport, interactionId});
           didStart();
         });
+      } else {
+        failed = true;
+        playback.update({effectiveEngine:null,voice:null,fallbackReason:"browser-unavailable"});
+        return;
       }
       await active.done;
       failed = Boolean(active.failed) && !stopped;
+      if (failed && engine === "browser") playback.update({fallbackReason:"browser-start-failed"});
       completed = !stopped;
     } catch (error) {
       failed = !stopped;

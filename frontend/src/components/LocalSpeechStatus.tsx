@@ -22,7 +22,7 @@ export function LocalSpeechStatus() {
     <p className="mb-3 text-xs leading-relaxed text-muted">
       实验功能，仅负责本机英文朗读和录音识别；对话与评分仍需联网。
       首次下载和预热可能较久，文件会缓存在浏览器中，建议使用 Wi-Fi。
-      发音未就绪时优先使用浏览器，再使用云端；识别未就绪时使用云端。
+      朗读未就绪时使用浏览器语音，浏览器也不可用时显示错误；识别未就绪时使用云端识别。
     </p>
     <div className="space-y-3">
       {models.map(({id,label})=>{

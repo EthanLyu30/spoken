@@ -4,7 +4,6 @@
  * In dev, requests to `/api/*` are proxied to the FastAPI server by Vite
  * (see vite.config.ts). In other environments, set VITE_API_BASE_URL.
  */
-import { useVoice } from "../store/voice";
 import { getToken, getAuthGeneration, assertAuthGeneration, subscribeAuthGeneration } from "./authToken";
 import { deviceTimezone, learningDay } from "./learningDay";
 import { getClientId } from "./clientId";
@@ -322,63 +321,6 @@ export function getSessions(signal?: AbortSignal, force = false): Promise<Sessio
 
 export function getSession(id: number, signal?: AbortSignal): Promise<SessionDetail> {
   return request<SessionDetail>(`/api/sessions/${id}`, { signal });
-}
-
-/**
- * Fetch MP3 audio for a line of Pip's speech as an object URL.
- * The caller is responsible for revoking the URL when done.
- */
-export interface TtsOverrides {
-  vcn?: string;
-  speed?: number;
-  pitch?: number;
-}
-
-export async function fetchTtsUrl(
-  text: string,
-  scenarioId?: string,
-  signal?: AbortSignal,
-  overrides?: TtsOverrides,
-  warmupTicket?: string,
-): Promise<string> {
-  const voice = useVoice.getState();
-  const body: Record<string, unknown> = { text, scenario_id: scenarioId };
-  if (warmupTicket) body.warmup_ticket = warmupTicket;
-  const vcn = overrides?.vcn ?? voice.vcn;
-  const speed = overrides?.speed ?? voice.speed;
-  const pitch = overrides?.pitch ?? voice.pitch;
-  if (vcn != null) body.vcn = vcn;
-  if (speed != null) body.speed = speed;
-  if (pitch != null) body.pitch = pitch;
-  const res = await fetch(`${BASE_URL}/api/tts`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...traceHeaders(signal) },
-    body: JSON.stringify(body),
-    signal: withTimeout(signal, 30_000),
-  });
-  if (!res.ok) throw new Error(`tts failed: ${res.status}`);
-  return URL.createObjectURL(await res.blob());
-}
-
-/** Open a raw PCM stream; the reader must be cancelled when playback stops. */
-export async function fetchTtsStream(
-  text: string,
-  scenarioId?: string,
-  signal?: AbortSignal,
-  overrides?: TtsOverrides,
-): Promise<Response> {
-  const voice = useVoice.getState();
-  return fetch(`${BASE_URL}/api/tts/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeader(), ...traceHeaders(signal) },
-    body: JSON.stringify({
-      text, scenario_id: scenarioId,
-      vcn: overrides?.vcn ?? voice.vcn ?? undefined,
-      speed: overrides?.speed ?? voice.speed ?? undefined,
-      pitch: overrides?.pitch ?? voice.pitch ?? undefined,
-    }),
-    signal: withTimeout(signal, 30_000),
-  });
 }
 
 /** Transcribe 16 kHz mono PCM via the backend (iFlytek ASR). */

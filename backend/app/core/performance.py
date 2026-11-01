@@ -11,6 +11,7 @@ METRICS = frozenset({
     "db_acquire", "db_query", "db_queries", "db_commit", "stats_cpu", "insights_cpu",
     "response_ready", "llm_tcp", "llm_tls", "llm_headers", "llm_first_text", "llm_last_text", "llm_done", "llm_tail", "llm_total",
     "llm_prompt_cache_hit_tokens", "llm_prompt_cache_miss_tokens",
+    "llm_response_headers", "llm_first_event", "llm_headers_to_text", "llm_keepalives_before_text",
     "tts_connect", "tts_first_pcm", "tts_complete_pcm", "tts_close",
     "tts_cache_hit", "tts_cache_miss",
     "tts_warmup_hit", "tts_warmup_miss", "tts_warmup_age", "tts_warmup_connect",
@@ -56,7 +57,7 @@ def measure(name, *, cpu=False):
 def server_timing(trace):
     with trace.performance_lock:
         values = numeric(trace.performance)
-    return ", ".join(f'{name};desc="{int(value)}"' if name in {"db_queries", "tts_cache_hit", "tts_cache_miss", "tts_warmup_hit", "tts_warmup_miss", "llm_prompt_cache_hit_tokens", "llm_prompt_cache_miss_tokens"} else f"{name};dur={value:.3f}"
+    return ", ".join(f'{name};desc="{int(value)}"' if name in {"db_queries", "tts_cache_hit", "tts_cache_miss", "tts_warmup_hit", "tts_warmup_miss", "llm_keepalives_before_text", "llm_prompt_cache_hit_tokens", "llm_prompt_cache_miss_tokens"} else f"{name};dur={value:.3f}"
                      for name, value in sorted(values.items()))
 
 

@@ -55,7 +55,7 @@ it("lets the user cancel a preview while audio is being prepared", async () => {
   expect(await screen.findByRole("button",{name:"试听"})).toBeEnabled();
 });
 
-it("keeps the settings link and all three voice engines on the separate settings tab", async () => {
+it("keeps the settings link and only browser and optional local voice engines on the separate settings tab", async () => {
   const user = userEvent.setup();
   render(
     <MemoryRouter initialEntries={["/me?tab=voice"]}>
@@ -65,7 +65,7 @@ it("keeps the settings link and all three voice engines on the separate settings
   expect(
     screen.getByRole("heading", { name: "让声音，适合你的节奏。" }),
   ).toBeVisible();
-  expect(screen.getByRole("button", { name: /云端语音/ })).toBeVisible();
+  expect(screen.queryByRole("button", { name: /云端语音/ })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: /浏览器语音/ })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("button", { name: /本地 AI 语音/ })).toBeVisible();
   expect(screen.getByRole("slider", { name: "朗读语速" })).toBeVisible();

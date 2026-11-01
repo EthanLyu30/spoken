@@ -1,12 +1,6 @@
 import type { VoiceEngine } from "../store/voice";
 
-export const AUTO_CLOUD_VOICE = "catherine";
-export const AUTO_CLOUD_SPEED = 58;
-export const AUTO_CLOUD_PITCH = 52;
-
-export type ResolvedVoiceMode =
-  | { kind: "browser" }
-  | { kind: "iflytek"; automaticFallback: boolean };
+export type ResolvedVoiceMode = { kind: "browser" } | { kind: "unavailable" };
 
 export interface VoiceResolutionSource {
   listEnglishVoices: () => SpeechSynthesisVoice[];
@@ -15,15 +9,11 @@ export interface VoiceResolutionSource {
 }
 
 export async function resolveVoiceMode(
-  engine: VoiceEngine,
+  _engine: VoiceEngine,
   source: VoiceResolutionSource,
   signal?: AbortSignal,
 ): Promise<ResolvedVoiceMode> {
-  if (engine === "iflytek") {
-    return { kind: "iflytek", automaticFallback: false };
-  }
-  if (engine === "local") return { kind: "iflytek", automaticFallback: true };
-  if (signal?.aborted) return { kind: "iflytek", automaticFallback: true };
+  if (signal?.aborted) return { kind: "unavailable" };
   if (source.listEnglishVoices().length > 0) {
     return { kind: "browser" };
   }
@@ -40,7 +30,7 @@ export async function resolveVoiceMode(
       signal?.removeEventListener("abort", aborted);
       resolve(result);
     };
-    const aborted = () => finish({ kind: "iflytek", automaticFallback: true });
+    const aborted = () => finish({ kind: "unavailable" });
     signal?.addEventListener("abort", aborted, { once: true });
     unsubscribe = source.subscribe(() => {
       if (source.listEnglishVoices().length > 0) {
@@ -52,22 +42,9 @@ export async function resolveVoiceMode(
     timer = window.setTimeout(
       () =>
         finish({
-          kind: "iflytek",
-          automaticFallback: true,
+          kind: "unavailable",
         }),
       source.timeoutMs,
     );
   });
-}
-
-export function autoCloudOverrides(settings: {
-  vcn: string | null;
-  speed: number | null;
-  pitch: number | null;
-}) {
-  return {
-    vcn: settings.vcn ?? AUTO_CLOUD_VOICE,
-    speed: settings.speed ?? AUTO_CLOUD_SPEED,
-    pitch: settings.pitch ?? AUTO_CLOUD_PITCH,
-  };
 }

@@ -10,6 +10,12 @@ import "../admin.css";
 const defaults: AdminFilters = { hours: 24, source: "server", operation: "", model: "", release: "", outcome: "" };
 const labels: Record<string, string> = { ok: "成功", error: "失败", timeout: "超时", cancelled: "已取消" };
 const spanLabels: Record<string, string> = { ...labels, incomplete: "未完成" };
+const measurementLabels: Record<string, string> = {
+  llm_tcp: "模型 TCP 建连（ms）", llm_tls: "模型 TLS 握手（ms）",
+  llm_headers: "等待模型响应头阶段（ms）", llm_response_headers: "模型请求至响应头（ms）",
+  llm_first_event: "模型首个非空响应行（ms）", llm_first_text: "模型请求至首字（ms）",
+  llm_headers_to_text: "响应头后等待首字（ms）", llm_keepalives_before_text: "首字前保活行数",
+};
 const names: Record<string, string> = {
   "POST /api/chat/stream": "场景对话 · 流式回复", "POST /api/chat": "场景对话 · 普通回复",
   "POST /api/interview/score": "Interview · 四题评分", "POST /api/asr": "录音识别",
@@ -257,7 +263,7 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
     <h3 className="admin-waterfall-title">阶段耗时</h3><p className="admin-waterfall-note">以下阶段共享该端的单调时钟，重叠阶段不累加为总耗时。</p>
     <div className="admin-waterfall">{detail.spans?.length ? detail.spans.map(span => <article key={span.id}><div><strong>{span.name}</strong><span>{ms(span.duration_ms)} · {spanLabels[span.outcome] ?? span.outcome}</span></div>
       <div className="admin-span-track"><i className={span.outcome} style={{ marginLeft: `${Math.min(99, span.offset_ms / Math.max(1, detail.duration_ms) * 100)}%`, width: `${Math.max(0.5, Math.min(100, span.duration_ms / Math.max(1, detail.duration_ms) * 100))}%` }} /></div>
-      <dl>{Object.entries(span.attributes).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl>
+      <dl>{Object.entries(span.attributes).map(([key, value]) => <div key={key}><dt>{measurementLabels[key] ?? key}</dt><dd>{String(value)}</dd></div>)}</dl>
     </article>) : <p className="admin-empty-spans">此请求没有已采集的子阶段，不据此推测等待位置。</p>}</div>
     <p className="admin-detail-note"><ShieldCheck size={13} />仅保留耗时、状态和白名单元数据，不保存用户问答、音频或凭据。</p>
   </aside>;

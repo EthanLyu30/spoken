@@ -2,12 +2,12 @@ import { expect, it } from "vitest";
 import { resolveVoiceMode } from "./voiceResolver";
 import { createLocalSpeechBootstrap } from "./localSpeech/bootstrap";
 
-it("resolves explicitly selected local speech without waiting for browser voices", async () => {
+it("resolves browser fallback for explicitly selected local speech", async () => {
   const mode = await resolveVoiceMode("local" as Parameters<typeof resolveVoiceMode>[0], {
     listEnglishVoices: () => [{ lang: "en-US" } as SpeechSynthesisVoice],
     subscribe: () => () => {}, timeoutMs: 10,
   });
-  expect(mode).toEqual({ kind: "iflytek", automaticFallback: true });
+  expect(mode).toEqual({ kind: "browser" });
 });
 
 it("does not schedule model downloads until the user selects local speech", () => {

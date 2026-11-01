@@ -28,14 +28,9 @@ vi.mock("../store/voice", async actual => ({
 vi.mock("./voiceResolver", () => ({
   resolveVoiceMode: () =>
     Promise.resolve({
-      kind: "iflytek",
-      automaticFallback: true,
+      kind: "unavailable",
     }),
-  autoCloudOverrides: () => ({
-    vcn: "x4_lindsey_formal",
-    speed: 58,
-    pitch: 52,
-  }),
+
 }));
 
 vi.mock("./localSpeech/runtime", () => ({
@@ -67,11 +62,12 @@ class FakeAudio {
   pause(): void {}
 }
 
-describe("cloud speech queue cleanup", () => {
+describe("local speech queue cleanup", () => {
   it("marks buffered playback errors after start without changing the resolved playback contract", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
     vi.stubGlobal("fetch", fetcher);
-    mocks.fetchTtsUrl.mockResolvedValue("blob:qa-audio");
+    mocks.createObjectUrl.mockReturnValue("blob:qa-audio");
+    mocks.synthesizeWithKokoro.mockResolvedValue({audio:new Float32Array([0]),sampleRate:24000});
     const queue = createSpeechQueue("cafe");
     const finished = queue.end("Hello there.");
     await vi.waitFor(() => expect(audioInstances).toHaveLength(1));
@@ -86,7 +82,7 @@ describe("cloud speech queue cleanup", () => {
     mocks.revokeObjectUrl.mockReset();
     mocks.createObjectUrl.mockReset();
     mocks.synthesizeWithKokoro.mockReset();
-    mocks.localReady = false;
+    mocks.localReady = true;
     audioInstances.length = 0;
     vi.stubGlobal("Audio", FakeAudio);
     Object.defineProperty(URL, "createObjectURL", {
@@ -104,7 +100,7 @@ describe("cloud speech queue cleanup", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses ready Kokoro for automatic fallback instead of calling iFlytek", async () => {
+  it("uses explicitly selected ready Kokoro without calling cloud", async () => {
     mocks.localReady = true;
     mocks.createObjectUrl.mockReturnValue("blob:kokoro");
     mocks.synthesizeWithKokoro.mockResolvedValue({
@@ -128,20 +124,10 @@ describe("cloud speech queue cleanup", () => {
     expect(mocks.revokeObjectUrl).toHaveBeenCalledWith("blob:kokoro");
   });
 
-  it("recovers with iFlytek when Kokoro synthesis fails", async () => {
-    mocks.localReady = true;
-    mocks.synthesizeWithKokoro.mockRejectedValue(new Error("wasm failed"));
-    mocks.fetchTtsUrl.mockResolvedValue("blob:cloud");
-
-    const speaking = speakText("Fallback sentence");
-    await vi.waitFor(() => {
-      expect(mocks.fetchTtsUrl).toHaveBeenCalledOnce();
-      expect(audioInstances).toHaveLength(1);
-    });
-
-    expect(audioInstances[0].src).toBe("blob:cloud");
-    audioInstances[0].onended?.();
-    await speaking.done;
+  it("reports unavailable when local synthesis fails and browser voices are unavailable", async () => {
+    mocks.localReady=true;mocks.synthesizeWithKokoro.mockRejectedValue(new Error("wasm failed"));
+    const speaking=speakText("Fallback sentence");await speaking.done;
+    expect(speaking.failed).toBe(true);expect(audioInstances).toHaveLength(0);expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
   });
 
   it("does not start a cloud request after stopped Kokoro synthesis fails", async () => {
@@ -183,7 +169,8 @@ describe("cloud speech queue cleanup", () => {
   });
 
   it("global stop releases the active whole audio file", async () => {
-    mocks.fetchTtsUrl.mockResolvedValue("blob:whole");
+    mocks.createObjectUrl.mockReturnValue("blob:whole");
+    mocks.synthesizeWithKokoro.mockResolvedValue({audio:new Float32Array([0]),sampleRate:24000});
     const q=createSpeechQueue("cafe");
     const done=q.end("First. Second.");
     await vi.waitFor(()=>expect(audioInstances).toHaveLength(1));
@@ -191,14 +178,10 @@ describe("cloud speech queue cleanup", () => {
     expect(mocks.revokeObjectUrl).toHaveBeenCalledWith("blob:whole");
   });
 
-  it("falls back once for the complete reply when local synthesis fails", async () => {
-    mocks.localReady=true;
+  it("does not replay a complete reply when local synthesis fails without browser voices", async () => {
     mocks.synthesizeWithKokoro.mockRejectedValue(new Error("worker failed"));
-    mocks.fetchTtsUrl.mockResolvedValue("blob:cloud-whole");
-    const q=createSpeechQueue("cafe");
-    const done=q.end("First. Second.");
-    await vi.waitFor(()=>expect(audioInstances).toHaveLength(1));
-    expect(mocks.fetchTtsUrl.mock.calls.map(call=>call[0])).toEqual(["First. Second."]);
-    audioInstances[0].onended?.(); await done;
+    const q=createSpeechQueue();await q.end("First. Second.");
+    expect(q.failed).toBe(true);expect(mocks.synthesizeWithKokoro.mock.calls.map(call=>call[0])).toEqual(["First. Second."]);
+    expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();expect(audioInstances).toHaveLength(0);
   });
 });

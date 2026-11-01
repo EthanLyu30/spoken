@@ -754,7 +754,6 @@ export default function Conversation() {
                   className="w-full rounded-xl border border-border bg-surface-2 p-2 text-sm"
                 >
                   <option value="browser">浏览器语音 · 整段朗读（默认）</option>
-                  <option value="iflytek">云端语音 · 整段生成后播放</option>
                   <option value="local">本地模型 · 实验功能，首次需下载</option>
                 </select>
                 <Link

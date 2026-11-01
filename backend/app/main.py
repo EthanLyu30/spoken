@@ -13,8 +13,6 @@ from app.core.middleware import SelectiveGZipMiddleware
 from app.core.observability import TelemetryMiddleware
 from app.services.telemetry import TelemetrySink, RetentionWorker, configured_bootstrap_admin
 from app.services.deepseek import create_http_client
-from app.services.public_tts_cache import PublicTtsCache
-from app.services.tts_warmup import TtsWarmupPool
 from app.api import admin, telemetry
 from app.api import (
     asr,
@@ -46,12 +44,6 @@ async def lifespan(application):
     try:
         async with AsyncExitStack() as resources:
             application.state.deepseek_http = await resources.enter_async_context(create_http_client())
-            cache = PublicTtsCache()
-            application.state.public_tts_cache = cache
-            resources.callback(cache.clear)
-            warmup_pool = TtsWarmupPool()
-            application.state.tts_warmup_pool = warmup_pool
-            resources.push_async_callback(warmup_pool.close)
             await asyncio.to_thread(configured_bootstrap_admin)
             sink = TelemetrySink() if get_settings().telemetry_enabled else None
             application.state.telemetry_sink = sink
@@ -64,8 +56,6 @@ async def lifespan(application):
             yield
     finally:
         application.state.deepseek_http = None
-        application.state.public_tts_cache = None
-        application.state.tts_warmup_pool = None
         application.state.telemetry_sink = None
         application.state.telemetry_retention = None
 

@@ -28,7 +28,7 @@ import {
   speakText,
   type Speaking,
 } from "../lib/speech";
-import { useVoice, VOICE_OPTIONS, type VoiceEngine } from "../store/voice";
+import { useVoice, type VoiceEngine } from "../store/voice";
 import { useWords } from "../store/words";
 import { useAuth } from "../store/auth";
 import { ProfileHero } from "../components/ProfileHero";
@@ -343,19 +343,16 @@ export default function Profile() {
 
 const ENGINES: { id: VoiceEngine; label: string; hint: string }[] = [
   { id: "browser", label: "浏览器语音", hint: "默认 · 整段朗读，音色因设备而异" },
-  { id: "iflytek", label: "云端语音", hint: "整段生成后播放 · 已核验英文男 / 女声" },
   { id: "local", label: "本地 AI 语音（实验）", hint: "本机朗读与识别 · 首次需下载模型" },
 ];
 
 function VoiceSettings() {
   const {
     engine,
-    vcn,
     browserVoiceURI,
     speed,
     pitch,
     setEngine,
-    setVcn,
     setBrowserVoiceURI,
     setSpeed,
     setPitch,
@@ -368,7 +365,7 @@ function VoiceSettings() {
     [],
   );
   const custom =
-    vcn != null || browserVoiceURI != null || speed != null || pitch != null;
+    browserVoiceURI != null || speed != null || pitch != null;
 
   useEffect(() => {
     return primeBrowserVoices(() => setBrowserVoices(listBrowserVoices()));
@@ -428,10 +425,8 @@ function VoiceSettings() {
       </div>
       <p className="mb-4 text-xs text-muted">
         {engine === "browser"
-          ? "完整回复生成后一次朗读，优先选择设备提供的自然英文音色，例如 Edge 的 Natural、Chrome 的 Google 声音。没有可用声音或无法启动朗读时，使用云端整段音频。"
-          : engine === "local"
-            ? "选择后才会准备模型，朗读优先加载。两项能力独立就绪，加载中和运行失败都可使用备用方案。"
-            : "使用讯飞一次合成完整回复，音频生成完成后播放；不选音色时跟随场景。"}
+          ? "完整回复生成后一次朗读，优先选择设备提供的自然英文音色，例如 Edge 的 Natural、Chrome 的 Google 声音。没有可用英文音色或朗读启动失败时会显示错误，可继续文字练习。"
+          : "选择后才会准备模型，朗读优先加载。朗读未就绪时使用浏览器语音，浏览器也不可用时显示错误；识别未就绪时使用云端识别。"}
       </p>
 
       {engine !== "local" && <label
@@ -454,26 +449,10 @@ function VoiceSettings() {
             </option>
           ))}
         </select>
-      ) : engine === "iflytek" ? (
-        <select
-          id="voice-selection"
-          value={vcn ?? ""}
-          onChange={(e) => setVcn(e.target.value || null)}
-          className="mb-5 w-full rounded-2xl border border-border bg-surface-2 px-4 py-2.5 text-ink outline-none focus:border-coral"
-        >
-          <option value="">
-            跟随场景（推荐）
-          </option>
-          {VOICE_OPTIONS.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-        </select>
       ) : <LocalSpeechStatus />}
       {engine === "browser" && browserVoices.length === 0 && (
         <p className="-mt-3 mb-4 text-xs text-muted">
-          此设备暂未提供英文浏览器音色；朗读时会自动使用云端整段音频。
+          此设备暂未提供英文浏览器音色；音色可用后可重试朗读，当前可继续文字练习。
         </p>
       )}
 

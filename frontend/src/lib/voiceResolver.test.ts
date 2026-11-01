@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  AUTO_CLOUD_PITCH,
-  AUTO_CLOUD_SPEED,
-  AUTO_CLOUD_VOICE,
-  autoCloudOverrides,
   resolveVoiceMode,
 } from "./voiceResolver";
 
@@ -23,22 +19,9 @@ describe("voiceResolver", () => {
     const controller=new AbortController(), unsubscribe=vi.fn();
     const pending=resolveVoiceMode("browser",{listEnglishVoices:()=>[],subscribe:()=>unsubscribe,timeoutMs:500},controller.signal);
     controller.abort();
-    await expect(pending).resolves.toEqual({kind:"iflytek",automaticFallback:true});
+    await expect(pending).resolves.toEqual({kind:"unavailable"});
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("uses explicit cloud mode immediately", async () => {
-    await expect(
-      resolveVoiceMode("iflytek", {
-        listEnglishVoices: () => [],
-        subscribe: () => () => undefined,
-        timeoutMs: 500,
-      }),
-    ).resolves.toEqual({
-      kind: "iflytek",
-      automaticFallback: false,
-    });
   });
 
   it("uses an English browser voice immediately when present", async () => {
@@ -69,41 +52,12 @@ describe("voiceResolver", () => {
     await expect(pending).resolves.toEqual({ kind: "browser" });
   });
 
-  it("falls back after 500 ms and respects user cloud overrides", async () => {
+  it("reports unavailable after the discovery deadline without choosing a cloud engine", async () => {
     vi.useFakeTimers();
-    const pending = resolveVoiceMode("browser", {
-      listEnglishVoices: () => [],
-      subscribe: () => () => undefined,
-      timeoutMs: 500,
-    });
-
+    const unsubscribe=vi.fn();
+    const pending=resolveVoiceMode("browser", {listEnglishVoices:()=>[],subscribe:()=>unsubscribe,timeoutMs:500});
     await vi.advanceTimersByTimeAsync(500);
-
-    await expect(pending).resolves.toEqual({
-      kind: "iflytek",
-      automaticFallback: true,
-    });
-    expect(
-      autoCloudOverrides({
-        vcn: null,
-        speed: null,
-        pitch: null,
-      }),
-    ).toEqual({
-      vcn: AUTO_CLOUD_VOICE,
-      speed: AUTO_CLOUD_SPEED,
-      pitch: AUTO_CLOUD_PITCH,
-    });
-    expect(
-      autoCloudOverrides({
-        vcn: "henry",
-        speed: 40,
-        pitch: 60,
-      }),
-    ).toEqual({
-      vcn: "henry",
-      speed: 40,
-      pitch: 60,
-    });
+    await expect(pending).resolves.toEqual({kind:"unavailable"});
+    expect(unsubscribe).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
   });
 });
