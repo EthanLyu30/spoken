@@ -63,3 +63,15 @@ it("recognizes direct-provider signal cancellation even when the raw stream reso
   expect(await pending).toBe("");
   expect(JSON.parse(fetcher.mock.calls[0][1].body).outcome).toBe("cancelled");
 });
+
+
+it("whitelists native diagnostics and never forwards unknown fields or native fields on other operations", () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, {status:202})); vi.stubGlobal("fetch",fetcher);
+  const options = {reason: "started", state_before: 1, state_after: 7, voice_type: "enhanced", voice_matched: true, error_code: "network", private_name: "Secret voice"} as const;
+  reportTiming("speech.native_start", 100, options);
+  const sample = JSON.parse(fetcher.mock.calls[0][1].body);
+  expect(sample).toMatchObject({reason:"started",state_before:1,state_after:7,voice_type:"enhanced",voice_matched:true,error_code:"network"});
+  expect(sample).not.toHaveProperty("private_name");
+  reportTiming("speech.complete",100,options);
+  expect(JSON.parse(fetcher.mock.calls[1][1].body)).not.toHaveProperty("reason");
+});

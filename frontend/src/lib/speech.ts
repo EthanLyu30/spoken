@@ -5,7 +5,7 @@ import { beginSpeechPlayback, type SpeechPlayback } from "../store/speechPlaybac
 import { autoCloudOverrides, resolveVoiceMode } from "./voiceResolver";
 import { float32ToWavBlob } from "./localSpeech/audio";
 import { isLocalSpeechModelReady, localSpeechCoordinator } from "./localSpeech/runtime";
-import { bindInteraction, reportTiming } from "./telemetry";
+import { bindInteraction, reportTiming, NATIVE_ERRORS, type NativeDiagnostic } from "./telemetry";
 
 export interface Speaking {
   readonly status?: SpeechPlayback;
@@ -61,7 +61,7 @@ function pickBrowserVoice(uri: string | null): SpeechSynthesisVoice | null {
     (voice.lang.toLowerCase() === "en-us" ? 10 : 0);
   return [...voices].sort((a, b) => score(b) - score(a))[0] ?? null;
 }
-function speakBrowser(text: string, settings: VoiceSettings, onStarted: (durationMs: number) => void): Speaking {
+function speakBrowser(text: string, settings: VoiceSettings, onStarted: () => void, onOutcome: (duration: number, diagnostic: NativeDiagnostic, outcome: "ok" | "error" | "cancelled") => void): Speaking {
   const synth = window.speechSynthesis;
   const utterance = new SpeechSynthesisUtterance(text);
   const voice = pickBrowserVoice(settings.browserVoiceURI);
@@ -71,7 +71,22 @@ function speakBrowser(text: string, settings: VoiceSettings, onStarted: (duratio
   utterance.pitch = 0.6 + ((settings.pitch ?? 50) / 100) * 0.9;
   let failed = false, finished = false, started = false;
   let startupTimer = 0, completionTimer = 0;
-  let nativeRequestedAt = 0;
+  const attemptStartedAt = performance.now();
+  let nativeRequestedAt: number | undefined;
+  const state = () => [synth.paused, synth.speaking, synth.pending].every(value => typeof value === "boolean")
+    ? Number(synth.paused) | (Number(synth.speaking) << 1) | (Number(synth.pending) << 2) : undefined;
+  const stateBefore = state();
+  let reported = false;
+  const report = (reason: NativeDiagnostic["reason"], error?: string) => {
+    if (reported) return;
+    reported = true;
+    onOutcome(performance.now() - (nativeRequestedAt ?? attemptStartedAt), {
+      reason, state_before: stateBefore, state_after: state(),
+      voice_type: !voice ? "unknown" : /(natural|neural|google|enhanced|premium)/i.test(voice.name) ? "enhanced" : voice.localService === false ? "remote" : voice.localService === true ? "local" : "unknown",
+      ...(settings.browserVoiceURI ? {voice_matched: voice?.voiceURI === settings.browserVoiceURI} : {}),
+      ...(error !== undefined ? {error_code: NATIVE_ERRORS.find(code => code === error) ?? "unknown"} : {}),
+    }, reason === "started" ? "ok" : reason === "cancelled" ? "cancelled" : "error");
+  };
   let settle: () => void = () => {};
   const done = new Promise<void>(resolve => { settle = resolve; });
   const finish = () => {
@@ -86,24 +101,35 @@ function speakBrowser(text: string, settings: VoiceSettings, onStarted: (duratio
     finish(); // Detach handlers before cancel can synchronously emit callbacks.
     try { synth.cancel(); } catch { /* the task must still settle */ }
   };
-  const fail = () => {
+  const fail = (reason: NativeDiagnostic["reason"], error?: string) => {
     if (finished) return;
-    failed = true; cancelNative();
+    failed = true;
+    cancelNative();
+    report(reason, error);
   };
   utterance.onstart = () => {
     if (finished || started) return;
     started = true;
     window.clearTimeout(startupTimer);
     // Generous text/rate allowance; an incomplete utterance fails without replay.
-    completionTimer = window.setTimeout(fail, Math.max(60_000, text.length * 150 / utterance.rate));
-    onStarted(performance.now() - nativeRequestedAt);
+    completionTimer = window.setTimeout(() => fail("speech_error"), Math.max(60_000, text.length * 150 / utterance.rate));
+    report("started");
+    onStarted();
   };
-  utterance.onend = () => { if (!finished) { failed = !started; finish(); } };
-  utterance.onerror = fail;
-  startupTimer = window.setTimeout(fail, 5_000);
-  try { synth.cancel(); nativeRequestedAt = performance.now(); synth.speak(utterance); }
-  catch { fail(); }
-  return { done, get failed() { return failed; }, stop: () => { if (!finished) cancelNative(); } };
+  utterance.onend = () => { if (!finished) { failed = !started; finish(); report("end_before_start"); } };
+  utterance.onerror = event => fail("speech_error", event?.error ?? "unknown");
+  startupTimer = window.setTimeout(() => fail("startup_timeout"), 5_000);
+  try {
+    // Older engines may not expose state; keep their defensive cancellation.
+    if (synth.speaking !== false || synth.pending !== false) synth.cancel();
+    // W3C cancel does not reset paused. Recover only a genuinely paused engine.
+    if (synth.paused === true && typeof synth.resume === "function") synth.resume();
+    nativeRequestedAt = performance.now();
+    synth.speak(utterance);
+  } catch { fail("speak_exception", "unknown"); }
+  return { done, get failed() { return failed; }, stop: () => {
+    if (!finished) { cancelNative(); report("cancelled"); }
+  } };
 }
 function playUrl(url: string, onStarted: (durationMs: number) => void): Speaking {
   const audio = new Audio(url);
@@ -139,7 +165,30 @@ async function fetchKokoroUrl(text: string, speed: number | null): Promise<strin
 }
 let current: Speaking | null = null;
 
-export function createSpeechQueue(scenarioId?: string, interactionId?: string): SpeechQueue {
+export interface SpeechPreparation {
+  consume: () => ReturnType<typeof resolveVoiceMode> | undefined;
+  dispose: () => void;
+}
+/** Discovery only: does not own playback or snapshot user preferences. */
+export function prepareSpeech(signal?: AbortSignal): SpeechPreparation {
+  const controller = new AbortController();
+  let consumed = false;
+  const dispose = () => { controller.abort(); signal?.removeEventListener("abort", dispose); };
+  if (signal?.aborted) dispose();
+  else signal?.addEventListener("abort", dispose, {once: true});
+  const mode = resolveVoiceMode("browser", voiceSource(), controller.signal);
+  return {dispose, consume: () => {
+    if (consumed || controller.signal.aborted) return undefined;
+    consumed = true;
+    return mode;
+  }};
+}
+export interface SpeechContext {
+  preparation?: SpeechPreparation;
+  interactionId?: string;
+  submittedAt?: number;
+}
+export function createSpeechQueue(scenarioId?: string, interactionId?: string, context?: SpeechContext): SpeechQueue {
   current?.stop();
   const requestedAt = performance.now();
   const settings = useVoice.getState();
@@ -155,7 +204,11 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
   bindInteraction(controller.signal, interactionId);
   // Discovery overlaps model generation; synthesis still requires final text.
   // Local remains opt-in and prepares the same browser fallback if unavailable.
-  const preparedMode = resolveVoiceMode(settings.engine === "local" ? "browser" : settings.engine, voiceSource(), controller.signal);
+  const preparation = context?.preparation;
+  controller.signal.addEventListener("abort", () => preparation?.dispose(), {once: true});
+  const preparedMode = (settings.engine !== "iflytek" ? preparation?.consume() : undefined)
+    ?? resolveVoiceMode(settings.engine === "local" ? "browser" : settings.engine, voiceSource(), controller.signal);
+  if (settings.engine === "iflytek") preparation?.dispose();
   let provideText: (text: string) => void = () => {};
   const finalText = new Promise<string>(resolve => { provideText = resolve; });
   let markStarted: () => void = () => {};
@@ -167,6 +220,7 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
     firstAt = performance.now();
     playback.update({phase:"speaking"});
     reportTiming("speech.first_audio", firstAt - requestedAt, {engine, transport, interactionId});
+    if (context?.submittedAt !== undefined) reportTiming("speech.request_to_audio", firstAt - context.submittedAt, {engine, transport, interactionId});
     if (finalTextAt !== undefined) reportTiming("speech.final_text_to_audio", firstAt - finalTextAt, {engine, transport, interactionId});
     markStarted();
   };
@@ -208,9 +262,8 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
         engine = "browser"; transport = "unknown";
         playback.update({effectiveEngine:"browser",voice:pickBrowserVoice(settings.browserVoiceURI)?.name ?? "英文音色",
           fallbackReason:settings.engine === "local" ? "local-unavailable" : null});
-        active = speakBrowser(text, settings, duration => {
-          reportTiming("speech.native_start", duration, {engine, transport, interactionId});
-          didStart();
+        active = speakBrowser(text, settings, didStart, (duration, diagnostic, outcome) => {
+          reportTiming("speech.native_start", duration, {engine: "browser", transport: "unknown", interactionId, outcome, ...diagnostic});
         });
         await active.done;
         // A listed voice may still be unavailable. Retry the complete reply
@@ -286,8 +339,8 @@ export function createSpeechQueue(scenarioId?: string, interactionId?: string): 
   current = {done: consumer.catch(() => undefined), stop: queue.stop};
   return queue;
 }
-export function speakText(text: string, scenarioId?: string): Speaking {
-  const queue = createSpeechQueue(scenarioId);
+export function speakText(text: string, scenarioId?: string, context?: SpeechContext): Speaking {
+  const queue = createSpeechQueue(scenarioId, context?.interactionId, context);
   return {done: queue.end(text).catch(() => undefined), stop: queue.stop, get failed() { return queue.failed; }, get status() { return queue.status; }};
 }
 export function stopSpeaking(): void {

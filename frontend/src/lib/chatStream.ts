@@ -1,6 +1,9 @@
+import { reportTiming } from "./telemetry";
+
 export async function readChatStream(
   response: Response,
   onText: (text: string) => void,
+  timing?: {requestedAt: number; interactionId?: string},
 ): Promise<string> {
   if (!response.ok || !response.body) throw new Error(`chat stream failed: ${response.status}`);
   const reader = response.body.getReader();
@@ -9,6 +12,13 @@ export async function readChatStream(
   let full = "";
   let buffer = "";
   let completed = false;
+  let lastTextAt: number | undefined;
+  const deliver = () => {
+    const now = performance.now();
+    if (timing && lastTextAt === undefined) reportTiming("chat.first_text", now - timing.requestedAt, {interactionId: timing.interactionId});
+    lastTextAt = now;
+    onText(full);
+  };
   const parse = (frame: string) => {
     const lines = frame.split(/\r?\n/);
     const event = lines.find((line) => line.startsWith("event:"))?.slice(6).trim();
@@ -19,7 +29,7 @@ export async function readChatStream(
     if (event === "error") throw new Error(value.message || "回复中断，请重试。");
     if (event === "delta" && typeof value.text === "string") {
       full += value.text;
-      onText(full);
+      deliver();
     }
   };
   try {
@@ -36,15 +46,23 @@ export async function readChatStream(
         }
       } else {
         full += text;
-        if (text) onText(full);
+        if (text) deliver();
       }
       if (completed || done) break;
     }
     if (events && !completed) throw new Error("回复中断，请重试这一回合。");
     if (!full.trim()) throw new Error("empty stream");
-    return full.trim();
   } finally {
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
+    // Cancellation may wait for transport shutdown indefinitely. Initiate it,
+    // observe rejection, and release our lock without delaying text or errors.
+    try { void reader.cancel().catch(() => undefined); } catch { /* cleanup is best effort */ }
+    try { reader.releaseLock(); } catch { /* preserve the original stream result */ }
   }
+  if (timing) {
+    const now = performance.now();
+    reportTiming("chat.complete", now - timing.requestedAt, {interactionId: timing.interactionId});
+    if (lastTextAt !== undefined) reportTiming("chat.tail", now - lastTextAt, {interactionId: timing.interactionId});
+  }
+  return full.trim();
+
 }

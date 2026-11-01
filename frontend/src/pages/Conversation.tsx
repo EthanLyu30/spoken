@@ -35,6 +35,8 @@ import { createPracticeId, persistSessionOnce } from "../lib/sessionSave";
 import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
 import {
   speakText,
+  prepareSpeech,
+  type SpeechContext,
   createSpeechQueue,
   type Speaking,
   type SpeechQueue,
@@ -45,7 +47,7 @@ import { useVoice, type VoiceEngine } from "../store/voice";
 import { SpeechPlaybackStatus } from "../components/SpeechPlaybackStatus";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { startVoiceCall, type CallPhase, type VoiceCall } from "../lib/call";
-import { getInteraction } from "../lib/telemetry";
+import { getInteraction, bindInteraction, newInteractionId } from "../lib/telemetry";
 import {
   isMoonshineTranscriptionReady,
   transcribeSpeech,
@@ -112,6 +114,7 @@ export default function Conversation() {
 
   const endRef = useRef<HTMLDivElement>(null);
   const speakingRef = useRef<Speaking | null>(null);
+  const replyPreparationRef = useRef<(SpeechContext & {index: number; controller: AbortController}) | null>(null);
   const callQueueRef = useRef<SpeechQueue | null>(null);
   const lastSpokenRef = useRef(-1);
   const autoSpeakAllowedRef = useRef(true);
@@ -209,7 +212,13 @@ export default function Conversation() {
       return;
     lastSpokenRef.current = idx;
     if (callPhase) return;
-    if (!muted) void playTts(messages[idx].content);
+    const pending = replyPreparationRef.current;
+    replyPreparationRef.current = null;
+    if (!muted && isCurrent()) {
+      const context = pending?.index === idx && !pending.controller.signal.aborted ? pending : undefined;
+      if (!context) pending?.preparation?.dispose();
+      void playTts(messages[idx].content, context);
+    } else pending?.preparation?.dispose();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, muted, callPhase, streaming]);
 
@@ -218,7 +227,15 @@ export default function Conversation() {
   // the background so the practice counts.
   useEffect(() => {
     mountedRef.current = true;
-    const unsubscribeIdentity = subscribeAuthGeneration(() => transcriptionControllerRef.current?.abort());
+    const unsubscribeIdentity = subscribeAuthGeneration(() => {
+      callRef.current?.end();
+      transcriptionControllerRef.current?.abort();
+      requestControllerRef.current?.abort();
+      replyPreparationRef.current?.preparation?.dispose();
+      replyPreparationRef.current = null;
+      speakingRef.current?.stop();
+      callQueueRef.current?.stop();
+    });
     const practiceId = practiceIdRef.current;
     return () => {
       mountedRef.current = false;
@@ -226,6 +243,8 @@ export default function Conversation() {
       transcriptionControllerRef.current?.abort();
       callAttemptRef.current += 1;
       requestControllerRef.current?.abort();
+      replyPreparationRef.current?.preparation?.dispose();
+      replyPreparationRef.current = null;
       speakingRef.current?.stop();
       callQueueRef.current?.stop();
       recorderRef.current?.stop().catch(() => undefined);
@@ -245,10 +264,10 @@ export default function Conversation() {
   }, []);
 
   // Play a line of Pip's speech; resolves when playback finishes.
-  function playTts(text: string): Promise<void> {
+  function playTts(text: string, context?: SpeechContext): Promise<void> {
     if (!isCurrent()) return Promise.resolve();
     speakingRef.current?.stop();
-    const s = speakText(text, id);
+    const s = speakText(text, id, context);
     speakingRef.current = s;
     return s.done;
   }
@@ -290,6 +309,10 @@ export default function Conversation() {
     )
       return;
     const ctrl = new AbortController();
+    bindInteraction(ctrl.signal, newInteractionId());
+    const submittedAt = performance.now();
+    replyPreparationRef.current?.preparation?.dispose();
+    const preparation = prepareSpeech(ctrl.signal);
     requestControllerRef.current = ctrl;
     autoSpeakAllowedRef.current = false;
     speakingRef.current?.stop();
@@ -301,6 +324,7 @@ export default function Conversation() {
         }
       : appendUserTurn(messagesRef.current, turnMetaRef.current, text, meta);
     const next = appended.messages;
+    replyPreparationRef.current = {preparation, controller: ctrl, index: next.length, interactionId: getInteraction(ctrl.signal), submittedAt};
     messagesRef.current = next;
     turnMetaRef.current = appended.meta;
     setTurnMeta(appended.meta);
@@ -309,6 +333,7 @@ export default function Conversation() {
     setError(null);
     setLoading(true);
     const custom = isCustom ? (customScene ?? undefined) : undefined;
+    let accepted = false;
     let started = false;
     const onText = (t: string) => {
       if (ctrl.signal.aborted || !isCurrent()) return;
@@ -324,6 +349,7 @@ export default function Conversation() {
       // Stream the reply token-by-token for lower perceived latency.
       const full = await streamChat(id, next, onText, ctrl.signal, custom);
       if (ctrl.signal.aborted || !isCurrent()) return;
+      accepted = true;
       autoSpeakAllowedRef.current = true;
       setStreaming(false);
       if (started) setLastAssistant(full);
@@ -340,6 +366,7 @@ export default function Conversation() {
       try {
         const r = await postChat(id, next, ctrl.signal, custom);
         if (ctrl.signal.aborted || !isCurrent()) return;
+        accepted = true;
         autoSpeakAllowedRef.current = true;
         setStreaming(false);
         if (started) setLastAssistant(r.reply);
@@ -352,6 +379,10 @@ export default function Conversation() {
         setError("发送失败，请确认后端在运行后重试。");
       }
     } finally {
+      if (!accepted) {
+        preparation.dispose();
+        if (replyPreparationRef.current?.controller === ctrl) replyPreparationRef.current = null;
+      }
       if (requestControllerRef.current === ctrl)
         requestControllerRef.current = null;
       if (isCurrent()) setLoading(false);
@@ -498,30 +529,33 @@ export default function Conversation() {
             queue.stop();
             if (signal.aborted || started || !isCurrent()) throw err;
             // Streaming unavailable -> plain endpoint; speak the whole reply.
-            const r = await postChat(id, next, signal, custom);
-            signal.throwIfAborted();
-            if (!isCurrent()) throw new DOMException("Identity changed", "AbortError");
-            if (started) setLastAssistant(r.reply);
-            else
-              setMessages((m) => [
-                ...m,
-                { role: "assistant", content: r.reply },
-              ]);
-            const fallback = createSpeechQueue(id, getInteraction(signal));
-            callQueueRef.current = fallback;
-            const cancelFallback = () => fallback.stop();
-            signal.addEventListener("abort", cancelFallback, { once: true });
-            void fallback.started.then(() => {
-              if (!signal.aborted && isCurrent()) onSpeaking();
-            });
+            const preparation = prepareSpeech(signal);
             try {
-              await fallback.end(mutedRef.current ? "" : r.reply);
-              if (fallback.failed) throw new Error("语音播放失败，请点击回复旁的朗读按钮重试。");
-            } finally {
-              signal.removeEventListener("abort", cancelFallback);
-              if (callQueueRef.current === fallback)
-                callQueueRef.current = null;
-            }
+              const r = await postChat(id, next, signal, custom);
+              signal.throwIfAborted();
+              if (!isCurrent()) throw new DOMException("Identity changed", "AbortError");
+              if (started) setLastAssistant(r.reply);
+              else
+                setMessages((m) => [
+                  ...m,
+                  { role: "assistant", content: r.reply },
+                ]);
+              const fallback = createSpeechQueue(id, getInteraction(signal), {preparation});
+              callQueueRef.current = fallback;
+              const cancelFallback = () => fallback.stop();
+              signal.addEventListener("abort", cancelFallback, { once: true });
+              void fallback.started.then(() => {
+                if (!signal.aborted && isCurrent()) onSpeaking();
+              });
+              try {
+                await fallback.end(mutedRef.current ? "" : r.reply);
+                if (fallback.failed) throw new Error("语音播放失败，请点击回复旁的朗读按钮重试。");
+              } finally {
+                signal.removeEventListener("abort", cancelFallback);
+                if (callQueueRef.current === fallback)
+                  callQueueRef.current = null;
+              }
+            } finally { preparation.dispose(); }
           } finally {
             signal.removeEventListener("abort", cancelSpeech);
             if (callQueueRef.current === queue) callQueueRef.current = null;
@@ -623,6 +657,7 @@ export default function Conversation() {
             type="button"
             onClick={() => {
               if (!muted) {
+                replyPreparationRef.current?.preparation?.dispose();
                 speakingRef.current?.stop();
                 callQueueRef.current?.stop();
               }

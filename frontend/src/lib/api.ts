@@ -13,7 +13,7 @@ import { transcribeDirect } from "./directAsr";
 import { withTimeout } from "./requestTimeout";
 import { invalidateProgress, progressGeneration, subscribeProgress } from "./progressCache";
 import { ReadResource } from "./readResource";
-import { traceHeaders } from "./telemetry";
+import { traceHeaders, getInteraction } from "./telemetry";
 export { withTimeout } from "./requestTimeout";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -227,13 +227,14 @@ export async function streamChat(
   signal?: AbortSignal,
   custom?: CustomScene,
 ): Promise<string> {
+  const requestedAt = performance.now();
   const res = await fetch(`${BASE_URL}/api/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Accept": "text/event-stream", "X-Client-Id": getClientId(), ...authHeader(), ...traceHeaders(signal) },
     body: JSON.stringify({ scenario_id: scenarioId, messages: messages.slice(-40), custom }),
     signal: withTimeout(signal, 60_000),
   });
-  return readChatStream(res, onText);
+  return readChatStream(res, onText, {requestedAt, interactionId: getInteraction(signal)});
 }
 
 export interface SkillScore {

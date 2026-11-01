@@ -2,21 +2,22 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ postChat: vi.fn(), postAsr: vi.fn(), streamChat: vi.fn(), speakText: vi.fn(), createSpeechQueue: vi.fn(), postFeedback: vi.fn(), postSession: vi.fn(), startVoiceCall: vi.fn(), startRecording: vi.fn() }));
+const mocks = vi.hoisted(() => ({ postChat: vi.fn(), postAsr: vi.fn(), streamChat: vi.fn(), speakText: vi.fn(), prepareSpeech: vi.fn(), createSpeechQueue: vi.fn(), postFeedback: vi.fn(), postSession: vi.fn(), startVoiceCall: vi.fn(), startRecording: vi.fn() }));
 vi.mock("../lib/api", () => ({ ...mocks }));
 vi.mock("../lib/call", () => ({ startVoiceCall: mocks.startVoiceCall }));
 vi.mock("../lib/recorder", () => ({ startRecording: mocks.startRecording }));
-vi.mock("../lib/speech", () => ({ speakText: mocks.speakText, createSpeechQueue: mocks.createSpeechQueue }));
-vi.mock("../components/ChatBubble", () => ({ ChatBubble: ({ text }: { text: string }) => <div>{text}</div> }));
+vi.mock("../lib/speech", () => ({ speakText: mocks.speakText, prepareSpeech: mocks.prepareSpeech, createSpeechQueue: mocks.createSpeechQueue }));
+vi.mock("../components/ChatBubble", () => ({ ChatBubble: ({ text, onSpeak }: { text: string; onSpeak?: () => void }) => <div>{text}{onSpeak && <button onClick={onSpeak}>Replay {text}</button>}</div> }));
 vi.mock("../components/Buddy", () => ({ Buddy: () => null }));
 vi.mock("../components/PlayfulBackground", () => ({ PlayfulBackground: () => null }));
 import Conversation from "./Conversation";
-import { bindInteraction } from "../lib/telemetry";
+import { bindInteraction, getInteraction } from "../lib/telemetry";
 import type { CallCallbacks } from "../lib/call";
 afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
   vi.clearAllMocks();
   Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
+  mocks.prepareSpeech.mockImplementation(() => ({ dispose: vi.fn(), consume: vi.fn() }));
   mocks.postChat.mockResolvedValue({ reply: "Hello" });
   mocks.speakText.mockReturnValue({ done: Promise.resolve(), stop: vi.fn() });
   mocks.postFeedback.mockResolvedValue({ overall: 80, scores: [] });
@@ -143,4 +144,123 @@ it.each(["identity", "unmount"])("cancels the push-to-talk transcription signal 
   if (reason === "identity") setToken("microphone-b"); else view.unmount();
   expect(signal?.aborted).toBe(true);
   finish("");
+});
+
+
+it("prepares typed replies before generation and passes the same request identity to final autoplay", async () => {
+  let complete!: (reply: string) => void;
+  mocks.streamChat.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+  const user = userEvent.setup();
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", {name: "文字练习"}));
+  await user.type(screen.getByRole("textbox", {name: "英文回复"}), "A coffee.");
+  await user.click(screen.getByRole("button", {name: /^发送$/}));
+  expect(mocks.prepareSpeech).toHaveBeenCalledOnce();
+  expect(mocks.prepareSpeech.mock.invocationCallOrder[0]).toBeLessThan(mocks.streamChat.mock.invocationCallOrder[0]);
+  expect(mocks.createSpeechQueue).not.toHaveBeenCalled();
+  expect(mocks.speakText.mock.calls.map(([text]) => text)).toEqual(["Hello"]);
+  const signal = mocks.streamChat.mock.calls[0][3] as AbortSignal;
+  expect(getInteraction(signal)).toMatch(/^[a-f0-9]{32}$/);
+  complete("Fresh reply.");
+  await screen.findByText("Fresh reply.");
+  await waitFor(() => expect(mocks.speakText).toHaveBeenLastCalledWith("Fresh reply.", "cafe", expect.objectContaining({preparation: mocks.prepareSpeech.mock.results[0].value, interactionId: getInteraction(signal), submittedAt: expect.any(Number)})));
+  expect(screen.getByRole("textbox", {name: "英文回复"})).toBeEnabled();
+});
+
+
+async function pendingTypedReply() {
+  let complete!: (reply: string) => void;
+  mocks.streamChat.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+  const user = userEvent.setup();
+  const view = render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", {name: "文字练习"}));
+  await user.type(screen.getByRole("textbox", {name: "英文回复"}), "Coffee.");
+  await user.click(screen.getByRole("button", {name: /^发送$/}));
+  return {user, view, complete};
+}
+it("keeps manual replay independent while a fresh reply is generating", async () => {
+  const {user, complete} = await pendingTypedReply();
+  const stop = vi.fn();
+  mocks.speakText.mockReturnValueOnce({stop, done: new Promise(() => {})});
+  await user.click(screen.getByRole("button", {name:"Replay Hello"}));
+  expect(stop).not.toHaveBeenCalled();
+  expect(mocks.speakText).toHaveBeenLastCalledWith("Hello", "cafe", undefined);
+  expect(mocks.prepareSpeech.mock.results[0].value.dispose).not.toHaveBeenCalled();
+  complete("Fresh."); await screen.findByText("Fresh.");
+  expect(stop).toHaveBeenCalledOnce();
+  expect(mocks.speakText).toHaveBeenLastCalledWith("Fresh.", "cafe", expect.objectContaining({preparation:mocks.prepareSpeech.mock.results[0].value}));
+});
+it.each(["mute", "identity", "unmount"])("disposes pending discovery on %s and suppresses stale autoplay", async reason => {
+  const {user, view, complete} = await pendingTypedReply();
+  const preparation = mocks.prepareSpeech.mock.results[0].value;
+  const signal = mocks.streamChat.mock.calls[0][3] as AbortSignal;
+  if (reason === "mute") await user.click(screen.getByRole("button", {name:"关闭朗读"}));
+  else if (reason === "identity") { const {setToken} = await import("../lib/authToken"); setToken("new-identity-" + Date.now()); }
+  else view.unmount();
+  expect(preparation.dispose).toHaveBeenCalled();
+  if (reason !== "mute") expect(signal.aborted).toBe(true);
+  complete("Should not autoplay.");
+  if (reason === "mute") {
+    await screen.findByText("Should not autoplay.");
+    await user.click(screen.getByRole("button", {name:"开启朗读"}));
+  } else await Promise.resolve();
+  expect(mocks.speakText.mock.calls.map(([text]) => text)).toEqual(["Hello"]);
+});
+it("reuses typed discovery through plain fallback and releases sending before audio ends", async () => {
+  mocks.streamChat.mockRejectedValueOnce(new Error("Unavailable"));
+  mocks.postChat.mockResolvedValueOnce({reply:"Hello"}).mockResolvedValueOnce({reply:"Plain reply."});
+  const user = userEvent.setup();
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  mocks.speakText.mockReturnValue({stop:vi.fn(), done:new Promise(() => {})});
+  await user.click(screen.getByRole("button", {name:"文字练习"}));
+  await user.type(screen.getByRole("textbox", {name:"英文回复"}), "Coffee.");
+  await user.click(screen.getByRole("button", {name:/^发送$/}));
+  await screen.findByText("Plain reply.");
+  expect(mocks.prepareSpeech).toHaveBeenCalledOnce();
+  expect(mocks.speakText).toHaveBeenLastCalledWith("Plain reply.", "cafe", expect.objectContaining({preparation:mocks.prepareSpeech.mock.results[0].value}));
+  expect(screen.getByRole("textbox", {name:"英文回复"})).toBeEnabled();
+});
+it("prepares voice discovery after push-to-talk ASR and before its model request", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null,{status:202})));
+  mocks.startRecording.mockResolvedValue({stop:vi.fn().mockResolvedValue(new ArrayBuffer(1280))});
+  mocks.postAsr.mockResolvedValueOnce("Coffee please.");
+  mocks.streamChat.mockResolvedValueOnce("Here you go.");
+  const user = userEvent.setup();
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", {name:"文字练习"}));
+  await user.click(screen.getByRole("button", {name:"开始录音"}));
+  await user.click(await screen.findByRole("button", {name:"结束录音"}));
+  await screen.findByText("Here you go.");
+  expect(mocks.prepareSpeech.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.postAsr.mock.invocationCallOrder[0]);
+  expect(mocks.prepareSpeech.mock.invocationCallOrder[0]).toBeLessThan(mocks.streamChat.mock.invocationCallOrder[0]);
+});
+it("prepares call plain fallback discovery before requesting the fallback reply", async () => {
+  const queue = {started:new Promise(() => {}),feed:vi.fn(),end:vi.fn().mockResolvedValue(undefined),stop:vi.fn()};
+  mocks.createSpeechQueue.mockReturnValue(queue);
+  mocks.streamChat.mockRejectedValueOnce(new Error("Unavailable"));
+  const user=userEvent.setup();
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button",{name:"开始语音对话"}));
+  const callbacks=mocks.startVoiceCall.mock.calls[0][0] as CallCallbacks;
+  await callbacks.reply("Coffee.",new ArrayBuffer(2),()=>{},new AbortController().signal);
+  expect(mocks.prepareSpeech).toHaveBeenCalledOnce();
+  expect(mocks.prepareSpeech.mock.invocationCallOrder[0]).toBeLessThan(mocks.postChat.mock.invocationCallOrder[1]);
+});
+
+
+it("ends the active call on identity change so independent fallback discovery is aborted", async () => {
+  const controller=new AbortController(); const end=vi.fn(()=>controller.abort());
+  mocks.startVoiceCall.mockResolvedValueOnce({end});
+  const user=userEvent.setup();
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button",{name:"开始语音对话"}));
+  await waitFor(()=>expect(mocks.startVoiceCall).toHaveBeenCalledOnce());
+  const {setToken}=await import("../lib/authToken");setToken("call-owner-changed");
+  expect(end).toHaveBeenCalledOnce();expect(controller.signal.aborted).toBe(true);
 });

@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ fetchTtsUrl: vi.fn(), fetchTtsStream: vi.fn(), synthesize: vi.fn(), modelError:vi.fn(), localReady: false,
-  settings: { engine: "iflytek", vcn: null, speed: null, pitch: null, browserVoiceURI: null as string | null } }));
+  settings: { engine: "iflytek", vcn: null, speed: null as number | null, pitch: null as number | null, browserVoiceURI: null as string | null } }));
 vi.mock("./api", () => ({ fetchTtsUrl: mocks.fetchTtsUrl, fetchTtsStream: mocks.fetchTtsStream }));
 vi.mock("../store/voice", async actual => ({ ...await actual<object>(), useVoice: { getState: () => mocks.settings } }));
 vi.mock("./localSpeech/runtime", () => ({ isLocalSpeechModelReady: () => mocks.localReady,localSpeechCoordinator:{markError:mocks.modelError} }));
 vi.mock("./localSpeech/kokoro", () => ({ synthesizeWithKokoro: mocks.synthesize }));
-import { createSpeechQueue, speakText, stopSpeaking, primeBrowserVoices, listBrowserVoices } from "./speech";
+import { createSpeechQueue, speakText, stopSpeaking, primeBrowserVoices, listBrowserVoices, prepareSpeech } from "./speech";
 
 class AudioDouble {
   onplaying: (() => void) | null = null;
@@ -16,6 +16,7 @@ class AudioDouble {
   constructor(public src: string) { audios.push(this); }
 }
 class UtteranceDouble {
+  rate = 1; pitch = 1;
   voice: SpeechSynthesisVoice | null = null;
   onstart: (() => void) | null = null;
   onend: (() => void) | null = null;
@@ -29,7 +30,7 @@ const revoke = vi.fn();
 let samples: Record<string, unknown>[] = [];
 beforeEach(() => {
   audios.length = 0; utterances.length = 0; samples = [];
-  mocks.settings.engine = "iflytek"; mocks.settings.browserVoiceURI = null; mocks.localReady = false;
+  mocks.settings.engine = "iflytek"; mocks.settings.browserVoiceURI = null; mocks.settings.speed = null; mocks.settings.pitch = null; mocks.localReady = false;
   mocks.fetchTtsUrl.mockReset().mockResolvedValue("blob:whole");
   mocks.fetchTtsStream.mockReset(); mocks.synthesize.mockReset(); mocks.modelError.mockReset(); nativeCancel.mockClear(); revoke.mockClear();
   vi.stubGlobal("AudioContext", undefined); vi.stubGlobal("Audio", AudioDouble);
@@ -378,4 +379,116 @@ it("settles a native completion timeout after sound starts without replaying thr
   expect(q.failed).toBe(true); await done;
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
   expect(samples).toContainEqual(expect.objectContaining({operation:"speech.playback",outcome:"error"}));
+});
+
+
+it("recovers a paused idle synthesizer without cancelling and reports bounded native state", async () => {
+  mocks.settings.engine = "browser";
+  const synth = window.speechSynthesis;
+  Object.assign(synth, { paused: true, speaking: false, pending: false, resume: vi.fn(() => { Object.assign(synth, { paused: false }); }) });
+  const q = createSpeechQueue(); const done = q.end("Whole reply.");
+  await vi.waitFor(() => expect(utterances).toHaveLength(1));
+  expect(synth.resume).toHaveBeenCalledOnce(); expect(nativeCancel).not.toHaveBeenCalled();
+  utterances[0].onstart?.(); utterances[0].onend?.(); await done;
+  expect(samples.filter(s => s.operation === "speech.native_start")).toEqual([expect.objectContaining({ reason: "started", outcome: "ok", state_before: 1, state_after: 0, voice_type: "local" })]);
+});
+
+it("retains a native failure diagnostic even when cloud fallback succeeds", async () => {
+  mocks.settings.engine = "browser";
+  const q = createSpeechQueue(); const done = q.end("Whole reply.");
+  await vi.waitFor(() => expect(utterances).toHaveLength(1));
+  utterances[0].onerror?.();
+  await vi.waitFor(() => expect(audios).toHaveLength(1));
+  audios[0].onplaying?.(); audios[0].onended?.(); await done;
+  expect(samples.filter(s => s.operation === "speech.native_start")).toEqual([expect.objectContaining({ reason: "speech_error", error_code: "unknown", outcome: "error" })]);
+});
+
+
+it("prepares discovery independently of active playback and consumes current preferences", async () => {
+  mocks.settings.engine = "browser";
+  const first = speakText("Replay.");
+  await vi.waitFor(() => expect(utterances).toHaveLength(1));
+  utterances[0].onstart?.();
+  const cancels = nativeCancel.mock.calls.length;
+  const preparation = prepareSpeech();
+  expect(nativeCancel).toHaveBeenCalledTimes(cancels);
+  expect(utterances[0].onend).not.toBeNull();
+  expect(utterances).toHaveLength(1); expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
+  mocks.settings = {...mocks.settings, engine: "iflytek"};
+  const next = speakText("New reply.", "cafe", {preparation, interactionId: "a".repeat(32), submittedAt: performance.now()});
+  await vi.waitFor(() => expect(audios).toHaveLength(1));
+  expect(utterances).toHaveLength(1);
+  audios[0].onplaying?.(); audios[0].onended?.(); await next.done; await first.done;
+  expect(samples).toContainEqual(expect.objectContaining({operation: "speech.request_to_audio", interaction_id: "a".repeat(32)}));
+});
+
+
+it.each(["timeout", "end", "exception", "cancelled"])("records exactly one native startup outcome for %s including stale callbacks", async reason => {
+  vi.useFakeTimers(); mocks.settings.engine="browser";
+  if (reason === "exception") vi.spyOn(window.speechSynthesis,"speak").mockImplementation(() => { throw new Error("Private device detail"); });
+  const q=createSpeechQueue(); const done=q.end("A whole reply.");
+  await vi.advanceTimersByTimeAsync(0);
+  const lateStart=utterances[0]?.onstart;
+  if (reason === "timeout") await vi.advanceTimersByTimeAsync(5000);
+  if (reason === "end") utterances[0].onend?.();
+  if (reason === "cancelled") q.stop();
+  await vi.advanceTimersByTimeAsync(0);
+  lateStart?.();
+  if (reason !== "cancelled") { audios[0].onplaying?.(); audios[0].onended?.(); }
+  await done;
+  const diagnostics=samples.filter(s=>s.operation==="speech.native_start");
+  expect(diagnostics).toEqual([expect.objectContaining({outcome:reason==="cancelled"?"cancelled":"error",reason:{timeout:"startup_timeout",end:"end_before_start",exception:"speak_exception",cancelled:"cancelled"}[reason]})]);
+  expect(diagnostics[0]).not.toHaveProperty("voice_matched");
+  expect(diagnostics[0]).not.toHaveProperty("state_before");
+  expect(JSON.stringify(diagnostics)).not.toContain("Private");
+});
+it("records only start for an utterance that starts then fails, preserving the explicit voice match", async () => {
+  mocks.settings.engine="browser"; mocks.settings.browserVoiceURI="device-en";
+  const q=createSpeechQueue(); const done=q.end("A whole reply.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  const start=utterances[0].onstart!; start(); start(); utterances[0].onerror?.(); await done;
+  expect(samples.filter(s=>s.operation==="speech.native_start")).toEqual([expect.objectContaining({reason:"started",outcome:"ok",voice_matched:true})]);
+  expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
+});
+it("amortizes standalone empty discovery without owning playback and cancels its resources", async () => {
+  vi.useFakeTimers(); mocks.settings.engine="browser";
+  const subscribe=vi.fn(), unsubscribe=vi.fn();
+  vi.stubGlobal("speechSynthesis",{getVoices:()=>[],addEventListener:subscribe,removeEventListener:unsubscribe,cancel:nativeCancel,speak:vi.fn()});
+  const controller=new AbortController(); const discarded=prepareSpeech(controller.signal);
+  expect(subscribe).toHaveBeenCalledOnce(); controller.abort();
+  expect(unsubscribe).toHaveBeenCalledOnce(); expect(discarded.consume()).toBeUndefined(); expect(vi.getTimerCount()).toBe(0);
+  const preparation=prepareSpeech();
+  await vi.advanceTimersByTimeAsync(600);
+  expect(mocks.fetchTtsUrl).not.toHaveBeenCalled(); expect(nativeCancel).not.toHaveBeenCalled();
+  const speech=speakText("Final reply.","cafe",{preparation});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(audios).toHaveLength(1);
+  audios[0].onplaying?.();audios[0].onended?.();await speech.done;
+  expect(preparation.consume()).toBeUndefined();
+});
+it("selects the latest English voice and settings after standalone preparation", async () => {
+  mocks.settings.engine="browser";
+  const preparation=prepareSpeech();
+  mocks.settings={...mocks.settings,browserVoiceURI:"late-natural",speed:70,pitch:80};
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([
+    {name:"Non-English Natural",voiceURI:"other",lang:"zh-CN"},
+    {name:"Late Natural",voiceURI:"late-natural",lang:"en-US"},
+  ] as SpeechSynthesisVoice[]);
+  const speech=speakText("Final reply.","cafe",{preparation});
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  expect(utterances[0].voice?.voiceURI).toBe("late-natural");
+  expect(utterances[0].rate).toBeCloseTo(1.26); expect(utterances[0].pitch).toBeCloseTo(1.32);
+  utterances[0].onstart?.();utterances[0].onend?.();await speech.done;
+});
+
+
+it("preserves native_start speak-to-callback timing while recovery remains in first_audio", async () => {
+  mocks.settings.engine="browser";
+  let now=100;vi.spyOn(performance,"now").mockImplementation(()=>now);
+  Object.assign(window.speechSynthesis,{paused:true,speaking:false,pending:false,resume:()=>{now=200;Object.assign(window.speechSynthesis,{paused:false});}});
+  const q=createSpeechQueue();const done=q.end("Whole reply.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  now=300;utterances[0].onstart?.();utterances[0].onend?.();await done;
+  expect(samples).toContainEqual(expect.objectContaining({operation:"speech.native_start",duration_ms:100,reason:"started",state_before:1}));
+  expect(samples).toContainEqual(expect.objectContaining({operation:"speech.first_audio",duration_ms:200}));
 });

@@ -15,15 +15,19 @@ const names: Record<string, string> = {
   "POST /api/interview/score": "Interview · 四题评分", "POST /api/asr": "录音识别",
   "POST /api/asr/session": "直连识别 · 授权", "POST /api/tts/stream": "语音合成 · 流式",
   "POST /api/tts": "语音合成", "asr.finalize": "语音识别 · 收尾等待",
-  "asr.transcribe": "录音识别 · 浏览器总耗时", "speech.first_audio": "语音播放 · 首声等待",
+  "asr.transcribe": "录音识别 · 浏览器总耗时", "speech.first_audio": "语音播放 · 建队列至开始回调",
   "speech.complete": "语音播放 · 完成（含播放）",
   "speech.playback": "语音播放 · 播放阶段（首声至结束）",
   "speech.voice_resolution": "语音准备 · 最终文本后音色等待",
-  "speech.final_text_to_audio": "语音播放 · 最终文本至首声",
-  "speech.native_start": "浏览器语音 · 调用至实际开始",
+  "speech.final_text_to_audio": "语音播放 · 最终文本至开始回调",
+  "speech.native_start": "浏览器语音 · 启动结果回调（非声学测量）",
+  "chat.first_text": "对话 · 请求至首段文本",
+  "chat.complete": "对话 · 请求至完整文本返回",
+  "chat.tail": "对话 · 最后文本至完整返回",
+  "speech.request_to_audio": "对话 · 提交至播放开始回调（识别后）",
   "speech.cloud_fetch": "云语音 · 完整音频获取",
   "speech.play_start": "音频播放 · play 至 playing",
-  "voice.first_audio": "整轮语音 · 检测到说话结束至首声", "voice.complete": "整轮语音 · 完成（含播放）",
+  "voice.first_audio": "整轮语音 · 说话结束至播放开始回调", "voice.complete": "整轮语音 · 完成（含播放）",
 };
 const ms = (n: number | null | undefined) => n == null ? "—" : n >= 1000 ? `${(n / 1000).toFixed(2)} s` : `${Math.round(n)} ms`;
 const number = (n: number | null) => n == null ? "—" : n.toLocaleString("zh-CN");
