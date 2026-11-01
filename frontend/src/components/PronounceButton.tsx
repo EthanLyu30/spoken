@@ -63,8 +63,11 @@ export function PronounceButton({ text }: { text: string }) {
     save.pending = true; setSaving(true); setSaveError(false);
     const current = () => saveRef.current === save && save.generation === getAuthGeneration() && textRef.current === save.text;
     try {
+      const reference = Array.from(save.text);
+      const title = reference.slice(0, 200).join("");
+      const detail = reference.length > 200 ? JSON.stringify({ reference_text: save.text }) : "";
       // A write dispatched under its original identity survives route changes.
-      await savePractice("pronunciation", save.score, save.text, "", undefined, save.key);
+      await savePractice("pronunciation", save.score, title, detail, undefined, save.key);
     } catch { if (current()) setSaveError(true); }
     finally { if (current()) { save.pending = false; setSaving(false); } }
   }

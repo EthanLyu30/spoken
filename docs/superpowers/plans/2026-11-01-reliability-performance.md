@@ -56,7 +56,7 @@
 
 ### Task 4: Review, deployment and cleanup
 
-- [ ] Fresh-context whole-branch review; fix material findings with observed regressions and green checks.
+- [x] Fresh-context whole-branch review; fix material findings with observed regressions and green checks.
 - [x] Exercise reachable main flows, payload compatibility and build assets; report physical browser/mic limits honestly if tooling remains blocked.
 - [ ] Record actual timing/bytes before and after; verify protected hashes, fast-forward main and push; verify CI and deployment.
 - [ ] Stop task-owned services and remove only verified task scratch/caches/previews after final report is verified; explicitly report any blocked residue.

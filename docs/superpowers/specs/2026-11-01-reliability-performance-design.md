@@ -22,6 +22,8 @@ The live protocol is `/api/pronunciation/stream`: JSON `start` with text/languag
 
 Moving to WebSocket must retain backend observability: record bounded assessment/upload/final spans and sanitized outcome metadata, never reference text, answers or raw audio.
 
+A single inbound reader stays active during paced upload and after `end`, with a maximum pending PCM queue of 512 KiB and 4,096 frames plus one end slot. Overflow fails explicitly rather than blocking disconnect observation. Race it against evaluation and cancel/gather both tasks and close the source on every exit. Practice titles use at most 200 Unicode code points; preserve longer pronunciation references in detail and keep the original reference for scoring.
+
 ## Verification and scope
 
 Use observed RED→GREEN regression tests for data-loss ordering, explicit remove/re-add, reverse mastery responses, review/save failures and lost-response retries. Test legacy callers, changed owners, pruned histories and duplicate guest claims. Verify streamed and buffered PCM equivalence at real device sample rates, empty audio, provider errors, cancellation and final-result timeouts. Full existing backend/frontend suites plus lint/typecheck/build must pass, followed by independent whole-branch review and deployed endpoint/assets checks.

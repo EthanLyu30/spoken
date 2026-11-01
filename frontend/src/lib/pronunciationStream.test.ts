@@ -158,3 +158,20 @@ it("still bounds the final deadline after allowing ten seconds of startup audio 
   expect(onError).toHaveBeenCalledTimes(1);
   expect(socket.readyState).toBe(3);
 });
+
+it("accepts 2000 Unicode reference points even when an emoji needs two UTF16 units", async () => {
+  const reference="a".repeat(1999)+"😊";
+  const stream=createPronunciationStream(reference),socket=Socket.instances[0];
+  expect(socket).toBeDefined();socket.open();
+  expect(JSON.parse(socket.sent[0] as string).text).toBe(reference);
+  socket.message({type:"ready"});stream.send(new ArrayBuffer(1280));
+  const finished=stream.finish();socket.message({type:"result",result});
+  await expect(finished).resolves.toEqual(result);
+});
+
+it("rejects 2001 Unicode reference points before opening a provider connection", async () => {
+  const onError=vi.fn();
+  const stream=createPronunciationStream("a".repeat(1999)+"😊"+"z",undefined,onError);
+  expect(Socket.instances).toHaveLength(0);expect(onError).toHaveBeenCalledTimes(1);
+  await expect(stream.finish()).rejects.toThrow(/1–2000/);
+});

@@ -145,7 +145,7 @@ export function createPronunciationStream(text: string, signal?: AbortSignal, on
   };
   try {
     assertAuthGeneration(generation, signal);
-    if (!text.trim() || text.length > 2000) {
+    if (!text.trim() || Array.from(text).length > 2000) {
       fail("跟读文本需要1–2000个字符。", false);
       return api;
     }

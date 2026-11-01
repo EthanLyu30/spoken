@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.pronunciation import get_ise_client
+from app.api.pronunciation import get_ise_client, pronunciation_stream
 from app.core.config import Settings
 from app.main import app
 from app.services import xf_ise
@@ -252,3 +252,242 @@ def test_streaming_assessments_still_appear_in_backend_telemetry():
     finally:
         app.state.telemetry_sink = previous_sink
         app.dependency_overrides.clear()
+
+
+class InboundSocket:
+    """Direct ASGI-message socket; every receive has one observable owner."""
+
+    def __init__(self, *messages):
+        self.messages = asyncio.Queue()
+        self.sent = []
+        self.closed = False
+        self.active_receives = 0
+        self.max_active_receives = 0
+        self.receive_cancelled = asyncio.Event()
+        self.feed({'type': 'websocket.receive', 'text': json.dumps({'type': 'start', 'text': 'hi'})}, *messages)
+
+    def feed(self, *messages):
+        for message in messages:
+            self.messages.put_nowait(message)
+
+    async def accept(self):
+        pass
+
+    async def receive_json(self):
+        return json.loads((await self.receive())['text'])
+
+    async def receive(self):
+        self.active_receives += 1
+        self.max_active_receives = max(self.max_active_receives, self.active_receives)
+        assert self.active_receives == 1, 'WebSocket must have only one inbound reader'
+        try:
+            return await self.messages.get()
+        except asyncio.CancelledError:
+            self.receive_cancelled.set()
+            raise
+        finally:
+            self.active_receives -= 1
+
+    async def send_json(self, message):
+        self.sent.append(message)
+
+    async def close(self):
+        self.closed = True
+
+
+def pcm_message(size=1280):
+    return {'type': 'websocket.receive', 'bytes': b'\0' * size}
+
+
+def end_message():
+    return {'type': 'websocket.receive', 'text': '{"type":"end"}'}
+
+
+async def expect_finished(task, reason):
+    done, _ = await asyncio.wait({task}, timeout=.3)
+    assert task in done, reason
+    await task
+
+
+@pytest.mark.anyio
+async def test_disconnect_after_end_cancels_provider_final_wait_promptly():
+    waiting, released = asyncio.Event(), asyncio.Event()
+    socket = InboundSocket(pcm_message(), end_message())
+
+    class Stub:
+        async def evaluate_stream(self, text, audio, *, on_ready, **kwargs):
+            try:
+                await on_ready()
+                async for _ in audio:
+                    pass
+                waiting.set()
+                await asyncio.Event().wait()
+            finally:
+                released.set()
+
+    route = asyncio.create_task(pronunciation_stream(socket, Stub()))
+    try:
+        await asyncio.wait_for(waiting.wait(), .3)
+        socket.feed({'type': 'websocket.disconnect', 'code': 1000})
+        await expect_finished(route, 'disconnect after end must interrupt the provider final wait')
+        assert released.is_set() and socket.closed
+        assert socket.sent == [{'type': 'ready'}]
+        assert socket.max_active_receives == 1
+    finally:
+        route.cancel()
+        await asyncio.gather(route, return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_disconnect_behind_queued_pcm_cancels_blocked_upstream_promptly():
+    blocked, released = asyncio.Event(), asyncio.Event()
+    socket = InboundSocket(pcm_message())
+
+    class Stub:
+        async def evaluate_stream(self, text, audio, *, on_ready, **kwargs):
+            try:
+                await on_ready()
+                async for _ in audio:
+                    blocked.set()
+                    await asyncio.Event().wait()
+            finally:
+                released.set()
+
+    route = asyncio.create_task(pronunciation_stream(socket, Stub()))
+    try:
+        await asyncio.wait_for(blocked.wait(), .3)
+        socket.feed(pcm_message(), pcm_message(), {'type': 'websocket.disconnect', 'code': 1000})
+        await expect_finished(route, 'queued audio must not hide disconnect behind provider backpressure')
+        assert released.is_set() and socket.closed and socket.active_receives == 0
+        assert socket.sent == [{'type': 'ready'}]
+        assert socket.max_active_receives == 1
+    finally:
+        route.cancel()
+        await asyncio.gather(route, return_exceptions=True)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('size,count', [(65536, 9), (2, 4097)], ids=['pending-bytes', 'pending-frames'])
+async def test_pending_audio_overflow_reports_error_and_releases_provider(size, count):
+    blocked, released = asyncio.Event(), asyncio.Event()
+    socket = InboundSocket()
+
+    class Stub:
+        async def evaluate_stream(self, text, audio, *, on_ready, **kwargs):
+            try:
+                await on_ready()
+                blocked.set()
+                await asyncio.Event().wait()
+            finally:
+                released.set()
+
+    route = asyncio.create_task(pronunciation_stream(socket, Stub()))
+    try:
+        await asyncio.wait_for(blocked.wait(), .3)
+        socket.feed(*(pcm_message(size) for _ in range(count)))
+        await expect_finished(route, 'bounded queue overflow must fail without blocking the inbound reader')
+        assert released.is_set() and socket.closed and socket.active_receives == 0
+        assert socket.sent[-1] == {'type': 'error', 'message': '语音评测未完成，请重试。'}
+        assert not any(message['type'] == 'result' for message in socket.sent)
+    finally:
+        route.cancel()
+        await asyncio.gather(route, return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_evaluator_failure_cancels_and_gathers_inbound_reader():
+    socket = InboundSocket()
+
+    class Stub:
+        async def evaluate_stream(self, text, audio, *, on_ready, **kwargs):
+            await on_ready()
+            raise xf_ise.XfIseError('private provider diagnostics')
+
+    route = asyncio.create_task(pronunciation_stream(socket, Stub()))
+    try:
+        await expect_finished(route, 'provider errors must release the waiting inbound reader')
+        assert socket.receive_cancelled.is_set()
+        assert socket.active_receives == 0 and socket.closed
+        assert socket.sent[-1] == {'type': 'error', 'message': '语音评测未完成，请重试。'}
+        assert 'private provider diagnostics' not in json.dumps(socket.sent)
+    finally:
+        route.cancel()
+        await asyncio.gather(route, return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_pre_ready_burst_and_consumed_audio_fit_pending_budget():
+    # The browser can flush 384 KiB as soon as it receives ready. A later burst
+    # must have its own pending budget once the first burst has been consumed.
+    socket = InboundSocket(*(pcm_message(65536) for _ in range(6)))
+    consumed = []
+
+    class Stub:
+        async def evaluate_stream(self, text, audio, *, on_ready, **kwargs):
+            await on_ready()
+            async for chunk in audio:
+                consumed.append(len(chunk))
+                if len(consumed) == 6:
+                    socket.feed(*(pcm_message(65536) for _ in range(6)), end_message())
+            return SAMPLE_XML
+
+    route = asyncio.create_task(pronunciation_stream(socket, Stub()))
+    try:
+        await expect_finished(route, 'legitimate pre-ready and later bursts must retain their PCM')
+        assert consumed == [65536] * 12
+        assert socket.sent[-1]['type'] == 'result'
+        assert socket.active_receives == 0 and socket.closed
+        assert socket.max_active_receives == 1
+    finally:
+        route.cancel()
+        await asyncio.gather(route, return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_end_sentinel_fits_at_pending_frame_limit():
+    socket = InboundSocket(*(pcm_message(2) for _ in range(4096)), end_message())
+    received = []
+
+    class Stub:
+        async def evaluate_stream(self, text, audio, *, on_ready, **kwargs):
+            await on_ready()
+            async for chunk in audio:
+                received.append(chunk)
+            return SAMPLE_XML
+
+    route = asyncio.create_task(pronunciation_stream(socket, Stub()))
+    try:
+        await expect_finished(route, 'end needs a reserved slot when the PCM frame budget is full')
+        assert received == [b'\0\0'] * 4096
+        assert socket.sent[-1]['type'] == 'result' and socket.active_receives == 0
+    finally:
+        route.cancel()
+        await asyncio.gather(route, return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_audio_after_end_rejects_input_and_cancels_final_wait():
+    waiting, released = asyncio.Event(), asyncio.Event()
+    socket = InboundSocket(pcm_message(), end_message())
+
+    class Stub:
+        async def evaluate_stream(self, text, audio, *, on_ready, **kwargs):
+            try:
+                await on_ready()
+                async for _ in audio:
+                    pass
+                waiting.set()
+                await asyncio.Event().wait()
+            finally:
+                released.set()
+
+    route = asyncio.create_task(pronunciation_stream(socket, Stub()))
+    try:
+        await asyncio.wait_for(waiting.wait(), .3)
+        socket.feed(pcm_message())
+        await expect_finished(route, 'post-end input must fail without leaving the final wait alive')
+        assert released.is_set() and socket.closed
+        assert socket.sent[-1] == {'type': 'error', 'message': '语音评测未完成，请重试。'}
+    finally:
+        route.cancel()
+        await asyncio.gather(route, return_exceptions=True)

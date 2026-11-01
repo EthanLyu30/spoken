@@ -138,7 +138,7 @@ it("prevents duplicate pending microphone grants and preserves same-owner scorin
   expect(screen.getByText("91")).toBeInTheDocument();
   expect(saves).toHaveLength(1);
   expect(saves[0]).toMatchObject({ owner: "Bearer pronounce-a",
-    body: { kind: "pronunciation", score: 91, title: "Original owner line" } });
+    body: { kind: "pronunciation", score: 91, title: "Original owner line", detail: "" } });
   view.unmount();
   act(() => changeOwner(false));
   expect(saves[0].signal.aborted).toBe(false);
@@ -171,6 +171,35 @@ it("keeps pronunciation feedback and retries a lost save without recording or sc
   await act(async()=>{saving.resolve(new Response("{}"));});
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(startRecording).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(fetch).mock.calls.filter(([url])=>String(url).includes("/api/pronunciation"))).toHaveLength(1);
+  view.unmount();
+});
+
+it.each([
+  "a".repeat(201),
+  "a".repeat(2000),
+  "a".repeat(199)+"😊"+"z",
+])("saves long reference %# with a valid title, intact reference, and the same retry receipt",async reference=>{
+  const view=render(<PronounceButton text={reference}/>);
+  fireEvent.click(screen.getByRole("button",{name:"跟读评分"}));
+  await screen.findByRole("button",{name:"停止评分"});
+  fireEvent.click(screen.getByRole("button",{name:"停止评分"}));
+  await waitFor(()=>expect(fetch).toHaveBeenCalledOnce());
+  const scoringUrl=String(vi.mocked(fetch).mock.calls[0][0]);
+  expect(new URL(scoringUrl,location.href).searchParams.get("text")).toBe(reference);
+  await finishScore();expect(screen.getByText("91")).toBeVisible();
+  const body=saves[0].body as {title:string;detail:string;client_request_id:string};
+  const expectedTitle=reference.includes("😊") ? "a".repeat(199)+"😊" : "a".repeat(200);
+  expect(body.title).toBe(expectedTitle);expect(Array.from(body.title)).toHaveLength(200);
+  expect(JSON.parse(body.detail)).toEqual({reference_text:reference});
+  if(reference.includes("😊"))expect(body.title.endsWith("😊")).toBe(true);
+  await act(async()=>{saving.resolve(new Response("{}",{status:503}));});
+  expect(screen.getByRole("alert")).toBeVisible();
+  saving=deferred<Response>();fireEvent.click(screen.getByRole("button",{name:"重试保存"}));
+  await waitFor(()=>expect(saves).toHaveLength(2));
+  expect(saves[1].body).toEqual(body);expect(body.client_request_id).toEqual(expect.any(String));
+  await act(async()=>{saving.resolve(new Response("{}"));});
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();expect(startRecording).toHaveBeenCalledTimes(1);
   expect(vi.mocked(fetch).mock.calls.filter(([url])=>String(url).includes("/api/pronunciation"))).toHaveLength(1);
   view.unmount();
 });
