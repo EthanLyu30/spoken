@@ -72,9 +72,9 @@
 - Keep this plan's completion flags accurate.
 
 - [x] Fresh review of changed resource/abort paths; resolve findings and rerun affected checks.
-- [ ] Verify commit identity EthanLyu30; preserve primary checkout's original nine changes by hashing before/after integration.
-- [ ] Verify server/client deployments before measurement; baseline omission and ready ticket comparison run against the same deployed backend.
-- [ ] Measure fixed complete texts in alternating arms (three texts, two rounds); retain misses/errors rather than selecting only hits.
-- [ ] Measure genuinely generated new replies and compare total model-plus-cloud file readiness separately from browser callbacks.
+- [x] Verify commit identity EthanLyu30; preserve primary checkout's original nine changes by hashing before/after integration.
+- [x] Verify server/client deployments before measurement; baseline omission and ready ticket comparison run against the same deployed backend.
+- [x] Measure fixed complete texts in alternating arms (three texts, two rounds); retain misses/errors rather than selecting only hits.
+- [x] Measure genuinely generated new replies and compare total model-plus-cloud file readiness separately from browser callbacks.
 - [x] Continue in-app real chat acceptance, distinguishing effective speech engine and actual output from onplaying/onstart.
-- [ ] Update report; clean exact task-generated artifacts after verification. Main push requires the requested acceptance; an unavailable required browser/audio check remains outstanding, not silently treated as passed.
+- [x] Update report; clean exact task-generated artifacts after verification. Main push requires the requested acceptance; an unavailable required browser/audio check remains outstanding, not silently treated as passed.
