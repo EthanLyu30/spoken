@@ -164,9 +164,11 @@ HTTP 全部 200、done=true、无错误帧。测量脚本在内存转译对应�
 
 - [功能提交](https://github.com/EthanLyu30/spoken/commit/82dab38fc89afbc09d8be7e23d6a501689ea60e7) 已快进合并并 push main，author/committer 的 GitHub 登录均为 EthanLyu30。主检出九个原有用户改动以 SHA256 核对保持；未重写历史。
 - [功能 CI 41265558308](https://github.com/EthanLyu30/spoken/actions/runs/41265558308) 的 Python3.11 后端与 Node20 前端均通过；Render 部署 7467554829 成功，新 SSE 九条均含新增阶段字段。
-- 首次推送后的前端代码检查仍显示基线 8465ecb，GitHub 尚未出现该次 Vercel 状态；正在核对发布链路。此时不能说浏览器已经使用新前端，线上模型数据与用户试听反馈仍分别成立。
-- 冒烟口径：健康 200、无 owner 的学习进度 400、未登录后台 401；游客只读探针须用 X-Client-Id，初次误用 user_id 查询参数被正确拒绝，已更正测试脚本。
-- 清理待最终发布验证后执行，仅删本轮明确归属的脚本、数据、构建与缓存；用户原文件、未知/旧缓存、依赖、.env、数据库及宿主工作树保留。浏览器停止控制后，临时“运行”窗口是否关闭无法确认；命令没有执行。
+- 首次功能推送后，前端一度仍是基线 8465ecb；随后文档/前端 README 提交 `8d7fe38068c6c11d8670c25e945b9d1b07347435` 触发并完成 [Vercel 部署](https://vercel.com/ethanlyu30s-projects/spoken/7BWy4Mw5796szVwdrKLcDyG8XchS)，Production 记录 7467632308。首次事件未出现部署的具体原因未确定，不能说是代码构建失败。
+- UTC 02:41:09 再次从正式域名读取公共构建产物：`/assets/index-BAG6VhQP.js` 返回 200，包含完整 8d7fe38 提交号及 `speech.request_to_audio`、`startup_timeout`、`chat.complete` 新字段。`82dab38..8d7fe38` 仅文档/README 改动，已确认该生产前端含本轮全部运行时代码；代码产物核对不等于真实网页点击验收。
+- [8d7fe38 CI 41266043345](https://github.com/EthanLyu30/spoken/actions/runs/41266043345) 的前后端门禁均通过，Render 部署 7467623498 成功。最终报告/计划收尾提交不改变运行时代码。
+- 冒烟：健康 200、无 owner 的学习进度 400、游客 X-Client-Id 学习进度 200（sessions/insights/latest）、未登录后台 401。初次误用 user_id 查询参数被正确拒绝，修正的是测试脚本；没有放宽数据归属校验。
+- 最终发布验证后，以精确路径和递归目标/符号链接检查，使用不带 Force 的 PowerShell Remove-Item 清掉本轮 15 个目录及 pytest-current 链接：任务 SDD 脚本/数据/审查包、frontend/dist、Vite 缓存、后端 pytest 缓存和本轮字节码、pytest-1/2/3 临时目录。检查目标均已消失。用户原文件、旧 scripts/__pycache__、依赖、.env、数据库及宿主工作树保留，九个原有用户改动再次核对未变。浏览器停止控制后，临时“运行”窗口是否关闭无法确认；命令没有执行。
 
 ## 实施裁决与代价
 

@@ -51,5 +51,5 @@ Root orchestration.
 
 - [x] Review each task plus one fresh whole-branch review. Address important findings through scoped fix/re-review; keep model experiments and actual/synthetic/browser evidence separate.
 - [x] Compare same synthetic fresh replies/history via live endpoints; preserve all samples/errors, first/last/done/word counts and remaining native/hardware gaps. No opening-cache benefit in the primary results. No production learning writes.
-- [ ] Verify protected hashes, source identity, full coherent gates, then merge/push main already authorized. Verify Python3.11/Node20 CI, Render/Vercel and frontend release.
-- [ ] Retain final source/spec/plan/comparison only. Safely clean verified scratch/build/pytest/Vite/bytecode artifacts and report any cleanup blocked by browser policy. No force push, user-input deletion or host-owned worktree removal.
+- [x] Verify protected hashes, source identity, full coherent gates, then merge/push main already authorized. Verify Python3.11/Node20 CI, Render/Vercel and frontend release.
+- [x] Retain final source/spec/plan/comparison only. Safely clean verified scratch/build/pytest/Vite/bytecode artifacts and report any cleanup blocked by browser policy. No force push, user-input deletion or host-owned worktree removal.
