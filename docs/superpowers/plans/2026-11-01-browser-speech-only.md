@@ -41,7 +41,7 @@
 
 ### Task 3: Acceptance and integration
 
-- [ ] Measure genuine production model replies and inspect every timing sample; avoid claiming unmeasured capacity limits.
-- [ ] Independently review combined changes, address material findings, verify native playback/unavailable state and no TTS requests.
-- [ ] Record results and limitations; verify main identity and nine protected files, integrate/push main and verify deployment/CI.
-- [ ] Remove only verified current-task helpers, logs, temporary databases, previews and caches after final evidence is recorded.
+- [x] Measure genuine production model replies and inspect every timing sample; avoid claiming unmeasured capacity limits. Recorded 8 before + 12 after + 3 dispatch samples, all complete; historical 3.18 s not reproduced.
+- [x] Independently review combined changes, address material findings, verify native playback/unavailable state and no TTS requests. Review fixes covered; IAB unavailable state works. Edge's native playback fails even in a minimal API control, so audible acceptance remains explicitly open.
+- [x] Record results and limitations; verify main identity and nine protected files, integrate/push main and verify deployment/CI. Runtime 3bec465 deployed, CI 499/433 pass; docs-only final integration to follow.
+- [ ] Complete residual cleanup after final evidence is recorded. Workspace helpers, logs, DB, previews and caches were verified and removed. System Temp pytest-0/link removal was rejected with only “blocked by policy”; no workaround. Edge control was lost, so four test tabs and localhost-only Aria preference could not be confirmed cleared. See final performance report; preserve all pre-existing/uncertain artifacts.
