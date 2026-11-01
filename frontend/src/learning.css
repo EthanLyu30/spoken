@@ -1106,7 +1106,7 @@
     content: "";
     display: block;
     height: 200px;
-    background: var(--bg) url("/images/cafe-hero.png") right center / auto 285px
+    background: var(--bg) url("./assets/cafe-hero-1200.webp") right center / auto 285px
       no-repeat;
   }
   .hero-inner {

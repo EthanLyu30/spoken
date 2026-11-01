@@ -29,34 +29,34 @@
 **Frontend files:** store/words.ts, WordBag.tsx, useInterviewSession.ts, PronounceButton.tsx, Progress.tsx, api.ts and related tests.
 **Produces:** Optional owner-scoped `client_request_id`; stable retry IDs; review promise/error handling and ordered writes.
 
-- [ ] Write failing backend replay/conflict/legacy/prune/claim tests; implement transactional practice/review receipts and additive migration; run focused and full backend tests.
-- [ ] Write failing frontend collection/refresh/remove-readd, master ordering, failed review/save and detail-selection tests.
-- [ ] Implement explicit intents, serialized/revision-guarded writes, stable retry IDs and visible save failures; run focused and full frontend checks.
-- [ ] Inspect combined contract and commit only verified reliability changes as EthanLyu30.
+- [x] Write failing backend replay/conflict/legacy/prune/claim tests; implement transactional practice/review receipts and additive migration; run focused and full backend tests.
+- [x] Write failing frontend collection/refresh/remove-readd, master ordering, failed review/save and detail-selection tests.
+- [x] Implement explicit intents, serialized/revision-guarded writes, stable retry IDs and visible save failures; run focused and full frontend checks.
+- [x] Inspect combined contract and commit only verified reliability changes as EthanLyu30.
 
 ### Task 2: Images, cache and statistics
 
 **Files:** image variants/imports, ui.css, Wordmark/Buddy, vercel.json; services/progress.py and aggregation tests.
 **Consumes:** Task 1 receipts/claim semantics; do not alter their credit meaning.
 
-- [ ] Record original image bytes and stats benchmark; retain source PNGs.
-- [ ] Add same-content optimized WebP sizes and build-hashed imports; immutable cache only for assets; verify image quality/bytes and production build references.
-- [ ] Write failing bounded-result aggregation and timezone/semantics parity tests, implement SQL aggregates; retain supplied-event behavior and owner locks.
-- [ ] Run statistics regressions, compare identical 1k/10k/50k data, run full checks and commit.
+- [x] Record original image bytes and stats benchmark; retain source PNGs.
+- [x] Add same-content optimized WebP sizes and build-hashed imports; immutable cache only for assets; verify image quality/bytes and production build references.
+- [x] Write failing bounded-result aggregation and timezone/semantics parity tests, implement SQL aggregates; retain supplied-event behavior and owner locks.
+- [x] Run statistics regressions, compare identical 1k/10k/50k data, run full checks and commit.
 
 ### Task 3: Pronunciation waiting
 
 **Files:** xf_ise.py, pronunciation API and stream schema; recorder/audio transport, PronounceButton and tests.
 **Consumes:** Task 1 stable practice saving; provider evaluation remains iFlytek and public buffered compatibility remains.
 
-- [ ] Write failing deadline, concurrent receive and streaming transport tests with fake sockets/time.
-- [ ] Implement bounded provider session/upload/result lifecycle and streaming route; retain provider pacing.
-- [ ] Write failing capture equivalence, stream/fallback/cancel/owner-change UI tests; implement recording-time transmission and preserve usable buffered compatibility.
-- [ ] Measure deterministic upload overlap and final wait against baseline; run full suites/lint/typecheck/build and commit.
+- [x] Write failing deadline, concurrent receive and streaming transport tests with fake sockets/time.
+- [x] Implement bounded provider session/upload/result lifecycle and streaming route; retain provider pacing.
+- [x] Write failing capture equivalence, stream/fallback/cancel/owner-change UI tests; implement recording-time transmission and preserve usable buffered compatibility.
+- [x] Measure deterministic upload overlap and final wait against baseline; run full suites/lint/typecheck/build and commit.
 
 ### Task 4: Review, deployment and cleanup
 
 - [ ] Fresh-context whole-branch review; fix material findings with observed regressions and green checks.
-- [ ] Exercise reachable main flows, payload compatibility and build assets; report physical browser/mic limits honestly if tooling remains blocked.
+- [x] Exercise reachable main flows, payload compatibility and build assets; report physical browser/mic limits honestly if tooling remains blocked.
 - [ ] Record actual timing/bytes before and after; verify protected hashes, fast-forward main and push; verify CI and deployment.
 - [ ] Stop task-owned services and remove only verified task scratch/caches/previews after final report is verified; explicitly report any blocked residue.

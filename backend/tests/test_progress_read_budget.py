@@ -48,7 +48,7 @@ def selected_bytes(engine, calls):
     """UTF-8 value bytes, excluding protocol overhead; synthetic SELECT replay."""
     with engine.connect() as conn:
         return sum(len(str(value).encode("utf-8")) for sql, params in calls
-                   if sql.startswith("SELECT")
+                   if sql.startswith(("SELECT", "WITH"))
                    for row in conn.exec_driver_sql(sql, params) for value in row
                    if value is not None)
 

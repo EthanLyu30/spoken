@@ -228,8 +228,32 @@ class TelemetryMiddleware:
     def __init__(self, app):
         self.app = app
 
+    async def _assessment_socket(self, scope, receive, send):
+        trace = TraceContext(operation="WS /api/pronunciation/stream")
+        disconnected = False
+
+        async def observe_receive():
+            nonlocal disconnected
+            message = await receive()
+            if message["type"] == "websocket.disconnect":
+                disconnected = True
+            return message
+
+        try:
+            with trace:
+                await self.app(scope, observe_receive, send)
+                if disconnected and trace.outcome == "ok":
+                    trace.outcome = "cancelled"
+        finally:
+            sink = getattr(scope["app"].state, "telemetry_sink", None)
+            if sink:
+                sink.submit(trace.record())
+
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "")
+        if (scope["type"] == "websocket" and path == "/api/pronunciation/stream"
+                and get_settings().telemetry_enabled):
+            return await self._assessment_socket(scope, receive, send)
         if (scope["type"] != "http" or not path.startswith("/api/") or
                 path.startswith(("/api/admin", "/api/telemetry", "/api/auth", "/api/health")) or
                 scope.get("method") == "OPTIONS" or not get_settings().telemetry_enabled):

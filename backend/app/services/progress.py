@@ -6,12 +6,13 @@ counters. Helpers never commit: the caller owns the activity transaction.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from functools import lru_cache
 from itertools import islice
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import delete, func, literal, select, update
+from sqlalchemy import Date, and_, case, cast, delete, func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection, Engine
@@ -99,6 +100,98 @@ def _local_date(timestamp: datetime, zone: ZoneInfo):
     return timestamp.astimezone(zone).date()
 
 
+@dataclass(frozen=True)
+class ActivitySummary:
+    sessions: int
+    practices: int
+    collected: int
+    reviewed: int
+    interviews: int
+    conversation_max: float
+    pronunciation_max: float
+    scenarios: int
+    days: set[date]
+    today_count: int
+
+
+@lru_cache(maxsize=4096)
+def _sqlite_local_date(timestamp: str | None, zone_name: str) -> str | None:
+    # Cache only this pure conversion, bounded independently of event volume.
+    # Full timestamp and zone form the key; never cache a user's stats or now.
+    if timestamp is None:
+        return None
+    return _local_date(datetime.fromisoformat(timestamp), ZoneInfo(zone_name)).isoformat()
+
+
+def _activity_query(client_id: str, zone_name: str, dialect: str):
+    # Stored timestamps are UTC-naive. Explicitly attach UTC before converting
+    # on Postgres, independently of its connection/session timezone.
+    local_day = (cast(func.timezone(zone_name, func.timezone("UTC", LearningEvent.occurred_at)), Date)
+                 if dialect == "postgresql" else
+                 func.spoken_local_date(LearningEvent.occurred_at, zone_name, type_=Date))
+    events = select(LearningEvent.event_type, LearningEvent.word_text, LearningEvent.kind,
+        LearningEvent.score, LearningEvent.scenario_id, local_day.label("local_day"))\
+        .where(LearningEvent.client_id == client_id).cte("owner_events")
+    e = events.c
+    conversation = e.event_type == "session"
+    practice = e.event_type == "practice"
+    metrics = {
+        "sessions": func.count(case((conversation, 1))),
+        "practices": func.count(case((practice, 1))),
+        "collected": func.count(case((e.event_type == "word_collected", e.word_text)).distinct()),
+        "reviewed": func.count(case((e.event_type == "word_reviewed", e.word_text)).distinct()),
+        "interviews": func.count(case((and_(practice, e.kind == "interview"), 1))),
+        "conversation_max": func.coalesce(func.max(case((conversation, e.score))), 0),
+        "pronunciation_max": func.coalesce(func.max(case((and_(practice, e.kind == "pronunciation"), e.score))), 0),
+        "scenarios": func.count(case((and_(conversation, e.scenario_id != ""), e.scenario_id)).distinct()),
+    }
+    # One totals row and one row per distinct local day, never per event. UNION
+    # keeps totals off daily rows and avoids a separate remote round trip.
+    totals = select(cast(literal(None), Date).label("local_day"),
+        *(value.label(name) for name, value in metrics.items()), literal(0).label("speaking_count"))
+    days = select(e.local_day, *(literal(0).label(name) for name in metrics),
+        func.sum(case((e.event_type.in_(["session", "practice"]), 1), else_=0)).label("speaking_count"))\
+        .where(e.local_day.is_not(None)).group_by(e.local_day)
+    return totals.union_all(days)
+
+
+def _sql_activity(db: Session, client_id: str, zone_name: str, today: date) -> ActivitySummary:
+    connection = db.connection()
+    dialect = connection.dialect.name
+    if dialect == "sqlite" and not connection.info.get("spoken_local_date_registered"):
+        # Register once per pooled DBAPI connection, also covering test/custom
+        # engines and backfill connections created before this module imports.
+        connection.connection.dbapi_connection.create_function(
+            "spoken_local_date", 2, _sqlite_local_date, deterministic=True)
+        connection.info["spoken_local_date_registered"] = True
+    days, totals, today_count = set(), {}, 0
+    for row in db.execute(_activity_query(client_id, zone_name, dialect)):
+        if row.local_day is None:
+            totals = {key: value for key, value in row._mapping.items()
+                      if key not in {"local_day", "speaking_count"}}
+        else:
+            days.add(row.local_day)
+            if row.local_day == today:
+                today_count = row.speaking_count
+    return ActivitySummary(**totals, days=days, today_count=today_count)
+
+
+def _supplied_activity(events: list[LearningEvent], zone: ZoneInfo, today: date) -> ActivitySummary:
+    conversations = [e for e in events if e.event_type == "session"]
+    practices = [e for e in events if e.event_type == "practice"]
+    return ActivitySummary(
+        sessions=len(conversations), practices=len(practices),
+        collected=len({e.word_text for e in events if e.event_type == "word_collected" and e.word_text is not None}),
+        reviewed=len({e.word_text for e in events if e.event_type == "word_reviewed" and e.word_text is not None}),
+        interviews=sum(e.kind == "interview" for e in practices),
+        conversation_max=max((e.score or 0 for e in conversations), default=0),
+        pronunciation_max=max((e.score or 0 for e in practices if e.kind == "pronunciation"), default=0),
+        scenarios=len({e.scenario_id for e in conversations if e.scenario_id}),
+        days={_local_date(e.occurred_at, zone) for e in events if e.occurred_at is not None},
+        today_count=sum(e.occurred_at is not None and _local_date(e.occurred_at, zone) == today
+                        for e in conversations + practices))
+
+
 def stats_and_awards(db: Session, client_id: str, timezone_value: str | None = None,
                      *, events: list[LearningEvent] | None = None,
                      snapshot: ProgressSnapshot | None = None) -> dict:
@@ -106,14 +199,11 @@ def stats_and_awards(db: Session, client_id: str, timezone_value: str | None = N
     zone_name = timezone_name(timezone_value)
     zone = ZoneInfo(zone_name)
     today = _local_date(utcnow(), zone)
-    if events is None:
-        events = list(db.scalars(select(LearningEvent).where(LearningEvent.client_id == client_id)))
+    activity = _sql_activity(db, client_id, zone_name, today) if events is None else None
     with measure("stats_cpu", cpu=True):
-        conversations = [e for e in events if e.event_type == "session"]
-        practices = [e for e in events if e.event_type == "practice"]
-        collected = {e.word_text for e in events if e.event_type == "word_collected" and e.word_text is not None}
-        reviewed = {e.word_text for e in events if e.event_type == "word_reviewed" and e.word_text is not None}
-        days = {_local_date(e.occurred_at, zone) for e in events if e.occurred_at is not None}
+        if activity is None:
+            activity = _supplied_activity(events, zone, today)
+        days = activity.days
         streak = 0
         cursor = today if today in days else today - timedelta(days=1)
         while cursor in days:
@@ -125,20 +215,20 @@ def stats_and_awards(db: Session, client_id: str, timezone_value: str | None = N
             run = run + 1 if previous is not None and day == previous + timedelta(days=1) else 1
             longest = max(longest, run)
             previous = day
-        xp_total = len(conversations) * 40 + len(practices) * 15 + len(collected) * 5
+        xp_total = activity.sessions * 40 + activity.practices * 15 + activity.collected * 5
         level = 1 + xp_total // 250
         achievements = {
-            "first_conversation": len(conversations) >= 1,
+            "first_conversation": activity.sessions >= 1,
             "streak_3": longest >= 3,
             "streak_7": longest >= 7,
-            "conversations_10": len(conversations) >= 10,
-            "words_10": len(collected) >= 10,
-            "words_50": len(collected) >= 50,
-            "reviewed_words_10": len(reviewed) >= 10,
-            "pronunciation_90": any(e.kind == "pronunciation" and (e.score or 0) >= 90 for e in practices),
-            "interviews_3": sum(e.kind == "interview" for e in practices) >= 3,
-            "conversation_90": any((e.score or 0) >= 90 for e in conversations),
-            "scenarios_5": len({e.scenario_id for e in conversations if e.scenario_id}) >= 5,
+            "conversations_10": activity.sessions >= 10,
+            "words_10": activity.collected >= 10,
+            "words_50": activity.collected >= 50,
+            "reviewed_words_10": activity.reviewed >= 10,
+            "pronunciation_90": activity.pronunciation_max >= 90,
+            "interviews_3": activity.interviews >= 3,
+            "conversation_90": activity.conversation_max >= 90,
+            "scenarios_5": activity.scenarios >= 5,
             "level_3": level >= 3,
         }
     if snapshot is None:
@@ -149,14 +239,13 @@ def stats_and_awards(db: Session, client_id: str, timezone_value: str | None = N
                                  for key in sorted(newly_earned)))
     return {
         "streak_days": streak,
-        "today_count": sum(e.occurred_at is not None and _local_date(e.occurred_at, zone) == today
-                           for e in conversations + practices),
+        "today_count": activity.today_count,
         "today_goal": 3,
         "level": level,
         "xp": xp_total % 250,
         "xp_to_next": 250,
-        "total_sessions": len(conversations),
-        "total_practice": len(practices),
+        "total_sessions": activity.sessions,
+        "total_practice": activity.practices,
         "words_count": snapshot.words_count,
         "earned_badges": sorted(badges | newly_earned),
         "timezone": zone_name,

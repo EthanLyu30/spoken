@@ -813,7 +813,7 @@
   top: 0;
   bottom: 0;
   width: 310px;
-  background: url("/images/cafe-hero.png") 72% center / auto 430px no-repeat;
+  background: url("./assets/cafe-hero-1200.webp") 72% center / auto 430px no-repeat;
 }
 .onboarding-overlay > .card > div:first-child .buddy-art {
   display: none;
@@ -1385,7 +1385,7 @@
 }
 .home-hero {
   height: 430px;
-  background: #fffcf7 url("/images/cafe-hero.png") right center / auto 670px
+  background: #fffcf7 url("./assets/cafe-hero-1672.webp") right center / auto 670px
     no-repeat;
 }
 .hero-inner {
@@ -1493,7 +1493,8 @@
 .pick-image {
   height: 190px;
   border-radius: 9px;
-  background: url("/images/cafe-hero.png") 90% 48% / auto 300px no-repeat;
+  background: url("./assets/cafe-hero-768.webp") 90% 48% / auto 300px no-repeat;
+  background-image: image-set(url("./assets/cafe-hero-768.webp") 1x, url("./assets/cafe-hero-1200.webp") 2x);
 }
 .pick-copy {
   position: relative;
@@ -1695,7 +1696,8 @@
   position: relative;
   height: 552px;
   margin-top: 14px;
-  background: url("/images/journey-map.png") center / 100% 100% no-repeat;
+  background: url("./assets/journey-map-1672.webp") center / 100% 100% no-repeat;
+  background-image: image-set(url("./assets/journey-map-1200.webp") 1x, url("./assets/journey-map-1672.webp") 2x);
 }
 .journey-map ol {
   list-style: none;
@@ -2284,6 +2286,7 @@
   .home-hero {
     height: auto;
     min-height: 435px;
+    background-image: image-set(url("./assets/cafe-hero-768.webp") 1x, url("./assets/cafe-hero-1200.webp") 2x);
     background-size: auto 410px;
     background-position: 70% top;
     padding-top: 205px;
