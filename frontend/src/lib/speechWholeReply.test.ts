@@ -20,7 +20,9 @@ class UtteranceDouble {
   voice: SpeechSynthesisVoice | null = null;
   onstart: (() => void) | null = null;
   onend: (() => void) | null = null;
-  onerror: (() => void) | null = null;
+  onerror: ((event?: { error?: string }) => void) | null = null;
+  onpause: (() => void) | null = null;
+  onresume: (() => void) | null = null;
   constructor(public text: string) {}
 }
 const audios: AudioDouble[] = [];
@@ -289,11 +291,18 @@ it("keeps failed local inference without an English voice as a failure", async (
 });
 it("classifies cancellation after native playback starts without repeating completion", async () => {
   mocks.settings.engine="browser";
+  const synth=window.speechSynthesis;
+  Object.assign(synth,{paused:false,speaking:true,pending:true});
   const q=createSpeechQueue(); const done=q.end("A whole reply.");
   await vi.waitFor(()=>expect(utterances).toHaveLength(1)); utterances[0].onstart?.(); await q.started;
+  Object.assign(synth,{paused:false,speaking:true,pending:true});
+  nativeCancel.mockImplementationOnce(()=>Object.assign(synth,{speaking:false,pending:false}));
   q.stop(); q.stop(); await done;
   await vi.waitFor(()=>expect(samples).toContainEqual(expect.objectContaining({operation:"speech.playback",outcome:"cancelled"})));
   expect(samples.filter(sample=>sample.operation==="speech.complete")).toHaveLength(1);
+  expect(samples.filter(sample=>sample.operation==="speech.native_end")).toEqual([expect.objectContaining({
+    reason:"cancelled",outcome:"cancelled",state_at_event:6,
+  })]);
 });
 
 it("does not let a stale completed speech handle cancel its successor", async () => {
@@ -307,13 +316,17 @@ it("does not let a stale completed speech handle cancel its successor", async ()
 
 it("does not repeat a native reply through cloud after playback has started and failed", async () => {
   mocks.settings.engine="browser";
-  const q=createSpeechQueue(); const done=q.end("One whole reply.");
+  const q=createSpeechQueue(); const done=q.end("Private whole reply text.");
   await vi.waitFor(()=>expect(utterances).toHaveLength(1));
   utterances[0].onstart?.();
-  utterances[0].onerror?.(); await done;
+  utterances[0].onerror?.({error:"synthesis-failed"}); await done;
   expect(q.failed).toBe(true);
   expect(samples).toContainEqual(expect.objectContaining({operation:"speech.complete",outcome:"error"}));
   expect(samples).toContainEqual(expect.objectContaining({operation:"speech.playback",outcome:"error"}));
+  expect(samples.filter(s=>s.operation==="speech.native_end")).toEqual([expect.objectContaining({
+    reason:"native_error",error_code:"synthesis-failed",outcome:"error",
+  })]);
+  expect(JSON.stringify(samples)).not.toContain("Private whole reply text.");
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
 });
 
@@ -353,13 +366,70 @@ it("does not start a fallback after cancellation during the native startup deadl
 
 it("settles a native completion timeout after sound starts without replaying through cloud", async () => {
   vi.useFakeTimers(); mocks.settings.engine="browser";
+  const resume=vi.fn();
+  Object.assign(window.speechSynthesis,{paused:false,speaking:true,pending:false,resume});
   const q=createSpeechQueue(); const done=q.end("A short complete reply.");
   await vi.waitFor(()=>expect(utterances).toHaveLength(1));
   utterances[0].onstart?.();
   await vi.advanceTimersByTimeAsync(60_000);
   expect(q.failed).toBe(true); await done;
+  expect(resume).not.toHaveBeenCalled();
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
   expect(samples).toContainEqual(expect.objectContaining({operation:"speech.playback",outcome:"error"}));
+  expect(samples.filter(s=>s.operation==="speech.native_end")).toEqual([expect.objectContaining({
+    reason:"completion_timeout",outcome:"error",state_at_event:2,watchdog_budget_ms:60_000,visibility_state:"visible",
+  })]);
+});
+
+it("resumes a visible paused utterance once at the watchdog and accepts a terminal during grace", async () => {
+  vi.useFakeTimers(); mocks.settings.engine="browser";
+  const synth=window.speechSynthesis;
+  const resume=vi.fn(()=>{Object.assign(synth,{paused:false});});
+  Object.assign(synth,{paused:false,speaking:true,pending:false,resume});
+  const q=createSpeechQueue();const done=q.end("A paused complete reply.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  utterances[0].onstart?.();
+  Object.assign(synth,{paused:true});utterances[0].onpause?.();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(resume).toHaveBeenCalledOnce();expect(q.failed).toBe(false);
+  Object.assign(synth,{speaking:false});utterances[0].onend?.();await done;
+  expect(resume).toHaveBeenCalledOnce();
+  expect(samples.filter(s=>s.operation==="speech.native_end")).toEqual([expect.objectContaining({
+    reason:"end",outcome:"ok",watchdog_budget_ms:60_000,pause_count:1,resume_count:1,paused_duration_ms:60_000,visibility_state:"visible",
+  })]);
+});
+
+it("does not extend the watchdog for a paused utterance while the page is hidden", async () => {
+  vi.useFakeTimers();mocks.settings.engine="browser";
+  vi.spyOn(document,"visibilityState","get").mockReturnValue("hidden");
+  const synth=window.speechSynthesis;const resume=vi.fn();
+  Object.assign(synth,{paused:false,speaking:true,pending:false,resume});
+  const q=createSpeechQueue();const done=q.end("A hidden paused reply.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  utterances[0].onstart?.();Object.assign(synth,{paused:true});utterances[0].onpause?.();
+  await vi.advanceTimersByTimeAsync(60_000);await done;
+  expect(resume).not.toHaveBeenCalled();expect(q.failed).toBe(true);
+  expect(samples.filter(s=>s.operation==="speech.native_end")).toEqual([expect.objectContaining({
+    reason:"completion_timeout",outcome:"error",visibility_state:"hidden",resume_count:0,
+  })]);
+});
+
+it("reports completion_timeout only after the single two-second paused recovery grace fails", async () => {
+  vi.useFakeTimers();mocks.settings.engine="browser";
+  const synth=window.speechSynthesis;const resume=vi.fn();
+  Object.assign(synth,{paused:false,speaking:true,pending:false,resume});
+  const q=createSpeechQueue();const done=q.end("A stuck paused reply.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  utterances[0].onstart?.();Object.assign(synth,{paused:true});utterances[0].onpause?.();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(resume).toHaveBeenCalledOnce();expect(q.failed).toBe(false);
+  await vi.advanceTimersByTimeAsync(1_999);expect(q.failed).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);await done;
+  expect(q.failed).toBe(true);expect(resume).toHaveBeenCalledOnce();
+  expect(samples.filter(s=>s.operation==="speech.native_end")).toEqual([expect.objectContaining({
+    reason:"completion_timeout",outcome:"error",pause_count:1,resume_count:1,paused_duration_ms:62_000,
+  })]);
+  expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
 });
 
 
@@ -415,15 +485,35 @@ it.each(["timeout", "end", "exception", "cancelled"])("records exactly one nativ
   expect(diagnostics).toEqual([expect.objectContaining({outcome:reason==="cancelled"?"cancelled":"error",reason:{timeout:"startup_timeout",end:"end_before_start",exception:"speak_exception",cancelled:"cancelled"}[reason]})]);
   expect(diagnostics[0]).not.toHaveProperty("voice_matched");
   expect(diagnostics[0]).not.toHaveProperty("state_before");
+  expect(samples.filter(s=>s.operation==="speech.native_end")).toHaveLength(0);
   expect(JSON.stringify(diagnostics)).not.toContain("Private");
 });
-it("records only start for an utterance that starts then fails, preserving the explicit voice match", async () => {
+it("records start and one terminal for an utterance that starts then fails, preserving the explicit voice match", async () => {
   mocks.settings.engine="browser"; mocks.settings.browserVoiceURI="device-en";
   const q=createSpeechQueue(); const done=q.end("A whole reply.");
   await vi.waitFor(()=>expect(utterances).toHaveLength(1));
   const start=utterances[0].onstart!; start(); start(); utterances[0].onerror?.(); await done;
   expect(samples.filter(s=>s.operation==="speech.native_start")).toEqual([expect.objectContaining({reason:"started",outcome:"ok",voice_matched:true})]);
+  expect(samples.filter(s=>s.operation==="speech.native_end")).toEqual([expect.objectContaining({reason:"native_error",error_code:"unknown",outcome:"error"})]);
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
+});
+
+it("reports one normal native terminal with bounded playback diagnostics and ignores stale callbacks", async () => {
+  const synth = window.speechSynthesis;
+  Object.assign(synth, {paused:false, speaking:true, pending:false});
+  const q=createSpeechQueue(); const done=q.end("A whole reply whose text must stay private.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  const lateStart=utterances[0].onstart!, lateEnd=utterances[0].onend!, lateError=utterances[0].onerror!;
+  lateStart(); lateStart();
+  Object.assign(synth, {speaking:false});
+  lateEnd(); await done;
+  lateStart(); lateEnd(); lateError({error:"network"});
+  expect(samples.filter(s=>s.operation==="speech.native_start")).toHaveLength(1);
+  expect(samples.filter(s=>s.operation==="speech.native_end")).toEqual([expect.objectContaining({
+    reason:"end", outcome:"ok", state_at_event:0, watchdog_budget_ms:60_000,
+    pause_count:0, resume_count:0, paused_duration_ms:0, visibility_state:"visible",
+  })]);
+  expect(JSON.stringify(samples)).not.toContain("A whole reply whose text must stay private.");
 });
 it("amortizes standalone empty discovery without owning playback and cancels its resources", async () => {
   vi.useFakeTimers(); mocks.settings.engine="browser";

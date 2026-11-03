@@ -6,6 +6,7 @@ export interface UserTurnMeta {
   source: UserTurnSource;
   spokenText?: string;
   pcm?: ArrayBuffer;
+  interactionId?: string;
 }
 
 export type UserTurnMetaMap = Record<number, UserTurnMeta>;

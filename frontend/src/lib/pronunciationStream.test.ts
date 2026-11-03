@@ -31,7 +31,7 @@ it("uploads queued and new PCM before finish, with the agreed protocol and bound
   socket.message({ type: "ready" });
   stream.send(new ArrayBuffer(1280));
   expect(socket.url).toBe("wss://speech.example.test/api/pronunciation/stream");
-  expect(JSON.parse(socket.sent[0] as string)).toEqual({ type: "start", text: "Read this", language: "en" });
+  expect(JSON.parse(socket.sent[0] as string)).toEqual({ type: "start", text: "Read this", language: "en", entry: "follow_read" });
   expect(socket.sent.filter(value => value instanceof ArrayBuffer).map(value => value.byteLength)).toEqual([65536, 4464, 1280]);
   const finished = stream.finish();
   expect(JSON.parse(socket.sent.at(-1) as string)).toEqual({ type: "end" });

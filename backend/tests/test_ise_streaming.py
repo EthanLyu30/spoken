@@ -172,7 +172,8 @@ def test_live_endpoint_reads_binary_until_end_and_matches_existing_result():
 
 @pytest.mark.parametrize('start', [{}, {'type': 'start', 'text': ''},
                                   {'type': 'start', 'text': 'x' * 2001},
-                                  {'type': 'start', 'text': 'hi', 'language': 'invalid'}])
+                                  {'type': 'start', 'text': 'hi', 'language': 'invalid'},
+                                  {'type': 'start', 'text': 'hi', 'entry': 'invalid'}])
 def test_live_endpoint_rejects_invalid_start_without_provider(start):
     with TestClient(app).websocket_connect('/api/pronunciation/stream') as ws:
         ws.send_json(start)
@@ -240,7 +241,7 @@ def test_streaming_assessments_still_appear_in_backend_telemetry():
     app.dependency_overrides[get_ise_client] = Stub
     try:
         with TestClient(app).websocket_connect('/api/pronunciation/stream') as ws:
-            ws.send_json({'type': 'start', 'text': 'private learner reference'})
+            ws.send_json({'type': 'start', 'text': 'private learner reference', 'entry': 'follow_read'})
             assert ws.receive_json()['type'] == 'ready'
             ws.send_bytes(b'\0\1')
             ws.send_json({'type': 'end'})
@@ -248,6 +249,9 @@ def test_streaming_assessments_still_appear_in_backend_telemetry():
         assert len(records) == 1
         assert records[0]['operation'] == 'WS /api/pronunciation/stream'
         assert records[0]['outcome'] == 'ok'
+        spans = json.loads(records[0]['spans_json'])
+        request = next(span for span in spans if span['name'] == 'pronunciation.request')
+        assert request['attributes']['entry'] == 'follow_read'
         assert 'private learner reference' not in json.dumps(records, default=str)
     finally:
         app.state.telemetry_sink = previous_sink

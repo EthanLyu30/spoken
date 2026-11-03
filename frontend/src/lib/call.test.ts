@@ -308,6 +308,42 @@ describe("voice call ASR engine boundaries", () => {
     await vi.waitFor(() => expect(late.stop).toHaveBeenCalledOnce());
   });
 
+  it("does not retry an explicit empty stream final as a buffered utterance", async () => {
+    const opened = { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn(async () => "") };
+    mocks.openAsrStream.mockResolvedValue(opened);
+    const transcribe = vi.fn();
+    const reply = vi.fn();
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => false, transcribe, reply, onError: vi.fn() });
+    try {
+      pushFrame(0.1); pushFrame(0.1);
+      await Promise.resolve();
+      pushFrame(0.1);
+      await vi.waitFor(() => expect(opened.send).toHaveBeenCalled());
+      for (let i = 0; i < 4; i++) pushFrame(0);
+      await vi.waitFor(() => expect(opened.finishUtterance).toHaveBeenCalledOnce());
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(reply).not.toHaveBeenCalled();
+      expect(transcribe).not.toHaveBeenCalled();
+    } finally { call.end(); }
+  });
+
+  it("does not restart the complete recovery after its own failure", async () => {
+    const opened = { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn(async () => { throw new Error("stream failed"); }) };
+    mocks.openAsrStream.mockResolvedValue(opened);
+    const transcribe = vi.fn(async () => { throw new Error("buffered failed"); });
+    const onError = vi.fn();
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => false, transcribe, reply: vi.fn(), onError });
+    try {
+      pushFrame(0.1); pushFrame(0.1);
+      await Promise.resolve();
+      pushFrame(0.1);
+      await vi.waitFor(() => expect(opened.send).toHaveBeenCalled());
+      for (let i = 0; i < 4; i++) pushFrame(0);
+      await vi.waitFor(() => expect(onError).toHaveBeenCalledOnce());
+      expect(transcribe).toHaveBeenCalledOnce();
+    } finally { call.end(); }
+  });
+
   it("falls back to the whole recording when the cloud relay closes midway through speech", async () => {
     const opened = { send: vi.fn(), finishUtterance: vi.fn(async () => "tail only"), close: vi.fn() };
     mocks.openAsrStream.mockResolvedValue(opened);

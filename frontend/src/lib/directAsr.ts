@@ -8,6 +8,8 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const FRAME = 1280;
 let unavailableUntil = 0;
 
+const cancelledError = () => new DOMException("ASR cancelled", "AbortError");
+
 /** One provider session per utterance; signed handshakes are memory-only. */
 export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en_us", signal?: AbortSignal): Promise<AsrStream> {
   const generation = getAuthGeneration();
@@ -35,33 +37,37 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
       let retired = false;
       let first = true;
       let pending = new Uint8Array(0);
-      let pendingFinal: ((text: string) => void) | null = null;
+      let pendingFinal: { resolve: (text: string) => void; reject: (error: unknown) => void } | null = null;
       let finalTimer: ReturnType<typeof setTimeout> | undefined;
       const segments = new Map<number, string>();
 
-      const settle = (text: string) => {
+      const settle = (text = "", error?: unknown) => {
         clearTimeout(finalTimer); finalTimer = undefined;
-        const done = pendingFinal; pendingFinal = null; done?.(text);
+        const done = pendingFinal; pendingFinal = null;
+        if (error) done?.reject(error); else done?.resolve(text);
       };
-      const close = () => {
+      const close = (error?: unknown) => {
         if (retired) return;
         retired = true;
-        clearTimeout(readyTimer); settle("");
-        signal?.removeEventListener("abort", close);
+        clearTimeout(readyTimer);
+        const cancelled = signal?.aborted || generation !== getAuthGeneration();
+        const reason = error ?? (cancelled ? cancelledError() : new Error("ASR connection closed"));
+        if (pendingFinal) settle("", reason);
+        signal?.removeEventListener("abort", onAbort);
         try { ws.close(); } catch { /* already disconnected */ }
         if (ready) cb.onClose?.();
-        else reject(signal?.reason ?? (generation !== getAuthGeneration()
-          ? new DOMException("Identity changed", "AbortError") : new Error("ASR connection closed")));
+        else reject(reason);
       };
+      const onAbort = () => close(cancelledError());
       const cancelled = () => {
         if (!signal?.aborted && generation === getAuthGeneration()) return false;
-        close();
+        close(cancelledError());
         return true;
       };
-      const fail = () => {
+      const fail = (message = "ASR connection failed") => {
         if (retired) return;
         if (!signal?.aborted && generation === getAuthGeneration()) unavailableUntil = Date.now() + 30_000;
-        close();
+        close(new Error(message));
       };
       const sendFrame = (pcm: Uint8Array) => {
         const data = { status: first ? 0 : 1, format: "audio/L16;rate=16000", encoding: "raw", audio: btoa(String.fromCharCode(...pcm)) };
@@ -80,26 +86,27 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
           joined.set(pending); joined.set(new Uint8Array(pcm), pending.length); pending = joined;
           try {
             while (pending.length >= FRAME) { sendFrame(pending.slice(0, FRAME)); pending = pending.slice(FRAME); }
-          } catch { fail(); }
+          } catch { fail("ASR upload failed"); }
         },
-        finishUtterance: () => new Promise<string>((done) => {
-          if (cancelled() || retired || pendingFinal) { done(""); return; }
-          pendingFinal = done;
+        finishUtterance: () => new Promise<string>((resolveFinal, rejectFinal) => {
+          if (pendingFinal) { rejectFinal(new Error("ASR final is already pending")); return; }
+          if (cancelled() || retired) { rejectFinal(new Error("ASR connection closed")); return; }
+          pendingFinal = { resolve: resolveFinal, reject: rejectFinal };
           try {
             if (pending.length) { sendFrame(pending); pending = new Uint8Array(0); }
-            if (first) { close(); return; }
+            if (first) { close(new Error("ASR returned no audio")); return; }
             ws.send(JSON.stringify({ data: { status: 2, audio: "" } }));
-            finalTimer = setTimeout(fail, 5_000);
-          } catch { fail(); }
+            finalTimer = setTimeout(() => fail("ASR final timed out"), 5_000);
+          } catch { fail("ASR finalization failed"); }
         }),
-        close,
+        close: () => close(),
       };
       ws.onopen = () => { if (cancelled() || retired) return; ready = true; clearTimeout(readyTimer); resolve(api); };
       ws.onmessage = (event) => {
         if (cancelled() || retired) return;
         try {
           const message = JSON.parse(String(event.data));
-          if (message.code !== 0) { fail(); return; }
+          if (message.code !== 0) { fail("ASR provider error"); return; }
           const data = message.data ?? {};
           const result = data.result;
           if (result?.ws?.length) {
@@ -115,17 +122,17 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
             settle([...segments].sort((a,b) => a[0]-b[0]).map(item => item[1]).join("").trim());
             close();
           }
-        } catch { fail(); }
+        } catch { fail("ASR response invalid"); }
       };
-      ws.onerror = fail;
+      ws.onerror = () => fail("ASR network error");
       ws.onclose = () => {
         if (retired) return;
         if (ready && first) close(); // an unused idle session is not a network failure
-        else fail();
+        else fail("ASR connection closed");
       };
-      const readyTimer = setTimeout(fail, 2_500);
-      signal?.addEventListener("abort", close, { once: true });
-      if (signal?.aborted) close();
+      const readyTimer = setTimeout(() => fail("ASR connection timed out"), 2_500);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) close(cancelledError());
     });
   } catch (error) {
     if (!signal?.aborted && generation === getAuthGeneration() && !((error instanceof Error || error instanceof DOMException) && error.name === "AbortError")) unavailableUntil = Date.now() + 30_000;
@@ -133,7 +140,7 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
   }
 }
 
-/** Upload a retained complete clip directly; callers retain their relay fallback. */
+/** Upload a retained complete clip directly; a real empty final is not a transport failure. */
 export async function transcribeDirect(pcm: ArrayBuffer, signal?: AbortSignal): Promise<string> {
   const generation = getAuthGeneration();
   let disconnected = false;
@@ -150,7 +157,6 @@ export async function transcribeDirect(pcm: ArrayBuffer, signal?: AbortSignal): 
     assertAuthGeneration(generation, signal);
     const text = await stream.finishUtterance();
     assertAuthGeneration(generation, signal);
-    if (!text) throw new Error("Direct ASR returned no transcript");
     return text;
   } finally { stream.close(); }
 }

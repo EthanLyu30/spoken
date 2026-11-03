@@ -57,6 +57,7 @@ import { ChatBubble } from "../components/ChatBubble";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { Wordmark } from "../components/Wordmark";
 import { cn } from "../lib/utils";
+import { MAX_AUDIO_BYTES, MAX_RECORDING_MS } from "../lib/audioLimits";
 
 const localOpeners: Record<string, string> = {
   interview:
@@ -120,6 +121,12 @@ export default function Conversation() {
   const lastSpokenRef = useRef(-1);
   const autoSpeakAllowedRef = useRef(true);
   const recorderRef = useRef<ActiveRecorder | null>(null);
+  const recordingOperationRef = useRef<{
+    controller: AbortController;
+    timer: ReturnType<typeof setTimeout> | null;
+    bytes: number;
+    limited: boolean;
+  } | null>(null);
   const callRef = useRef<VoiceCall | null>(null);
   const messagesRef = useRef<ChatMessage[]>(messages);
   const turnMetaRef = useRef<UserTurnMetaMap>(turnMeta);
@@ -137,6 +144,13 @@ export default function Conversation() {
   const hasUserTurn = messages.some((m) => m.role === "user");
   const inCall = callPhase !== null;
   const isCurrent = () => mountedRef.current && generation === getAuthGeneration();
+
+  function cancelRecordingOperation() {
+    const operation = recordingOperationRef.current;
+    recordingOperationRef.current = null;
+    if (operation?.timer) clearTimeout(operation.timer);
+    operation?.controller.abort();
+  }
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -230,6 +244,7 @@ export default function Conversation() {
     mountedRef.current = true;
     const unsubscribeIdentity = subscribeAuthGeneration(() => {
       callRef.current?.end();
+      cancelRecordingOperation();
       transcriptionControllerRef.current?.abort();
       requestControllerRef.current?.abort();
       replyPreparationRef.current?.preparation?.dispose();
@@ -248,6 +263,7 @@ export default function Conversation() {
       replyPreparationRef.current = null;
       speakingRef.current?.stop();
       callQueueRef.current?.stop();
+      cancelRecordingOperation();
       recorderRef.current?.stop().catch(() => undefined);
       callRef.current?.end();
       turnMetaRef.current = {};
@@ -290,6 +306,7 @@ export default function Conversation() {
     textArg?: string,
     meta: UserTurnMeta = { source: "typed" },
     retry = false,
+    interactionId?: string,
   ) {
     if (!isCurrent()) return;
     let lastUser = messagesRef.current.length - 1;
@@ -310,7 +327,8 @@ export default function Conversation() {
     )
       return;
     const ctrl = new AbortController();
-    bindInteraction(ctrl.signal, newInteractionId());
+    bindInteraction(ctrl.signal, interactionId ?? newInteractionId());
+    const turnInteractionId = getInteraction(ctrl.signal);
     const submittedAt = performance.now();
     replyPreparationRef.current?.preparation?.dispose();
     const preparation = mutedRef.current ? undefined : prepareSpeech(ctrl.signal);
@@ -323,7 +341,10 @@ export default function Conversation() {
           messages: messagesRef.current.slice(0, lastUser + 1),
           meta: turnMetaRef.current,
         }
-      : appendUserTurn(messagesRef.current, turnMetaRef.current, text, meta);
+      : appendUserTurn(messagesRef.current, turnMetaRef.current, text, {
+          ...meta,
+          ...(meta.source !== "typed" && turnInteractionId ? { interactionId: turnInteractionId } : {}),
+        });
     const next = appended.messages;
     replyPreparationRef.current = {preparation, controller: ctrl, index: next.length, interactionId: getInteraction(ctrl.signal), submittedAt};
     messagesRef.current = next;
@@ -397,10 +418,14 @@ export default function Conversation() {
       setRecording(false);
       const rec = recorderRef.current;
       recorderRef.current = null;
+      const recordingOperation = recordingOperationRef.current;
+      recordingOperationRef.current = null;
+      if (recordingOperation?.timer) clearTimeout(recordingOperation.timer);
       if (!rec) return;
       setTranscribing(true);
       setError(null);
       const controller = new AbortController();
+      bindInteraction(controller.signal, newInteractionId());
       transcriptionControllerRef.current = controller;
       try {
         const pcm = await rec.stop();
@@ -419,7 +444,7 @@ export default function Conversation() {
             source: typedPrefix ? "mixed" : "voice",
             spokenText,
             pcm,
-          });
+          }, false, getInteraction(controller.signal));
         } else {
           setError("没听清，再说一次试试？");
         }
@@ -431,17 +456,39 @@ export default function Conversation() {
       }
     } else {
       setError(null);
+      const operation = { controller: new AbortController(), timer: null as ReturnType<typeof setTimeout> | null, bytes: 0, limited: false };
+      recordingOperationRef.current = operation;
+      const limitRecording = () => {
+        if (operation.limited) return;
+        operation.limited = true;
+        if (operation.timer) clearTimeout(operation.timer);
+        recordingOperationRef.current = null;
+        recorderRef.current = null;
+        operation.controller.abort();
+        if (isCurrent()) {
+          setRecording(false);
+          setError("录音最长180秒，请缩短后再试。");
+        }
+      };
       try {
         speakingRef.current?.stop();
-        recorderRef.current = await startRecording();
-        if (!isCurrent()) {
-          await recorderRef.current.stop();
-          recorderRef.current = null;
+        const rec = await startRecording(pcm => {
+          if (recordingOperationRef.current !== operation) return;
+          operation.bytes += pcm.byteLength;
+          if (operation.bytes > MAX_AUDIO_BYTES) limitRecording();
+        }, operation.controller.signal);
+        if (!isCurrent() || operation.limited) {
+          await rec.stop();
           return;
         }
+        recorderRef.current = rec;
+        operation.timer = setTimeout(limitRecording, MAX_RECORDING_MS);
         setRecording(true);
       } catch {
-        if (isCurrent()) setError("无法使用麦克风，请允许权限后重试，或直接打字。");
+        if (operation.timer) clearTimeout(operation.timer);
+        recordingOperationRef.current = null;
+        recorderRef.current = null;
+        if (isCurrent() && !operation.limited) setError("无法使用麦克风，请允许权限后重试，或直接打字。");
       }
     }
   }
@@ -488,6 +535,7 @@ export default function Conversation() {
               source: "voice",
               spokenText: userText,
               pcm,
+              interactionId: getInteraction(signal),
             },
           );
           const next = appended.messages;

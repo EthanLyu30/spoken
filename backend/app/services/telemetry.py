@@ -226,11 +226,26 @@ def serialize(record, *, detail=False):
         "http_status", "ttft_ms", "model", "input_tokens", "output_tokens", "release",
         "error_type", "error_cause_type")}
     out["started_at"] = record.started_at.isoformat(timespec="milliseconds") + "Z"
+    spans = None
+    if detail or not out["model"]:
+        try:
+            parsed = json.loads(record.spans_json)
+        except (TypeError, ValueError):
+            parsed = []
+        spans = parsed if isinstance(parsed, list) else []
+        if not out["model"]:
+            out["model"] = next((
+                attributes["model"]
+                for node in spans
+                if isinstance(node, dict) and node.get("name") == "pronunciation.assess"
+                for attributes in [node.get("attributes")]
+                if isinstance(attributes, dict) and attributes.get("model") in ("en_vip", "cn_vip")
+            ), None)
     cost = record_reference_cost(record, source=record.source)
     out['cost_min_cny'] = cost[0] if cost is not None else None
     out['cost_max_cny'] = cost[1] if cost is not None else None
     if detail:
-        out["spans"] = json.loads(record.spans_json)
+        out["spans"] = spans
     return out
 
 

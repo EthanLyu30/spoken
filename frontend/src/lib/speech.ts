@@ -4,7 +4,7 @@ import { beginSpeechPlayback, type SpeechPlayback } from "../store/speechPlaybac
 import { resolveVoiceMode } from "./voiceResolver";
 import { float32ToWavBlob } from "./localSpeech/audio";
 import { isLocalSpeechModelReady, localSpeechCoordinator } from "./localSpeech/runtime";
-import { bindInteraction, reportTiming, NATIVE_ERRORS, type NativeDiagnostic } from "./telemetry";
+import { bindInteraction, reportTiming, NATIVE_ERRORS, type NativeDiagnostic, type NativeEndDiagnostic } from "./telemetry";
 
 export interface Speaking {
   readonly status?: SpeechPlayback;
@@ -60,7 +60,7 @@ function pickBrowserVoice(uri: string | null): SpeechSynthesisVoice | null {
     (voice.lang.toLowerCase() === "en-us" ? 10 : 0);
   return [...voices].sort((a, b) => score(b) - score(a))[0] ?? null;
 }
-function speakBrowser(text: string, settings: VoiceSettings, voice: SpeechSynthesisVoice, onStarted: () => void, onOutcome: (duration: number, diagnostic: NativeDiagnostic, outcome: "ok" | "error" | "cancelled") => void): Speaking {
+function speakBrowser(text: string, settings: VoiceSettings, voice: SpeechSynthesisVoice, onStarted: () => void, onOutcome: (duration: number, diagnostic: NativeDiagnostic, outcome: "ok" | "error" | "cancelled") => void, onTerminal: (duration: number, diagnostic: NativeEndDiagnostic, outcome: "ok" | "error" | "cancelled") => void): Speaking {
   const synth = window.speechSynthesis;
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.voice = voice;
@@ -70,20 +70,42 @@ function speakBrowser(text: string, settings: VoiceSettings, voice: SpeechSynthe
   let failed = false, finished = false, started = false;
   let startupTimer = 0, completionTimer = 0;
   const attemptStartedAt = performance.now();
+  const completionBudget = Math.max(60_000, text.length * 150 / utterance.rate);
   let nativeRequestedAt: number | undefined;
+  let pauseCount = 0, resumeCount = 0, pausedDurationMs = 0, recoveryAttempted = false;
+  let pausedSince: number | undefined;
   const state = () => [synth.paused, synth.speaking, synth.pending].every(value => typeof value === "boolean")
     ? Number(synth.paused) | (Number(synth.speaking) << 1) | (Number(synth.pending) << 2) : undefined;
+  const currentlyPaused = () => synth.paused;
+  const visibility = (): NativeEndDiagnostic["visibility_state"] => {
+    if (typeof document === "undefined") return "unknown";
+    return document.visibilityState === "visible" || document.visibilityState === "hidden" ? document.visibilityState : "unknown";
+  };
   const stateBefore = state();
-  let reported = false;
-  const report = (reason: NativeDiagnostic["reason"], error?: string) => {
-    if (reported) return;
-    reported = true;
+  let startReported = false, terminalReported = false;
+  const reportStart = (reason: NativeDiagnostic["reason"], error?: string, stateAfter = state()) => {
+    if (startReported) return;
+    startReported = true;
     onOutcome(performance.now() - (nativeRequestedAt ?? attemptStartedAt), {
-      reason, state_before: stateBefore, state_after: state(),
+      reason, state_before: stateBefore, state_after: stateAfter,
       voice_type: !voice ? "unknown" : /(natural|neural|google|enhanced|premium)/i.test(voice.name) ? "enhanced" : voice.localService === false ? "remote" : voice.localService === true ? "local" : "unknown",
       ...(settings.browserVoiceURI ? {voice_matched: voice?.voiceURI === settings.browserVoiceURI} : {}),
       ...(error !== undefined ? {error_code: NATIVE_ERRORS.find(code => code === error) ?? "unknown"} : {}),
     }, reason === "started" ? "ok" : reason === "cancelled" ? "cancelled" : "error");
+  };
+  const pausedDuration = (now: number) => Math.min(300_000, pausedDurationMs + (pausedSince === undefined ? 0 : Math.max(0, now - pausedSince)));
+  const reportTerminal = (reason: NonNullable<NativeEndDiagnostic["reason"]>, error: string | undefined, stateAtEvent: number | undefined) => {
+    if (terminalReported || !started) return;
+    terminalReported = true;
+    const now = performance.now();
+    onTerminal(now - (nativeRequestedAt ?? attemptStartedAt), {
+      reason,
+      ...(stateAtEvent !== undefined ? {state_at_event: stateAtEvent} : {}),
+      watchdog_budget_ms: Math.min(3_600_000, completionBudget),
+      pause_count: pauseCount, resume_count: resumeCount,
+      paused_duration_ms: pausedDuration(now), visibility_state: visibility(),
+      ...(error !== undefined ? {error_code: NATIVE_ERRORS.find(code => code === error) ?? "unknown"} : {}),
+    }, reason === "end" ? "ok" : reason === "cancelled" ? "cancelled" : "error");
   };
   let settle: () => void = () => {};
   const done = new Promise<void>(resolve => { settle = resolve; });
@@ -92,31 +114,81 @@ function speakBrowser(text: string, settings: VoiceSettings, voice: SpeechSynthe
     finished = true;
     window.clearTimeout(startupTimer);
     window.clearTimeout(completionTimer);
-    utterance.onstart = utterance.onend = utterance.onerror = null;
+    utterance.onstart = utterance.onend = utterance.onerror = utterance.onpause = utterance.onresume = null;
     settle();
   };
   const cancelNative = () => {
     finish(); // Detach handlers before cancel can synchronously emit callbacks.
     try { synth.cancel(); } catch { /* the task must still settle */ }
   };
-  const fail = (reason: NativeDiagnostic["reason"], error?: string) => {
+  const failStartup = (reason: NativeDiagnostic["reason"], error?: string) => {
     if (finished) return;
     failed = true;
+    const stateAtEvent = state();
     cancelNative();
-    report(reason, error);
+    reportStart(reason, error, stateAtEvent);
+  };
+  const failTerminal = (reason: "native_error" | "completion_timeout", error?: string) => {
+    if (finished) return;
+    failed = true;
+    const stateAtEvent = state(); // Cancel can synchronously clear native state.
+    cancelNative();
+    reportTerminal(reason, error, stateAtEvent);
+  };
+  const markPaused = () => {
+    if (finished || !started || pausedSince !== undefined) return;
+    pausedSince = performance.now();
+    pauseCount = Math.min(100, pauseCount + 1);
+  };
+  const markResumed = () => {
+    if (finished || !started || pausedSince === undefined) return;
+    const now = performance.now();
+    pausedDurationMs += Math.max(0, now - pausedSince);
+    pausedSince = undefined;
+    if (resumeCount < pauseCount) resumeCount = Math.min(100, resumeCount + 1);
+  };
+  const completionWatchdog = () => {
+    if (finished) return;
+    // A visible, paused engine gets one bounded nudge; every other state keeps
+    // the original deadline. There is never a replay or periodic pause/resume.
+    if (!recoveryAttempted && synth.paused === true && visibility() === "visible") {
+      recoveryAttempted = true;
+      markPaused();
+      if (typeof synth.resume === "function") {
+        resumeCount = Math.min(100, resumeCount + 1);
+        try {
+          synth.resume();
+          if (currentlyPaused() === false) markResumed();
+        } catch { /* grace still bounds a failed resume */ }
+      }
+      completionTimer = window.setTimeout(() => failTerminal("completion_timeout"), 2_000);
+      return;
+    }
+    failTerminal("completion_timeout");
   };
   utterance.onstart = () => {
     if (finished || started) return;
     started = true;
     window.clearTimeout(startupTimer);
-    // Generous text/rate allowance; an incomplete utterance fails without replay.
-    completionTimer = window.setTimeout(() => fail("speech_error"), Math.max(60_000, text.length * 150 / utterance.rate));
-    report("started");
+    if (synth.paused === true) markPaused();
+    completionTimer = window.setTimeout(completionWatchdog, completionBudget);
+    reportStart("started");
     onStarted();
   };
-  utterance.onend = () => { if (!finished) { failed = !started; finish(); report("end_before_start"); } };
-  utterance.onerror = event => fail("speech_error", event?.error ?? "unknown");
-  startupTimer = window.setTimeout(() => fail("startup_timeout"), 5_000);
+  utterance.onpause = markPaused;
+  utterance.onresume = markResumed;
+  utterance.onend = () => {
+    if (finished) return;
+    if (!started) { failStartup("end_before_start"); return; }
+    const stateAtEvent = state();
+    finish();
+    reportTerminal("end", undefined, stateAtEvent);
+  };
+  utterance.onerror = event => {
+    if (started) failTerminal("native_error", event?.error ?? "unknown");
+    else failStartup("speech_error", event?.error ?? "unknown");
+  };
+  startupTimer = window.setTimeout(() => failStartup("startup_timeout"), 5_000);
   try {
     // Older engines may not expose state; keep their defensive cancellation.
     if (synth.speaking !== false || synth.pending !== false) synth.cancel();
@@ -124,9 +196,13 @@ function speakBrowser(text: string, settings: VoiceSettings, voice: SpeechSynthe
     if (synth.paused === true && typeof synth.resume === "function") synth.resume();
     nativeRequestedAt = performance.now();
     synth.speak(utterance);
-  } catch { fail("speak_exception", "unknown"); }
+  } catch { failStartup("speak_exception", "unknown"); }
   return { done, get failed() { return failed; }, stop: () => {
-    if (!finished) { cancelNative(); report("cancelled"); }
+    if (finished) return;
+    const stateAtEvent = state(); // Sample before cancel, including native pending/speaking bits.
+    cancelNative();
+    if (started) reportTerminal("cancelled", undefined, stateAtEvent);
+    else reportStart("cancelled", undefined, stateAtEvent);
   } };
 }
 function playUrl(url: string, onStarted: (durationMs: number) => void): Speaking {
@@ -260,6 +336,8 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
           fallbackReason:settings.engine === "local" ? "local-unavailable" : null});
         active = speakBrowser(text, settings, browserVoice, didStart, (duration, diagnostic, outcome) => {
           reportTiming("speech.native_start", duration, {engine: "browser", transport: "unknown", interactionId, outcome, ...diagnostic});
+        }, (duration, diagnostic, outcome) => {
+          reportTiming("speech.native_end", duration, {engine: "browser", transport: "unknown", interactionId, outcome, ...diagnostic});
         });
       } else if (url) {
         preparation?.dispose();

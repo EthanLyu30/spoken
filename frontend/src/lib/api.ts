@@ -12,7 +12,8 @@ import { transcribeDirect } from "./directAsr";
 import { withTimeout } from "./requestTimeout";
 import { invalidateProgress, progressGeneration, subscribeProgress } from "./progressCache";
 import { ReadResource } from "./readResource";
-import { traceHeaders, getInteraction } from "./telemetry";
+import { traceHeaders, getInteraction, reportTiming } from "./telemetry";
+import { assertAudioWithinLimit } from "./audioLimits";
 export { withTimeout } from "./requestTimeout";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -323,30 +324,74 @@ export function getSession(id: number, signal?: AbortSignal): Promise<SessionDet
   return request<SessionDetail>(`/api/sessions/${id}`, { signal });
 }
 
+type AsrFallbackReason = "timeout" | "disconnect" | "provider_error" | "empty" | "http_error" | "unavailable" | "unknown";
+
+function asrFallbackReason(error: unknown): AsrFallbackReason {
+  const name = error instanceof Error ? error.name : "";
+  const message = error instanceof Error ? error.message : "";
+  if (name === "TimeoutError" || /timed? ?out/i.test(message)) return "timeout";
+  if (/disconnect|closed|network|fetch/i.test(message)) return "disconnect";
+  if (/no transcript|empty/i.test(message)) return "empty";
+  if (/unavailable|cooling down/i.test(message)) return "unavailable";
+  if (/asr failed/i.test(message)) return "http_error";
+  return "provider_error";
+}
+
 /** Transcribe 16 kHz mono PCM via the backend (iFlytek ASR). */
 export async function postAsr(pcm: ArrayBuffer, signal?: AbortSignal): Promise<string> {
   const generation = getAuthGeneration();
+  assertAudioWithinLimit(pcm);
   assertAuthGeneration(generation, signal);
+  const interactionId = getInteraction(signal);
+  let fallbackReason: AsrFallbackReason = "unknown";
+  const directStarted = performance.now();
   try {
     const text = await transcribeDirect(pcm, signal);
     assertAuthGeneration(generation, signal);
+    reportTiming("asr.attempt", performance.now() - directStarted, {
+      engine: "xfyun", transport: "direct", interactionId, stage: "whole_clip", attempt: 1,
+      audio_bytes: pcm.byteLength, outcome: text.trim() ? "ok" : "error",
+      result_class: text.trim() ? "nonempty" : "empty",
+    });
     return text;
   } catch (error) {
+    fallbackReason = asrFallbackReason(error);
+    const cancelled = signal?.aborted || generation !== getAuthGeneration() ||
+      ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError");
+    reportTiming("asr.attempt", performance.now() - directStarted, {
+      engine: "xfyun", transport: "direct", interactionId, stage: "whole_clip", attempt: 1,
+      audio_bytes: pcm.byteLength, outcome: cancelled ? "cancelled" : "error", fallback_reason: fallbackReason,
+    });
     assertAuthGeneration(generation, signal);
+    signal?.throwIfAborted();
     if ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError") throw error;
   }
-  assertAuthGeneration(generation, signal);
-  const res = await fetch(`${BASE_URL}/api/asr`, {
-    method: "POST",
-    headers: { "Content-Type": "application/octet-stream", ...traceHeaders(signal) },
-    body: pcm,
-    signal: withTimeout(signal, 45_000),
-  });
-  assertAuthGeneration(generation, signal);
-  if (!res.ok) throw new Error(`asr failed: ${res.status}`);
-  const data = (await res.json()) as { text: string };
-  assertAuthGeneration(generation, signal);
-  return data.text;
+  const bufferedStarted = performance.now();
+  try {
+    const res = await fetch(`${BASE_URL}/api/asr`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream", ...traceHeaders(signal) },
+      body: pcm,
+      signal: withTimeout(signal, 45_000),
+    });
+    assertAuthGeneration(generation, signal);
+    if (!res.ok) throw new Error(`asr failed: ${res.status}`);
+    const data = (await res.json()) as { text: string };
+    assertAuthGeneration(generation, signal);
+    reportTiming("asr.attempt", performance.now() - bufferedStarted, {
+      engine: "xfyun", transport: "buffered", interactionId, stage: "http_buffered", attempt: 2,
+      audio_bytes: pcm.byteLength, outcome: data.text.trim() ? "ok" : "error",
+      result_class: data.text.trim() ? "nonempty" : "empty", fallback_reason: fallbackReason,
+    });
+    return data.text;
+  } catch (error) {
+    assertAuthGeneration(generation, signal);
+    reportTiming("asr.attempt", performance.now() - bufferedStarted, {
+      engine: "xfyun", transport: "buffered", interactionId, stage: "http_buffered", attempt: 2,
+      audio_bytes: pcm.byteLength, outcome: signal?.aborted ? "cancelled" : "error", fallback_reason: fallbackReason,
+    });
+    throw error;
+  }
 }
 
 export interface PhonemeScore {
@@ -374,16 +419,20 @@ export async function postPronunciation(
   text: string,
   pcm: ArrayBuffer,
   signal?: AbortSignal,
+  entry?: "turn_correction" | "follow_read",
 ): Promise<PronunciationResult> {
   const generation = getAuthGeneration();
+  assertAudioWithinLimit(pcm);
+  const query = new URLSearchParams({ text });
+  if (entry) query.set("entry", entry);
   const init: RequestInit = {
     method: "POST",
-    headers: { "Content-Type": "application/octet-stream" },
+    headers: { "Content-Type": "application/octet-stream", ...traceHeaders(signal) },
     body: pcm,
     signal: withTimeout(signal, 45_000),
   };
   assertAuthGeneration(generation, signal);
-  const res = await fetch(`${BASE_URL}/api/pronunciation?text=${encodeURIComponent(text)}`, init);
+  const res = await fetch(`${BASE_URL}/api/pronunciation?${query.toString()}`, init);
   assertAuthGeneration(generation, signal);
   if (!res.ok) throw new Error(`pronunciation failed: ${res.status}`);
   const result = (await res.json()) as PronunciationResult;

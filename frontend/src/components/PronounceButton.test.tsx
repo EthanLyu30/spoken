@@ -56,7 +56,7 @@ it.each([false, true])("never uploads audio after a delayed stop crosses identit
   fireEvent.click(screen.getByRole("button", { name: "停止评分" }));
   act(() => changeOwner(back));
   await act(async () => { stopped.resolve(pcm); });
-  expect(fetch).not.toHaveBeenCalled();
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => !String(url).includes("/api/telemetry/client"))).toHaveLength(0);
   expect(saves).toEqual([]);
   expect(screen.queryByText("评测失败，重试")).not.toBeInTheDocument();
 });
@@ -68,7 +68,7 @@ it("does not upload a delayed stop after ordinary unmount", async () => {
   fireEvent.click(screen.getByRole("button", { name: "停止评分" }));
   view.unmount();
   await act(async () => { stopped.resolve(pcm); });
-  expect(fetch).not.toHaveBeenCalled();
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => !String(url).includes("/api/telemetry/client"))).toHaveLength(0);
 });
 
 it.each([false, true])("never saves a delayed score after identity and route unmount (ABA=%s)", async back => {
@@ -109,7 +109,7 @@ it.each(["identity", "unmount"])("releases an active recorder on %s", async canc
   const view = await record();
   if (cancellation === "unmount") view.unmount(); else act(() => changeOwner(false));
   await waitFor(() => expect(stop).toHaveBeenCalledOnce());
-  expect(fetch).not.toHaveBeenCalled();
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => !String(url).includes("/api/telemetry/client"))).toHaveLength(0);
 });
 
 it.each(["identity", "aba", "unmount"])("releases a late microphone grant after %s without recording or uploading", async cancellation => {
@@ -120,7 +120,7 @@ it.each(["identity", "aba", "unmount"])("releases a late microphone grant after 
   if (cancellation === "unmount") view.unmount(); else act(() => changeOwner(cancellation === "aba"));
   await act(async () => { grant.resolve({ stop }); });
   expect(stop).toHaveBeenCalledOnce();
-  expect(fetch).not.toHaveBeenCalled();
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => !String(url).includes("/api/telemetry/client"))).toHaveLength(0);
   expect(screen.queryByRole("button", { name: "停止评分" })).not.toBeInTheDocument();
 });
 

@@ -9,12 +9,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from time import perf_counter
 from typing import Awaitable, Callable
 
 import websockets
 
 from app.core.config import Settings, get_settings
-from app.core.observability import span, traced
+from app.core.observability import span, trace_attribute, traced
 from app.services.xf_auth import build_auth_url
 
 _HOST = "iat-api.xfyun.cn"
@@ -65,13 +66,19 @@ class XfAsrClient:
         transcript: list[str] = []
         ws = None
         tasks: list[asyncio.Task] = []
+        started = perf_counter()
         try:
-            ws = await _connect(s)
-            tasks = [
-                asyncio.create_task(self._send(ws, pcm, language)),
-                asyncio.create_task(self._recv(ws, transcript)),
-            ]
-            await asyncio.wait_for(asyncio.gather(*tasks), timeout=_TRANSCRIBE_TIMEOUT)
+            async with asyncio.timeout(_TRANSCRIBE_TIMEOUT):
+                ws = await _connect(s)
+                sender = asyncio.create_task(self._send(ws, pcm, language))
+                receiver = asyncio.create_task(self._recv(ws, transcript, started=started))
+                tasks = [sender, receiver]
+                done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                if receiver in done:
+                    receiver.result()  # Surface provider errors before upload finishes.
+                await sender
+                with span("asr.final", provider="xfyun"):
+                    await asyncio.wait_for(asyncio.shield(receiver), _FINAL_TIMEOUT)
         except XfAsrError:
             raise
         except TimeoutError as exc:
@@ -90,10 +97,14 @@ class XfAsrClient:
                 except Exception:
                     pass  # a failed close must not discard a completed transcript
 
-        return "".join(transcript).strip()
+        text = "".join(transcript).strip()
+        trace_attribute("result_class", "nonempty" if text else "empty")
+        return text
 
+    @traced("asr.upload", provider="xfyun")
     async def _send(self, ws, pcm: bytes, language: str) -> None:
         total = len(pcm)
+        trace_attribute("audio_bytes", total)
         first = True
         for i in range(0, total, _FRAME):
             chunk = pcm[i : i + _FRAME]
@@ -120,7 +131,8 @@ class XfAsrClient:
         # One explicit end marker also covers a single sub-40 ms audio frame.
         await ws.send(json.dumps({"data": {"status": 2, "audio": ""}}))
 
-    async def _recv(self, ws, out: list[str]) -> None:
+    async def _recv(self, ws, out: list[str], *, started: float) -> None:
+        first_result = True
         async for message in ws:
             resp = json.loads(message)
             if resp.get("code") != 0:
@@ -129,6 +141,9 @@ class XfAsrClient:
                 )
             data = resp.get("data") or {}
             result = data.get("result") or {}
+            if result and first_result:
+                trace_attribute("ttft_ms", max(0, (perf_counter() - started) * 1000))
+                first_result = False
             for seg in result.get("ws", []):
                 for cand in seg.get("cw", []):
                     out.append(cand.get("w", ""))

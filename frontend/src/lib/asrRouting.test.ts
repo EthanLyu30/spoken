@@ -4,6 +4,7 @@ const direct = vi.hoisted(() => ({ transcribe: vi.fn(), open: vi.fn() }));
 vi.mock("./directAsr", () => ({ transcribeDirect: direct.transcribe, openDirectAsrStream: direct.open }));
 import { postAsr } from "./api";
 import { openAsrStream } from "./asrStream";
+import { MAX_AUDIO_BYTES } from "./audioLimits";
 
 describe("cloud ASR routing", () => {
   beforeEach(() => { direct.transcribe.mockReset(); direct.open.mockReset(); vi.stubGlobal("fetch", vi.fn()); });
@@ -12,7 +13,7 @@ describe("cloud ASR routing", () => {
   it("uses a successful direct transcript without uploading the recording to the relay", async () => {
     direct.transcribe.mockResolvedValue("complete direct transcript");
     expect(await postAsr(new ArrayBuffer(1280))).toBe("complete direct transcript");
-    expect(fetch).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/api/asr"))).toHaveLength(0);
   });
 
   it("preserves the whole clip when direct transcription needs the relay fallback", async () => {
@@ -27,7 +28,19 @@ describe("cloud ASR routing", () => {
     const controller = new AbortController(); controller.abort();
     await expect(postAsr(new ArrayBuffer(1280), controller.signal)).rejects.toThrow();
     expect(direct.transcribe).not.toHaveBeenCalled();
-    expect(fetch).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/api/asr"))).toHaveLength(0);
+  });
+
+  it("does not retry an explicit empty direct final over HTTP", async () => {
+    direct.transcribe.mockResolvedValue("");
+    expect(await postAsr(new ArrayBuffer(1280))).toBe("");
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/api/asr"))).toHaveLength(0);
+  });
+
+  it("rejects oversized audio before any direct or backend request", async () => {
+    await expect(postAsr(new ArrayBuffer(MAX_AUDIO_BYTES + 1))).rejects.toThrow("180 seconds");
+    expect(direct.transcribe).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/api/asr"))).toHaveLength(0);
   });
 
   it("selects the direct streaming connection when it is available", async () => {
@@ -53,7 +66,7 @@ it("does not upload to the relay after a pending direct attempt fails across A t
   const checked = expect(postAsr(new ArrayBuffer(1280))).rejects.toMatchObject({ name: "AbortError" });
   setToken("asr-b"); setToken("asr-a"); reject(new Error("network"));
   await checked;
-  expect(fetch).not.toHaveBeenCalled();
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/api/asr"))).toHaveLength(0);
   vi.unstubAllGlobals();
 });
 
@@ -76,7 +89,7 @@ it("does not treat direct cancellation as a reason to try the relay", async () =
   direct.transcribe.mockRejectedValue(abort);
   vi.stubGlobal("fetch", vi.fn());
   await expect(postAsr(new ArrayBuffer(1280))).rejects.toBe(abort);
-  expect(fetch).not.toHaveBeenCalled();
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/api/asr"))).toHaveLength(0);
   vi.unstubAllGlobals();
 });
 it("keeps same-owner streaming relay fallback available after a direct failure", async () => {

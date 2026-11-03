@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { postPronunciation } from "./api";
 import { setToken } from "./authToken";
+import { bindInteraction } from "./telemetry";
+import { MAX_AUDIO_BYTES } from "./audioLimits";
 import * as timeout from "./requestTimeout";
 
 const pcm = new ArrayBuffer(4);
@@ -38,5 +40,18 @@ it("does not dispatch if its caller is already cancelled", async () => {
   const controller = new AbortController(); controller.abort();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}")));
   await expect(postPronunciation("old text", pcm, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+  expect(fetch).not.toHaveBeenCalled();
+});
+it("forwards the interaction and entry while rejecting oversized audio before upload", async () => {
+  const controller = new AbortController();
+  bindInteraction(controller.signal, "e".repeat(32));
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}")));
+  await postPronunciation("text", pcm, controller.signal, "turn_correction");
+  const [url, init] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
+  expect(String(url)).toContain("entry=turn_correction");
+  expect(init.headers).toMatchObject({ "X-Interaction-Id": "e".repeat(32) });
+
+  vi.mocked(fetch).mockClear();
+  await expect(postPronunciation("text", new ArrayBuffer(MAX_AUDIO_BYTES + 1), controller.signal)).rejects.toThrow("180 seconds");
   expect(fetch).not.toHaveBeenCalled();
 });

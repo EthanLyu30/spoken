@@ -65,6 +65,15 @@ it("recognizes direct-provider signal cancellation even when the raw stream reso
 });
 
 
+it("accepts long native terminal timings without relaxing other operations", () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+  vi.stubGlobal("fetch", fetcher);
+  reportTiming("speech.native_end", 300_001, { reason: "completion_timeout" });
+  reportTiming("speech.complete", 300_001);
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({ operation: "speech.native_end", duration_ms: 300_001 });
+});
+
 it("whitelists native diagnostics and never forwards unknown fields or native fields on other operations", () => {
   const fetcher = vi.fn().mockResolvedValue(new Response(null, {status:202})); vi.stubGlobal("fetch",fetcher);
   const options = {reason: "started", state_before: 1, state_after: 7, voice_type: "enhanced", voice_matched: true, error_code: "network", private_name: "Secret voice"} as const;
