@@ -88,7 +88,7 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
           const text = (await openedStream.finishUtterance()).trim();
           return text || latest.trim();
         } catch (error) {
-          if (finishSignal?.aborted) throw error;
+          if (finishSignal?.aborted || control.signal.aborted) throw error;
           // A deploy can close the relay mid-utterance. Prefer the complete
           // recording over a truncated partial; keep the partial only if the
           // recovery request also fails.
