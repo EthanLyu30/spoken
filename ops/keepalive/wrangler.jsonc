@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "spoken-backend-keepalive",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-19",
+  "workers_dev": false,
+  "preview_urls": false,
+  "triggers": {
+    // UTC: every five minutes, 08:00–24:00 China time, as with the existing job.
+    "crons": ["*/5 0-15 * * *"]
+  },
+  "vars": {
+    "BACKEND_HEALTH_URL": "https://spoken-backend-sg.onrender.com/api/ready"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

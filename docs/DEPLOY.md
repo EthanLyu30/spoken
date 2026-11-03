@@ -32,7 +32,8 @@ docker compose up -d --build
 
 ### 前端 → Vercel（或 Netlify，静态）
 - Root Directory = `frontend`，Framework = **Vite**，Build = `npm run build`，Output = `dist`。
-- 环境变量 `VITE_API_BASE_URL = <后端地址>`（如 `https://spoken-backend.onrender.com`）。
+- 环境变量 `VITE_API_BASE_URL = <后端地址>`（当前生产为 `https://spoken-backend-sg.onrender.com`）。
+- `frontend/vercel.json` 已配置单页应用路由回退：直接打开或刷新 `/me`、`/words`、`/practice/cafe` 等地址时返回 `index.html`，再由 React Router 渲染页面。此配置随前端重新部署后生效；现有静态资源仍由 Vercel 正常提供。
 - Moonshine / Kokoro 权重由浏览器空闲时从 Hugging Face 下载并写入 Cache Storage；不增加 Vercel 服务端资源。首次访问会有较大的后台下载，国内网络无法访问 Hugging Face 时会自动继续使用讯飞。若后续要求本地模型高覆盖率，应把权重镜像到可控的对象存储/CDN。
 
 ### 收尾
@@ -79,8 +80,32 @@ DeepSeek 统一使用官方滚动名称 `deepseek-flash`（当前对应 V4.1 Fla
 国内直连 Vercel 的 `*.vercel.app` 有时会被 DNS 污染 / 路由很慢，Render 免费档闲置 ~15 分钟会休眠、冷启动要几十秒。低成本缓解：
 
 - **自定义域名**：买个域名，在 Vercel 项目 **Settings → Domains** 添加并按提示配 DNS（自有域名比 `*.vercel.app` 稳）。加好后把后端 `CORS_ORIGINS` 加上新域名（多个用逗号分隔）。
-- **保活后端**：仓库已带 `.github/workflows/keepalive.yml`，每 ~10 分钟 ping 一次 `/api/health` 让 Render 别睡（可在仓库 **Settings → Variables** 设 `BACKEND_HEALTH_URL` 覆盖默认地址）。GitHub 定时任务是「尽力而为」、可能延迟；要更稳可再挂一个 [UptimeRobot](https://uptimerobot.com)（免费，5 分钟间隔）。
-- **想要国内更快**：把后端迁到香港（如 fly.io `hkg`），离用户和 DeepSeek 都近；或走 ICP 备案 + 国内 CDN（最快但最折腾）。免费版 Cloudflare 在大陆无节点，通常帮助有限、甚至更慢。
+- **保活后端**：使用下面的 Cloudflare Cron 作为主要定时器；`.github/workflows/keepalive.yml` 保留为备用和手动健康检查。GitHub 定时任务可能延迟或漏跑，不能单独保证每 5 分钟保活。
+- **想要国内更快**：本项目当前已使用 Render Singapore + Neon Singapore；若仍不够，可继续迁到香港（如 fly.io `hkg`），离用户更近；或走 ICP 备案 + 国内 CDN（最快但最折腾）。免费版 Cloudflare 在大陆无节点，通常帮助有限、甚至更慢。
+
+### Cloudflare Workers 独立保活
+
+仓库已提供 `ops/keepalive/wrangler.jsonc` 和 Worker。需要部署到自己的 Cloudflare 账号，提交仓库代码不会自动启用这个 Cron。在仓库根目录执行（Node.js 20.19+）：
+
+```bash
+npx --yes wrangler@4.151.2 login
+npx --yes wrangler@4.151.2 deploy --config ops/keepalive/wrangler.jsonc
+```
+
+- Cron 使用 UTC：`*/5 0-15 * * *`，即北京时间 **08:00–24:00，每 5 分钟一次**；夜间仍允许 Render 休眠，次日首次请求可能需要冷启动。
+- Worker 只访问 `/api/ready`（数据库就绪探针），没有公开 HTTP 入口，也不调用 DeepSeek / 讯飞。目标地址在配置的 `vars.BACKEND_HEALTH_URL` 中修改。
+- Cloudflare 和 GitHub 复用同一个检查实现：单次最多等 75 秒，失败最多尝试 3 次，间隔 5 秒；必须收到健康 JSON（`status: "ok"`）才算成功，200 状态的 HTML 加载页不算成功。
+- 重试耗尽会让 Worker 调用和 GitHub 任务失败，不再显示虚假的成功。Cloudflare Dashboard → Workers → `spoken-backend-keepalive` → Observability 可检查执行时间、成功和失败日志。
+- Cron 新建或修改后可能需要最多 15 分钟传播。验证时应查看实际定时执行记录，而不只看部署成功提示。
+- GitHub 备用任务的目标地址仍可通过仓库变量 `BACKEND_HEALTH_URL` 覆盖；Cloudflare 配置与 GitHub 变量需分别更新。
+
+本地验证（不依赖第三方密钥）：
+
+```bash
+node --test ops/keepalive/check.test.mjs
+node ops/keepalive/cli.mjs
+npx --yes wrangler@4.151.2 deploy --dry-run --config ops/keepalive/wrangler.jsonc
+```
 
 ---
 
