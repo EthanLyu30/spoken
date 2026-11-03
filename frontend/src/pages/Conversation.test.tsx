@@ -59,21 +59,24 @@ it("does not treat failed whole-reply audio as a successful voice turn", async (
   await expect(callbacks.reply("A coffee.", new ArrayBuffer(2), () => {}, new AbortController().signal)).rejects.toThrow("语音播放失败");
 });
 
-it("does not speak an interrupted reply and speaks the corrected retry at the same message index", async () => {
+it("recovers an interrupted stream through the plain endpoint and speaks only the completed reply", async () => {
   const user = userEvent.setup();
   mocks.streamChat.mockImplementationOnce(async (_id, _history, onText) => {
     onText("Half a reply");
     throw new Error("回复中断");
-  }).mockImplementationOnce(async (_id, _history, onText) => { onText("Complete reply"); return "Complete reply"; });
+  });
+  mocks.postChat.mockImplementation(async (_id, messages) => ({
+    reply: messages.length ? "Complete reply" : "Hello",
+  }));
   render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
   await screen.findByText("Hello");
   await user.click(screen.getByRole("button", { name: "文字练习" }));
   await user.type(screen.getByRole("textbox", { name: "英文回复" }), "A latte please.");
   await user.click(screen.getByRole("button", { name: /^发送$/ }));
-  await screen.findByRole("button", { name: "重试回复" });
-  expect(mocks.speakText.mock.calls.map(([text]) => text)).toEqual(["Hello"]);
-  await user.click(screen.getByRole("button", { name: "重试回复" }));
-  await waitFor(() => expect(mocks.speakText.mock.calls.map(([text]) => text)).toEqual(["Hello", "Complete reply"]));
+  await screen.findByText("Complete reply");
+  expect(mocks.postChat).toHaveBeenCalledTimes(2);
+  expect(mocks.speakText.mock.calls.map(([text]) => text)).toEqual(["Hello", "Complete reply"]);
+  expect(screen.queryByRole("button", { name: "重试回复" })).not.toBeInTheDocument();
 });
 
 it("does not send a previous identity's unmount feedback result as a new account's session", async () => {

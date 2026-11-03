@@ -381,15 +381,11 @@ export default function Conversation() {
       setStreaming(false);
       if (started) setLastAssistant(full);
       else setMessages((m) => [...m, { role: "assistant", content: full }]);
-    } catch (err) {
+    } catch {
       if (ctrl.signal.aborted || !isCurrent()) return;
-      if (started) {
-        setStreaming(false);
-        setCanRetry(true);
-        setError(err instanceof Error ? err.message : "回复中断，请重试。");
-        return;
-      }
-      // Streaming unavailable -> fall back to the plain endpoint.
+      // Streaming can be cut by a backend deploy, a proxy reset, or an SSE
+      // timeout. Recover the whole turn through the plain endpoint instead of
+      // making the learner tap retry; this also replaces any partial text.
       try {
         const r = await postChat(id, next, ctrl.signal, custom);
         if (ctrl.signal.aborted || !isCurrent()) return;
@@ -403,7 +399,11 @@ export default function Conversation() {
         if (ctrl.signal.aborted || !isCurrent()) return;
         setStreaming(false);
         setCanRetry(true);
-        setError("发送失败，请确认后端在运行后重试。");
+        setError(
+          started
+            ? "回复中断，请重试。"
+            : "发送失败，请确认后端在运行后重试。",
+        );
       }
     } finally {
       if (!accepted) {
