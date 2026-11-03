@@ -25,7 +25,7 @@ docker compose up -d --build
 ## 方式 B · 云端托管（前后端分离，推荐给评委试用）
 
 ### 后端 → Render（Docker，免费档）
-1. Render → **New → Blueprint**，选本仓库（会读取根目录 `render.yaml`）。或手动新建 **Web Service**：Runtime=Docker、Dockerfile=`backend/Dockerfile`、Context=`backend`、Health Check=`/api/health`。
+1. Render → **New → Blueprint**，选本仓库（会读取根目录 `render.yaml`）。或手动新建 **Web Service**：Runtime=Docker、Dockerfile=`backend/Dockerfile`、Context=`backend`、Health Check=`/api/ready`。
 2. 在 Dashboard 填环境变量：`DEEPSEEK_API_KEY`、`XF_APP_ID`、`XF_API_KEY`、`XF_API_SECRET`、`CORS_ORIGINS=<你的前端域名>`、`DATABASE_URL=<Postgres 连接串>`（见下「数据持久化」）。
 3. 容器会自动绑定 Render 注入的 `$PORT`。
    > 不配 `DATABASE_URL` 会用临时 SQLite，**重部署/休眠唤醒后数据会重置**；配上 Postgres 才能持久保存。
@@ -36,9 +36,16 @@ docker compose up -d --build
 - `frontend/vercel.json` 已配置单页应用路由回退：直接打开或刷新 `/me`、`/words`、`/practice/cafe` 等地址时返回 `index.html`，再由 React Router 渲染页面。此配置随前端重新部署后生效；现有静态资源仍由 Vercel 正常提供。
 - Moonshine / Kokoro 权重由浏览器空闲时从 Hugging Face 下载并写入 Cache Storage；不增加 Vercel 服务端资源。首次访问会有较大的后台下载，国内网络无法访问 Hugging Face 时会自动继续使用讯飞。若后续要求本地模型高覆盖率，应把权重镜像到可控的对象存储/CDN。
 
+### 零停机部署
+Render Web Service 部署或重启时，会先在旁边启动新实例；只有健康检查 `/api/ready` 返回 200（应用已就绪且数据库可查询）后才把新流量切过去，旧实例继续服务，随后收到 `SIGTERM`。因此新实例启动通常不会让用户看到冷启动或 502。
+
+2026-11-03 更新健康检查期间实测：120 秒内 49 次 `/api/ready` 请求，**0 次失败**，p95 约 0.4–0.6 秒。
+
+注意：SSE 聊天和 ASR WebSocket 是长连接，旧实例退出时会断开；客户端仍需重连。部署时应尽量避开正在进行的语音对话。
+
 ### 收尾
 - 后端 `CORS_ORIGINS` 必须**包含前端域名**（逗号分隔可多个）。
-- 打开前端域名验证；`<后端>/api/health` 应返回 `{"status":"ok"}`。
+- 打开前端域名验证；`<后端>/api/ready` 应返回 `{"status":"ok","database":"ok"}`。
 
 ---
 

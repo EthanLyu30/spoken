@@ -13,7 +13,7 @@ services:
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     plan: free
-    healthCheckPath: /api/health
+    healthCheckPath: /api/ready
     envVars:
       - key: DEEPSEEK_API_KEY
         sync: false
