@@ -1,4 +1,4 @@
-# 数据库区域迁移：Render Oregon + Neon Oregon（2026-11-03）
+# 数据库与后端区域迁移（2026-11-03）
 
 ## 问题
 
@@ -42,3 +42,28 @@
 - 真实麦克风、播放听感、并发容量和 Render/Neon 计费变化未在本轮验收。
 - 未删除旧数据库；回滚只需把 Render 的 `DATABASE_URL` 指回旧连接串并重新部署。
 - 迁移不改变前端 API 域名；Vercel 与 Render 仍是分离部署。
+
+## 第二段：后端也迁到 Singapore（同日）
+
+在数据库同区之后，剩余的主要延迟是大陆到 Render Oregon 的线路。随后新建：
+
+- Render `spoken-backend-sg`，区域 **Singapore**；
+- Neon `spoken-singapore`，区域 **AWS Asia Pacific 1 (Singapore)**；
+- 将 Oregon 当前全部 16 张表复制到 Singapore，行数逐表一致；
+- Vercel Production 的 `VITE_API_BASE_URL` 切换到 `https://spoken-backend-sg.onrender.com` 并重新部署；
+- GitHub Actions 的 `BACKEND_HEALTH_URL` 变量改为新服务的 `/api/ready`。
+
+旧 Render Oregon 服务已暂停，旧 Oregon / Singapore 数据库保留作回滚副本。
+
+同一台本机、同一代理出口的热页面测量：
+
+| 页面 | LCP | 主要 API |
+|---|---:|---|
+| 首页 | **0.32 s** | `auth/me` 0.12 s、`stats` 0.12 s |
+| 学习进度 | **0.82 s** | `auth/me` 0.13 s、progress 0.22 s、stats 0.12 s |
+| 个人中心 | **0.78 s** | sessions 0.23 s、stats 0.13 s |
+| 生词本 | **0.58 s** | words 0.13 s |
+
+新后端数据库阶段：`db_acquire` 约 2–3 ms、`db_query` 约 3–4 ms、`response_ready` 约 9–13 ms。大陆直连新服务的健康检查在暖连接后约 0.9–2.2 s，明显优于 Oregon 的 16 s 级失败/重试。
+
+边界：Cloudflare Worker 的独立 Cron 仍指向旧 URL，需要手动更新或停用；真实麦克风、播放听感和并发容量仍未验收。Vercel 与 Render 仍是分离部署，前端静态资源与 API 域名各自独立。
