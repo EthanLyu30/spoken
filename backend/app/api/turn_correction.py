@@ -1,5 +1,7 @@
 """On-demand grammar and expression feedback for one learner turn."""
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.chat import get_client
@@ -29,6 +31,14 @@ async def turn_correction(
                 detail=f"Unknown scenario: {request.scenario_id}",
             )
     try:
-        return await generate_turn_correction(scenario, request, client)
+        # A stalled upstream must not leave a learner waiting for the client's
+        # 60 s default. This is a small optional analysis, so fail/reuse quickly.
+        async with asyncio.timeout(15):
+            return await generate_turn_correction(scenario, request, client)
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="纠错分析超时，请稍后重试。",
+        ) from exc
     except DeepSeekError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

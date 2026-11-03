@@ -2,6 +2,7 @@ import { learningDay, statsMatchDay } from "../lib/learningDay";
 import { useLearningDay } from "./useLearningDay";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { subscribeProgress, progressGeneration } from "../lib/progressCache";
+import { readProfileCache, writeProfileCache } from "../lib/profileCache";
 import {
   getPractice,
   getSessions,
@@ -35,7 +36,12 @@ export function useProfileData(owner: number | null, details = true) {
   const day = useLearningDay();
   const [statsDay, setStatsDay] = useState(day);
   const revision = useSyncExternalStore(subscribeProgress, progressGeneration, progressGeneration);
-  const [data, setData] = useState<ProfileData>(() => empty(owner));
+  const [data, setData] = useState<ProfileData>(() => {
+    const cached = readProfileCache(owner);
+    return cached
+      ? { ...cached, status: "ready", errors: [], pending: [] }
+      : empty(owner);
+  });
   const [attempt, setAttempt] = useState(0);
   const attempted = useRef(0);
   useEffect(() => {
@@ -44,7 +50,14 @@ export function useProfileData(owner: number | null, details = true) {
     attempted.current = attempt;
     const requestDay = learningDay();
     const sections = details ? ["sessions", "stats", "practice"] : ["stats"];
-    setData(previous => ({...(previous.owner === owner && previous.status === "ready" ? previous : empty(owner)),pending:sections,errors:[]}));
+    setData(previous => {
+      if (previous.owner === owner && previous.status === "ready")
+        return { ...previous, pending: sections, errors: [] };
+      const cached = readProfileCache(owner);
+      return cached
+        ? { ...cached, status: "ready", errors: [], pending: sections }
+        : empty(owner);
+    });
     const complete = (part:string, patch:Partial<ProfileData>, failed=false) => {
       if (controller.signal.aborted) return;
       setData(previous => {
@@ -62,6 +75,15 @@ export function useProfileData(owner: number | null, details = true) {
     }
     return () => controller.abort();
   }, [owner, attempt, revision, details, day]);
+  useEffect(() => {
+    if (data.owner !== owner || data.status !== "ready" || data.pending.length) return;
+    if (data.stats === null && data.errors.includes("stats")) return;
+    writeProfileCache(owner, {
+      sessions: data.sessions,
+      practice: data.practice,
+      stats: data.stats,
+    }, statsDay);
+  }, [owner, data, statsDay]);
   return {
     ...(data.owner === owner ? (statsDay === day ? data : {...data, stats: null}) : empty(owner)),
     reload: () => setAttempt((n) => n + 1),

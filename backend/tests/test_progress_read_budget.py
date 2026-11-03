@@ -71,7 +71,7 @@ def test_empty_stats_one_snapshot_no_owner_write_and_permanent_badges(engine):
 
 
 @pytest.mark.parametrize("count", [1, 1300])
-def test_populated_stats_four_statements_and_one_bounded_award_insert(engine, count):
+def test_populated_stats_two_read_statements_after_one_bounded_award(engine, count):
     with Session(engine) as db:
         db.add_all(LearningEvent(event_key=str(i), client_id="populated", event_type="session")
                    for i in range(count))
@@ -82,10 +82,12 @@ def test_populated_stats_four_statements_and_one_bounded_award_insert(engine, co
     with trace(engine) as (calls, checkouts), Session(engine) as db:
         repeated = practice.compute_stats(db, "populated")
     assert repeated == initial and repeated["total_sessions"] == count
-    assert len(calls) == 4 and len(checkouts) == 1
-    assert "ON CONFLICT" in calls[1][0] and "DO UPDATE" in calls[1][0]
+    # A read with no newly crossed threshold is snapshot + activity only: no
+    # owner lock, no commit, and no badge write.
+    assert len(calls) == 2 and len(checkouts) == 1
+    assert "LEFT OUTER JOIN earned_badges" in calls[0][0]
+    assert "learning_events" in calls[1][0]
     assert not any(sql.startswith("UPDATE ") for sql, _ in calls)
-    assert "LEFT OUTER JOIN earned_badges" in calls[3][0]
     print(f"populated {count}: SQL={len(calls)}, checkouts={len(checkouts)}, selected_bytes={selected_bytes(engine, calls)}")
 
 

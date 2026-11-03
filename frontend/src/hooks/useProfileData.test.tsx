@@ -47,6 +47,20 @@ it("refreshes profile history after a background save invalidates progress",asyn
   await waitFor(()=>expect(result.current.practice).toHaveLength(1));
 });
 
+it("paints a stored profile snapshot while its refresh is still pending",async()=>{
+  const first=renderHook(()=>useProfileData(77));
+  await waitFor(()=>expect(first.result.current.status).toBe("ready"));
+  expect(first.result.current.stats?.level).toBe(3);
+  first.unmount();
+  api.getStats.mockReturnValue(new Promise(()=>{}));
+  api.getSessions.mockReturnValue(new Promise(()=>{}));
+  api.getPractice.mockReturnValue(new Promise(()=>{}));
+  const second=renderHook(()=>useProfileData(77));
+  expect(second.result.current.status).toBe("ready");
+  expect(second.result.current.stats?.level).toBe(3);
+  second.unmount();
+});
+
 it("loads only the hero statistics for the voice settings tab",async()=>{
   const {result}=renderHook(()=>useProfileData(9,false));
   await waitFor(()=>expect(result.current.stats?.level).toBe(3));

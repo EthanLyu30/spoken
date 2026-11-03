@@ -88,18 +88,9 @@ def list_records(
 
 def compute_stats(db: Session, client_id: str, timezone: str | None = None) -> dict:
     try:
-        snapshot = progress.read_snapshot(db, client_id, include_events=True)
-        if snapshot.has_events:
-            progress.lock_owner(db, client_id)
-            # The probe predates the lock: neither its badge set nor its word
-            # count is authoritative for an award decision. Read both again.
-            result = progress.stats_and_awards(db, client_id, timezone)
-        else:
-            result = progress.stats_and_awards(db, client_id, timezone, events=[], snapshot=snapshot)
-        # An empty snapshot cannot earn any badges. Keep first-visit reads free
-        # of writes and mutex rows; a racing activity writer owns its awards.
-        db.commit()
-        return result
+        # Read-only unless a badge threshold was crossed; the award path commits
+        # inside progress.read_stats.
+        return progress.read_stats(db, client_id, timezone)
     except Exception:
         db.rollback()
         raise

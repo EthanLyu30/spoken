@@ -174,7 +174,7 @@ export function postTurnCorrection(
     method: "POST",
     body: JSON.stringify(payload),
     signal,
-  });
+  }, 18_000);
 }
 
 export interface DictionaryEntry {
@@ -194,7 +194,7 @@ export function postDictionaryLookup(
     method: "POST",
     body: JSON.stringify({ query }),
     signal,
-  });
+  }, 15_000);
 }
 
 /**
@@ -276,7 +276,7 @@ export function postFeedback(
     method: "POST",
     body: JSON.stringify({ scenario_id: scenarioId, messages: messages.slice(-60), custom }),
     signal,
-  });
+  }, 30_000);
 }
 
 export interface SessionSummary {
@@ -451,7 +451,7 @@ export async function postHint(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ scenario_id: scenarioId, messages: messages.slice(-40), custom }),
-    signal: withTimeout(signal, 30_000),
+    signal: withTimeout(signal, 15_000),
   });
   if (!res.ok) throw new Error(`hint failed: ${res.status}`);
   const data = (await res.json()) as { suggestions: string[] };

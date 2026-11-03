@@ -58,12 +58,11 @@ def review_word(
     client_id: str = Depends(get_client_id),
     timezone: str = Depends(get_timezone),
 ) -> Word:
-    entry = repo.get_word(db, client_id, word_id)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="Word not found")
     try:
-        return Word.model_validate(repo.review_word(db, entry, payload.remembered, timezone,
-                                                   payload.client_request_id))
+        return Word.model_validate(repo.review_word_by_id(
+            db, client_id, word_id, payload.remembered, timezone,
+            payload.client_request_id,
+        ))
     except RequestConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:

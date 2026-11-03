@@ -192,17 +192,12 @@ def _supplied_activity(events: list[LearningEvent], zone: ZoneInfo, today: date)
                         for e in conversations + practices))
 
 
-def stats_and_awards(db: Session, client_id: str, timezone_value: str | None = None,
-                     *, events: list[LearningEvent] | None = None,
-                     snapshot: ProgressSnapshot | None = None) -> dict:
-    """Compute from the journal and persist newly proven badges without committing."""
-    zone_name = timezone_name(timezone_value)
-    zone = ZoneInfo(zone_name)
-    today = _local_date(utcnow(), zone)
-    activity = _sql_activity(db, client_id, zone_name, today) if events is None else None
+def _empty_activity() -> ActivitySummary:
+    return ActivitySummary(0, 0, 0, 0, 0, 0, 0, 0, set(), 0)
+
+
+def _achievement_values(activity: ActivitySummary, today: date):
     with measure("stats_cpu", cpu=True):
-        if activity is None:
-            activity = _supplied_activity(events, zone, today)
         days = activity.days
         streak = 0
         cursor = today if today in days else today - timedelta(days=1)
@@ -231,12 +226,12 @@ def stats_and_awards(db: Session, client_id: str, timezone_value: str | None = N
             "scenarios_5": activity.scenarios >= 5,
             "level_3": level >= 3,
         }
-    if snapshot is None:
-        snapshot = read_snapshot(db, client_id)
-    badges = snapshot.badges
-    newly_earned = {key for key, earned in achievements.items() if earned} - badges
-    _insert_many(db, EarnedBadge, ({"client_id": client_id, "badge_key": key, "earned_at": utcnow()}
-                                 for key in sorted(newly_earned)))
+    return streak, xp_total, level, achievements
+
+
+def _stats_payload(activity: ActivitySummary, snapshot: ProgressSnapshot,
+                   zone_name: str, today: date, streak: int, xp_total: int,
+                   level: int, badges) -> dict:
     return {
         "streak_days": streak,
         "today_count": activity.today_count,
@@ -247,10 +242,68 @@ def stats_and_awards(db: Session, client_id: str, timezone_value: str | None = N
         "total_sessions": activity.sessions,
         "total_practice": activity.practices,
         "words_count": snapshot.words_count,
-        "earned_badges": sorted(badges | newly_earned),
+        "earned_badges": sorted(badges),
         "timezone": zone_name,
         "local_date": today.isoformat(),
     }
+
+
+def stats_and_awards(db: Session, client_id: str, timezone_value: str | None = None,
+                     *, events: list[LearningEvent] | None = None,
+                     snapshot: ProgressSnapshot | None = None) -> dict:
+    """Compute from the journal and persist newly proven badges without committing."""
+    zone_name = timezone_name(timezone_value)
+    zone = ZoneInfo(zone_name)
+    today = _local_date(utcnow(), zone)
+    activity = _sql_activity(db, client_id, zone_name, today) if events is None else None
+    if activity is None:
+        activity = _supplied_activity(events, zone, today)
+    streak, xp_total, level, achievements = _achievement_values(activity, today)
+    if snapshot is None:
+        snapshot = read_snapshot(db, client_id)
+    badges = snapshot.badges
+    newly_earned = {key for key, earned in achievements.items() if earned} - badges
+    _insert_many(db, EarnedBadge, ({"client_id": client_id, "badge_key": key, "earned_at": utcnow()}
+                                 for key in sorted(newly_earned)))
+    return _stats_payload(activity, snapshot, zone_name, today, streak, xp_total, level,
+                          badges | newly_earned)
+
+
+def read_stats(db: Session, client_id: str, timezone_value: str | None = None) -> dict:
+    """Read-only fast path; award only when a badge threshold was crossed.
+
+    Ordinary dashboard reads used to take the owner lock and commit even when no
+    badge changed. On a remote database that cost two extra round trips per page.
+    """
+    zone_name = timezone_name(timezone_value)
+    zone = ZoneInfo(zone_name)
+    today = _local_date(utcnow(), zone)
+    snapshot = read_snapshot(db, client_id, include_events=True)
+    activity = (
+        _sql_activity(db, client_id, zone_name, today)
+        if snapshot.has_events else _empty_activity()
+    )
+    streak, xp_total, level, achievements = _achievement_values(activity, today)
+    newly_earned = {key for key, earned in achievements.items() if earned} - snapshot.badges
+    if not newly_earned:
+        return _stats_payload(activity, snapshot, zone_name, today, streak, xp_total, level,
+                              snapshot.badges)
+    # Rare path: serialize with writers and re-read the badge/word snapshot under
+    # the lock. The activity summary already proves the threshold; a racing
+    # writer owns its own awards, so a second activity query is unnecessary.
+    try:
+        lock_owner(db, client_id)
+        latest = read_snapshot(db, client_id)
+        new_badges = {key for key, earned in achievements.items() if earned} - latest.badges
+        _insert_many(db, EarnedBadge, ({"client_id": client_id, "badge_key": key,
+                                        "earned_at": utcnow()}
+                                       for key in sorted(new_badges)))
+        db.commit()
+        return _stats_payload(activity, latest, zone_name, today, streak, xp_total, level,
+                              latest.badges | new_badges)
+    except Exception:
+        db.rollback()
+        raise
 
 
 def _legacy_events(db: Session):

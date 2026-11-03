@@ -113,7 +113,21 @@ def list_due(db: Session, client_id: str, kind: str | None = None) -> list[WordE
 def review_word(db: Session, entry: WordEntry, remembered: bool,
                 timezone: str | None = None, client_request_id: str | None = None) -> WordEntry | Word:
     """Apply a Leitner review: remembered -> longer interval, forgot -> reset."""
-    _lock_entry(db, entry)
+    entry = _lock_owner_word(db, entry.client_id, entry.id)
+    return _review_locked(db, entry, remembered, timezone, client_request_id)
+
+
+def review_word_by_id(db: Session, client_id: str, word_id: int, remembered: bool,
+                      timezone: str | None = None,
+                      client_request_id: str | None = None) -> WordEntry | Word:
+    """Lock and review in one owner-scoped read instead of pre-reading the row."""
+    entry = _lock_owner_word(db, client_id, word_id)
+    return _review_locked(db, entry, remembered, timezone, client_request_id)
+
+
+def _review_locked(db: Session, entry: WordEntry, remembered: bool,
+                   timezone: str | None = None,
+                   client_request_id: str | None = None) -> WordEntry | Word:
     # A deleted word's numeric ID can be recycled by SQLite. Bind the key to
     # this incarnation so an old review cannot replay onto a replacement.
     fingerprint = request_receipts.payload_hash({"word_id": entry.id, "remembered": remembered,
@@ -156,15 +170,19 @@ def delete_word(db: Session, entry: WordEntry) -> None:
     db.commit()
 
 
-def _lock_entry(db: Session, entry: WordEntry) -> None:
-    """Revalidate ownership after waiting for a concurrent review or claim."""
-    owner, word_id = entry.client_id, entry.id
+def _lock_owner_word(db: Session, owner: str, word_id: int) -> WordEntry:
+    """Take the owner lock, then revalidate the word under that lock."""
     progress.lock_owner(db, owner)
     current = db.scalar(select(WordEntry).where(WordEntry.id == word_id, WordEntry.client_id == owner)
                         .execution_options(populate_existing=True))
     if current is None:
         db.rollback()
         raise ValueError("Word no longer belongs to this owner")
+    return current
+
+
+def _lock_entry(db: Session, entry: WordEntry) -> None:
+    _lock_owner_word(db, entry.client_id, entry.id)
 
 
 def set_mastered(db: Session, entry: WordEntry, mastered: bool) -> WordEntry:

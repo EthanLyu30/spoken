@@ -1,5 +1,6 @@
 import asyncio
 
+import httpx
 import pytest
 from pydantic import ValidationError
 
@@ -148,3 +149,73 @@ def test_stream_rejects_upstream_eof_or_error_after_partial_text(monkeypatch, en
         return [part async for part in deepseek.DeepSeekClient(_settings()).chat_stream([{"role": "user", "content": "Hello"}])]
     with pytest.raises(deepseek.DeepSeekError):
         asyncio.run(run())
+
+def _status_error(status: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", "https://api.deepseek.test/chat/completions")
+    return httpx.HTTPStatusError(
+        f"HTTP {status}", request=request, response=httpx.Response(status, request=request)
+    )
+
+
+def test_chat_retries_one_retryable_status(monkeypatch):
+    class Client(_FakeAsyncClient):
+        attempts = 0
+
+        async def post(self, _url: str, *, json: dict, headers: dict, extensions=None):
+            type(self).attempts += 1
+            if type(self).attempts == 1:
+                raise _status_error(503)
+            return _FakeResponse()
+
+    monkeypatch.setattr(deepseek.httpx, "AsyncClient", Client)
+    result = asyncio.run(
+        deepseek.DeepSeekClient(_settings()).chat([{"role": "user", "content": "Hello"}])
+    )
+    assert result == "Hello!"
+    assert Client.attempts == 2
+
+
+def test_chat_does_not_retry_non_retryable_status(monkeypatch):
+    class Client(_FakeAsyncClient):
+        attempts = 0
+
+        async def post(self, _url: str, *, json: dict, headers: dict, extensions=None):
+            type(self).attempts += 1
+            raise _status_error(400)
+
+    monkeypatch.setattr(deepseek.httpx, "AsyncClient", Client)
+    with pytest.raises(deepseek.DeepSeekError, match="HTTP 400"):
+        asyncio.run(
+            deepseek.DeepSeekClient(_settings()).chat([{"role": "user", "content": "Hello"}])
+        )
+    assert Client.attempts == 1
+
+
+def test_stream_retries_one_status_before_the_first_delta(monkeypatch):
+    class Stream(_FakeStreamResponse):
+        def __init__(self, fail: bool):
+            self.fail = fail
+
+        def raise_for_status(self) -> None:
+            if self.fail:
+                raise _status_error(502)
+
+    class Client(_FakeAsyncClient):
+        attempts = 0
+
+        def stream(self, *args, **kwargs):
+            type(self).attempts += 1
+            return Stream(fail=type(self).attempts == 1)
+
+    monkeypatch.setattr(deepseek.httpx, "AsyncClient", Client)
+
+    async def run():
+        return [
+            part
+            async for part in deepseek.DeepSeekClient(_settings()).chat_stream(
+                [{"role": "user", "content": "Hello"}]
+            )
+        ]
+
+    assert asyncio.run(run()) == ["Hello"]
+    assert Client.attempts == 2

@@ -22,7 +22,7 @@ _parent: ContextVar[str | None] = ContextVar("spoken_span", default=None)
 _span_data: ContextVar[dict | None] = ContextVar("spoken_span_data", default=None)
 _ATTRS = {"provider", "model", "attempt", "cache_hit", "input_tokens", "output_tokens",
           "input_chars", "output_chars", "audio_bytes", "engine", "transport",
-          "error_type", "ttft_ms", "scoring_version", "answer_count",
+          "error_type", "ttft_ms", "scoring_version", "answer_count", "provider_status",
           "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "result_class", "entry"}
 
 

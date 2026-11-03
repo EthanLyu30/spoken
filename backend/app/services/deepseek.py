@@ -6,6 +6,7 @@ a small wrapper over ``httpx`` rather than a heavy SDK dependency.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -37,6 +38,15 @@ def _usage(data):
 
 class DeepSeekError(RuntimeError):
     """Raised when a DeepSeek request cannot be completed."""
+
+
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+
+
+async def _retry_delay(attempt: int) -> None:
+    # One bounded retry; jitter is intentionally small so a user-visible turn
+    # cannot grow by more than a fraction of a second.
+    await asyncio.sleep(0.35 + attempt * 0.15)
 
 
 def create_http_client() -> httpx.AsyncClient:
@@ -100,20 +110,32 @@ class DeepSeekClient:
         }
 
         request_start = perf_counter()
-        try:
-            async with self._client() as client:
-                # HTTPX post() fully reads and closes the response stream before
-                # returning, including cleanup on cancellation/read failure.
-                resp = await client.post(url, json=payload, headers=headers, extensions={"trace": HttpTimings()})
-                resp.raise_for_status()
-                data = resp.json()
-                _usage(data)
-        except httpx.HTTPStatusError as exc:
-            raise DeepSeekError(
-                f"DeepSeek returned HTTP {exc.response.status_code}"
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise DeepSeekError(f"DeepSeek request failed: {exc}") from exc
+        data = None
+        for attempt in range(2):
+            try:
+                async with self._client() as client:
+                    # HTTPX post() fully reads and closes the response stream
+                    # before returning, including cleanup on cancellation/read
+                    # failure.
+                    resp = await client.post(
+                        url, json=payload, headers=headers,
+                        extensions={"trace": HttpTimings()},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    _usage(data)
+                break
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                trace_attribute("provider_status", status)
+                if attempt == 0 and status in _RETRYABLE_STATUS:
+                    await _retry_delay(attempt)
+                    continue
+                raise DeepSeekError(
+                    f"DeepSeek returned HTTP {status}"
+                ) from exc
+            except httpx.HTTPError as exc:
+                raise DeepSeekError(f"DeepSeek request failed: {exc}") from exc
 
         try:
             content = data["choices"][0]["message"]["content"]
@@ -158,57 +180,71 @@ class DeepSeekClient:
         request_start = perf_counter()
         first_text = True
         last_text_at = None
-        try:
-            async with self._client() as client:
-                async with client.stream("POST", url, json=payload, headers=headers, extensions={"trace": HttpTimings()}) as resp:
-                    resp.raise_for_status()
-                    headers_at = perf_counter()
-                    add("llm_response_headers", max(0, (headers_at - request_start) * 1000))
-                    add("llm_keepalives_before_text", 0)
-                    first_event = True
-                    completed = False
-                    async for line in resp.aiter_lines():
-                        if first_event and line:
-                            add("llm_first_event", max(0, (perf_counter() - request_start) * 1000))
-                            first_event = False
-                        if first_text and line.startswith(":"):
-                            add("llm_keepalives_before_text", 1)
-                        if not line.startswith("data:"):
-                            continue
-                        data = line[5:].strip()
-                        if data == "[DONE]":
-                            completed = True
-                            done_at = perf_counter()
-                            add("llm_done", max(0, (done_at - request_start) * 1000))
-                            if last_text_at is not None:
-                                add("llm_last_text", max(0, (last_text_at - request_start) * 1000))
-                                add("llm_tail", max(0, (done_at - last_text_at) * 1000))
-                            elapsed("llm_total", request_start)
-                            break
-                        try:
-                            packet = json.loads(data)
-                            _usage(packet)
-                            if isinstance(packet, dict) and packet.get("error"):
-                                raise DeepSeekError("DeepSeek reported a streaming error")
-                            choice = packet["choices"][0]
-                            reason = choice.get("finish_reason")
-                            if reason is not None and reason != "stop":
-                                raise DeepSeekError("DeepSeek stream did not complete successfully")
-                            delta = choice["delta"].get("content")
-                        except (json.JSONDecodeError, KeyError, IndexError, TypeError):
-                            continue
-                        if delta:
-                            last_text_at = perf_counter()
-                            if first_text:
-                                add("llm_headers_to_text", max(0, (last_text_at - headers_at) * 1000))
-                                add("llm_first_text", max(0, (last_text_at - request_start) * 1000))
-                                first_text = False
-                            yield delta
-                    if not completed:
-                        raise DeepSeekError("DeepSeek stream ended before completion")
-        except httpx.HTTPStatusError as exc:
-            raise DeepSeekError(
-                f"DeepSeek returned HTTP {exc.response.status_code}"
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise DeepSeekError(f"DeepSeek request failed: {exc}") from exc
+        for attempt in range(2):
+            emitted = False
+            try:
+                async with self._client() as client:
+                    async with client.stream("POST", url, json=payload, headers=headers, extensions={"trace": HttpTimings()}) as resp:
+                        resp.raise_for_status()
+                        headers_at = perf_counter()
+                        add("llm_response_headers", max(0, (headers_at - request_start) * 1000))
+                        add("llm_keepalives_before_text", 0)
+                        first_event = True
+                        completed = False
+                        async for line in resp.aiter_lines():
+                            if first_event and line:
+                                add("llm_first_event", max(0, (perf_counter() - request_start) * 1000))
+                                first_event = False
+                            if first_text and line.startswith(":"):
+                                add("llm_keepalives_before_text", 1)
+                            if not line.startswith("data:"):
+                                continue
+                            data = line[5:].strip()
+                            if data == "[DONE]":
+                                completed = True
+                                done_at = perf_counter()
+                                add("llm_done", max(0, (done_at - request_start) * 1000))
+                                if last_text_at is not None:
+                                    add("llm_last_text", max(0, (last_text_at - request_start) * 1000))
+                                    add("llm_tail", max(0, (done_at - last_text_at) * 1000))
+                                elapsed("llm_total", request_start)
+                                break
+                            try:
+                                packet = json.loads(data)
+                                _usage(packet)
+                                if isinstance(packet, dict) and packet.get("error"):
+                                    raise DeepSeekError("DeepSeek reported a streaming error")
+                                choice = packet["choices"][0]
+                                reason = choice.get("finish_reason")
+                                if reason is not None and reason != "stop":
+                                    raise DeepSeekError("DeepSeek stream did not complete successfully")
+                                delta = choice["delta"].get("content")
+                            except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+                                continue
+                            if delta:
+                                last_text_at = perf_counter()
+                                if first_text:
+                                    add("llm_headers_to_text", max(0, (last_text_at - headers_at) * 1000))
+                                    add("llm_first_text", max(0, (last_text_at - request_start) * 1000))
+                                    first_text = False
+                                emitted = True
+                                yield delta
+                        if not completed:
+                            raise DeepSeekError("DeepSeek stream ended before completion")
+                return
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                trace_attribute("provider_status", status)
+                if attempt == 0 and not emitted and status in _RETRYABLE_STATUS:
+                    await _retry_delay(attempt)
+                    continue
+                raise DeepSeekError(f"DeepSeek returned HTTP {status}") from exc
+            except httpx.HTTPError as exc:
+                # Connection failures are safe to retry only before the first
+                # delta; after that the caller must not receive duplicate text.
+                if attempt == 0 and not emitted and isinstance(
+                    exc, (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError)
+                ):
+                    await _retry_delay(attempt)
+                    continue
+                raise DeepSeekError(f"DeepSeek request failed: {exc}") from exc

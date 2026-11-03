@@ -120,3 +120,16 @@ def test_turn_correction_service_failure_maps_to_503():
         assert client.post("/api/turn-correction", json=_body()).status_code == 503
     finally:
         app.dependency_overrides.clear()
+
+def test_turn_correction_timeout_returns_bounded_failure(monkeypatch):
+    async def slow(*_args, **_kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr("app.api.turn_correction.generate_turn_correction", slow)
+    app.dependency_overrides[get_client] = lambda: _Stub("{}")
+    try:
+        response = client.post("/api/turn-correction", json=_body())
+        assert response.status_code == 503
+        assert "超时" in response.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()

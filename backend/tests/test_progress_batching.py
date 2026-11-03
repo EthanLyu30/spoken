@@ -103,8 +103,9 @@ def test_fully_awarded_stats_do_not_insert_badges_again_and_keep_permanent_union
     print(f"repeat stats SQL: total={len(calls)}, badge INSERTs={len(inserts)}")
     assert stats["earned_badges"] == ALL_BADGES
     assert inserts == []
-    assert len(calls) == 4
-    assert len([sql for sql, _, _ in calls if "LEFT OUTER JOIN earned_badges" in sql]) == 2
+    # Snapshot + activity; no owner lock, commit or badge re-read.
+    assert len(calls) == 2
+    assert len([sql for sql, _, _ in calls if "LEFT OUTER JOIN earned_badges" in sql]) == 1
     with Session(engine) as db:
         db.execute(delete(LearningEvent))
         db.commit()
