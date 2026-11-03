@@ -6,6 +6,8 @@ import { createPronunciationStream, type PronunciationStream } from "../lib/pron
 import { PronunciationFeedback } from "./PronunciationFeedback";
 import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
 import { createPracticeId } from "../lib/sessionSave";
+import { MAX_AUDIO_BYTES, MAX_RECORDING_MS } from "../lib/audioLimits";
+import { bindInteraction, getInteraction, newInteractionId, reportTiming } from "../lib/telemetry";
 
 interface RecordingOperation {
   generation: number;
@@ -15,6 +17,8 @@ interface RecordingOperation {
   stream: PronunciationStream | null;
   timer: ReturnType<typeof setTimeout> | null;
   bytes: number;
+  stopRequestedAt?: number;
+  stopReported?: boolean;
 }
 
 /** Stream captured PCM to iFlytek while keeping a complete clip for compatibility. */
@@ -28,9 +32,19 @@ export function PronounceButton({ text }: { text: string }) {
   const [saveError, setSaveError] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  function reportStop(operation: RecordingOperation, outcome: "ok" | "error" | "cancelled", transport?: "relay" | "buffered") {
+    if (operation.stopRequestedAt === undefined || operation.stopReported) return;
+    operation.stopReported = true;
+    reportTiming("pronunciation.stop_to_result", performance.now() - operation.stopRequestedAt, {
+      engine: "xfyun", transport, interactionId: getInteraction(operation.controller.signal),
+      entry: "follow_read", audio_bytes: operation.bytes, outcome,
+    });
+  }
+
   useEffect(() => {
     function cancel() {
       const operation = operationRef.current;
+      if (operation) reportStop(operation, "cancelled");
       operationRef.current = null; saveRef.current = null;
       if (operation?.timer) clearTimeout(operation.timer);
       operation?.controller.abort(); operation?.stream?.close();
@@ -49,7 +63,8 @@ export function PronounceButton({ text }: { text: string }) {
       operation.generation === getAuthGeneration() && !operation.controller.signal.aborted;
   }
   function fail(operation: RecordingOperation, error?: unknown) {
-    if (!isCurrent(operation)) return;
+    if (!isCurrent(operation)) { reportStop(operation, "cancelled"); return; }
+    reportStop(operation, "error");
     operationRef.current = null;
     if (operation.timer) clearTimeout(operation.timer);
     operation.controller.abort(); operation.stream?.close();
@@ -75,6 +90,7 @@ export function PronounceButton({ text }: { text: string }) {
     const rec = operation.recorder;
     if (!rec || !isCurrent(operation)) return;
     operation.recorder = null;
+    operation.stopRequestedAt = performance.now();
     if (operation.timer) clearTimeout(operation.timer);
     setState("scoring"); setErr(null);
     try {
@@ -84,8 +100,9 @@ export function PronounceButton({ text }: { text: string }) {
       const streamed = operation.stream ? await operation.stream.finish() : null;
       if (!isCurrent(operation)) return;
       // A never-ready session has sent no PCM to an active provider session.
-      const scored = streamed ?? await postPronunciation(operation.text, pcm, operation.controller.signal);
+      const scored = streamed ?? await postPronunciation(operation.text, pcm, operation.controller.signal, "follow_read");
       if (!isCurrent(operation)) return;
+      reportStop(operation, "ok", streamed ? "relay" : "buffered");
       setResult(scored);
       saveRef.current = { generation: operation.generation, key: createPracticeId(), score: scored.overall, text: operation.text, pending: false };
       void persist();
@@ -96,13 +113,14 @@ export function PronounceButton({ text }: { text: string }) {
     const active = operationRef.current;
     if (active) { await finish(active); return; }
     const operation: RecordingOperation = { generation: getAuthGeneration(), text, controller: new AbortController(), recorder: null, stream: null, timer: null, bytes: 0 };
+    bindInteraction(operation.controller.signal, newInteractionId());
     operationRef.current = operation; saveRef.current = null;
     setState("starting"); setErr(null); setResult(null); setSaveError(false);
     try {
       const rec = await startRecording(pcm => {
         if (!isCurrent(operation)) return;
         operation.bytes += pcm.byteLength;
-        if (operation.bytes > 5_760_000) { fail(operation, new Error("180 seconds")); return; }
+        if (operation.bytes > MAX_AUDIO_BYTES) { fail(operation, new Error("180 seconds")); return; }
         // The first audio callback can only arrive after microphone permission.
         operation.stream ??= createPronunciationStream(operation.text, operation.controller.signal, error => fail(operation, error));
         operation.stream.send(pcm);
@@ -110,7 +128,7 @@ export function PronounceButton({ text }: { text: string }) {
       if (!isCurrent(operation)) { await rec.stop(); return; }
       operation.recorder = rec; setState("recording");
       // Reaching the limit is a visible cancellation, never an unbounded mic.
-      operation.timer = setTimeout(() => fail(operation, new Error("180 seconds")), 180_000);
+      operation.timer = setTimeout(() => fail(operation, new Error("180 seconds")), MAX_RECORDING_MS);
     } catch (error) { fail(operation, error); }
   }
 

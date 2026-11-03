@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from app.api import asr as asr_api
 from app.api.asr import get_asr_stream_factory
 from app.core.config import get_settings
 from app.main import app
@@ -108,6 +109,133 @@ def test_end_without_audio_returns_empty_final():
         assert ws.receive_json()["type"] == "ready"
         ws.send_text(json.dumps({"type": "end"}))
         assert ws.receive_json() == {"type": "final", "text": ""}
+
+
+class _DirectSocket:
+    def __init__(self, *messages):
+        self.messages = asyncio.Queue()
+        for message in messages:
+            self.messages.put_nowait(message)
+        self.sent = []
+        self.closed = False
+
+    async def accept(self):
+        pass
+
+    async def receive(self):
+        return await self.messages.get()
+
+    async def receive_text(self):
+        message = await self.receive()
+        if message.get("type") == "websocket.disconnect":
+            raise WebSocketDisconnect(message.get("code", 1000))
+        return message.get("text", "")
+
+    async def send_json(self, message):
+        self.sent.append(message)
+
+    async def close(self):
+        self.closed = True
+
+
+def _start_message():
+    return {"type": "websocket.receive", "text": json.dumps({"type": "start"})}
+
+
+def _audio_message(payload=b"\x00\x01"):
+    return {"type": "websocket.receive", "bytes": payload}
+
+
+def _control_message(payload):
+    text = payload if isinstance(payload, str) else json.dumps(payload)
+    return {"type": "websocket.receive", "text": text}
+
+
+def _direct_factory(settings, on_partial, *, language="en_us"):
+    return _FakeStream(settings, on_partial, language=language)
+
+
+def test_first_start_has_a_five_second_deadline(monkeypatch):
+    monkeypatch.setattr(asr_api, "_START_TIMEOUT", 0.01)
+
+    async def run():
+        socket = _DirectSocket()
+        await asyncio.wait_for(asr_api.asr_stream(socket, _Cfg(), _direct_factory), 0.3)
+        assert socket.sent[-1]["type"] == "error"
+        assert socket.closed
+
+    asyncio.run(run())
+
+
+def test_connection_has_an_overall_deadline(monkeypatch):
+    monkeypatch.setattr(asr_api, "_SESSION_TIMEOUT", 0.02)
+
+    async def run():
+        socket = _DirectSocket(_start_message())
+        await asyncio.wait_for(asr_api.asr_stream(socket, _Cfg(), _direct_factory), 0.3)
+        assert socket.sent[0] == {"type": "ready"}
+        assert socket.sent[-1]["type"] == "error"
+        assert socket.closed
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("payload", [b"\x00", b"\x00" * 65538], ids=["odd-pcm", "oversized-frame"])
+def test_audio_frame_hard_limits_close_with_an_explicit_error(payload):
+    async def run():
+        socket = _DirectSocket(_start_message(), _audio_message(payload))
+        await asyncio.wait_for(asr_api.asr_stream(socket, _Cfg(), _direct_factory), 0.3)
+        assert socket.sent[0] == {"type": "ready"}
+        assert socket.sent[-1]["type"] == "error"
+        assert socket.closed
+
+    asyncio.run(run())
+
+
+def test_utterance_audio_limit_is_enforced_across_frames(monkeypatch):
+    monkeypatch.setattr(asr_api, "MAX_AUDIO_BYTES", 4)
+
+    async def run():
+        socket = _DirectSocket(
+            _start_message(), _audio_message(b"\x00\x01"), _audio_message(b"\x00" * 4)
+        )
+        await asyncio.wait_for(asr_api.asr_stream(socket, _Cfg(), _direct_factory), 0.3)
+        assert socket.sent[-1]["type"] == "error"
+        assert socket.closed
+        assert not any(message["type"] == "final" for message in socket.sent)
+
+    asyncio.run(run())
+
+
+def test_exact_frame_limit_is_allowed_and_audio_budget_resets_each_turn(monkeypatch):
+    monkeypatch.setattr(asr_api, "MAX_AUDIO_BYTES", 65536)
+
+    async def run():
+        socket = _DirectSocket(
+            _start_message(),
+            _audio_message(b"\x00" * 65536), _control_message({"type": "end"}),
+            _audio_message(b"\x00" * 65536), _control_message({"type": "close"}),
+        )
+        await asyncio.wait_for(asr_api.asr_stream(socket, _Cfg(), _direct_factory), 0.3)
+        assert [message["type"] for message in socket.sent].count("final") == 1
+        assert not any(message["type"] == "error" for message in socket.sent)
+        assert socket.closed
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("control", ["{broken", {"type": "unknown"}, "null"])
+def test_malformed_control_closes_instead_of_leaking_into_the_next_turn(control):
+    async def run():
+        socket = _DirectSocket(
+            _start_message(), _control_message(control), _audio_message(), _control_message({"type": "end"})
+        )
+        await asyncio.wait_for(asr_api.asr_stream(socket, _Cfg(), _direct_factory), 0.3)
+        assert socket.sent[-1]["type"] == "error"
+        assert socket.closed
+        assert not any(message["type"] in {"partial", "final"} for message in socket.sent)
+
+    asyncio.run(run())
 
 
 def test_provider_failure_closes_the_relay_instead_of_accepting_only_the_audio_tail():

@@ -23,7 +23,7 @@ _span_data: ContextVar[dict | None] = ContextVar("spoken_span_data", default=Non
 _ATTRS = {"provider", "model", "attempt", "cache_hit", "input_tokens", "output_tokens",
           "input_chars", "output_chars", "audio_bytes", "engine", "transport",
           "error_type", "ttft_ms", "scoring_version", "answer_count",
-          "prompt_cache_hit_tokens", "prompt_cache_miss_tokens"}
+          "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "result_class", "entry"}
 
 
 def _attributes(values):

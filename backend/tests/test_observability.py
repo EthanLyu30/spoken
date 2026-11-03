@@ -49,6 +49,59 @@ def test_old_and_new_failure_details_preserve_unknowns():
         assert result['spans'] == []
 
 
+def _telemetry_record(**changes):
+    from app.models.telemetry import TelemetryRecord
+
+    values = dict(trace_id='a' * 32, operation='POST /api/pronunciation',
+        started_at=datetime.now(timezone.utc).replace(tzinfo=None), source='server',
+        outcome='ok', duration_ms=6, spans_json='[]', release='qa')
+    values.update(changes)
+    return TelemetryRecord(**values)
+
+
+@pytest.mark.parametrize('engine', ['en_vip', 'cn_vip'])
+def test_pronunciation_engine_fallback_is_display_only(engine):
+    from app.services.telemetry import serialize
+
+    spans = json.dumps([{'name': 'pronunciation.assess', 'attributes': {'model': engine}}])
+    record = _telemetry_record(model=None, input_tokens=1000, output_tokens=500, spans_json=spans)
+    result = serialize(record)
+    assert result['model'] == engine
+    assert result['input_tokens'] == 1000 and result['output_tokens'] == 500
+    assert result['cost_min_cny'] is None and result['cost_max_cny'] is None
+    assert record.model is None, 'display fallback must not change pricing or the stored root'
+
+
+def test_deepseek_root_model_usage_and_pricing_ignore_pronunciation_fallback():
+    from app.services.telemetry import serialize
+
+    spans = json.dumps([{'name': 'pronunciation.assess', 'attributes': {'model': 'en_vip'}}])
+    record = _telemetry_record(model='deepseek-flash', input_tokens=1000, output_tokens=500,
+        spans_json=spans)
+    result = serialize(record)
+    assert result['model'] == 'deepseek-flash'
+    assert result['input_tokens'] == 1000 and result['output_tokens'] == 500
+    assert result['cost_min_cny'] == pytest.approx((1000 * .02 + 500 * 4) / 1_000_000)
+    assert result['cost_max_cny'] == pytest.approx((1000 * 2 + 500 * 8) / 1_000_000)
+
+
+def test_new_pronunciation_root_model_does_not_depend_on_span_fallback():
+    from app.services.telemetry import serialize
+
+    record = _telemetry_record(model='cn_vip', spans_json='{legacy-root-only')
+    assert serialize(record)['model'] == 'cn_vip'
+    assert serialize(record, detail=True)['spans'] == []
+
+
+@pytest.mark.parametrize('spans_json', ['{broken', '{}', 'null'])
+def test_malformed_span_fallback_is_safe(spans_json):
+    from app.services.telemetry import serialize
+
+    record = _telemetry_record(model=None, spans_json=spans_json)
+    assert serialize(record)['model'] is None
+    assert serialize(record, detail=True)['spans'] == []
+
+
 def account(client, *, admin=False):
     email = f"qa-{uuid.uuid4().hex}@example.com"
     response = client.post('/api/auth/register', json={
@@ -143,6 +196,37 @@ def test_browser_samples_have_separate_source_and_reject_extra_content():
         data = client.get('/api/admin/overview', headers=owner, params={'operation': 'asr.finalize', 'source': 'browser'}).json()
         assert data['source'] == 'browser' and data['count'] >= 1
         assert data['input_tokens'] is None
+
+
+def test_shared_browser_diagnostic_fields_reach_the_sink_by_operation():
+    from types import SimpleNamespace
+    records = []
+    previous = getattr(app.state, 'telemetry_sink', None)
+    app.state.telemetry_sink = SimpleNamespace(submit=records.append)
+    try:
+        client = TestClient(app)
+        bodies = [
+            {'operation': 'speech.native_end', 'duration_ms': 10, 'reason': 'completion_timeout',
+             'error_code': 'unknown', 'state_at_event': 3, 'watchdog_budget_ms': 60_000,
+             'pause_count': 1, 'resume_count': 1, 'paused_duration_ms': 62_000,
+             'visibility_state': 'visible'},
+            {'operation': 'asr.attempt', 'duration_ms': 20, 'stage': 'open', 'attempt': 1,
+             'fallback_reason': 'none', 'audio_bytes': 100, 'result_class': 'empty'},
+            {'operation': 'pronunciation.stop_to_result', 'duration_ms': 30,
+             'entry': 'turn_correction', 'audio_bytes': 200},
+        ]
+        for body in bodies:
+            assert client.post('/api/telemetry/client', json=body).status_code == 202
+        for body, record in zip(bodies, records):
+            attributes = json.loads(record['spans_json'])[0]['attributes']
+            expected = {k: v for k, v in body.items() if k not in {'operation', 'duration_ms'}}
+            assert all(attributes[k] == v for k, v in expected.items())
+            assert 'private' not in json.dumps(attributes)
+    finally:
+        if previous is None:
+            del app.state.telemetry_sink
+        else:
+            app.state.telemetry_sink = previous
 
 
 def test_browser_playback_stage_is_accepted_and_remains_separate_from_backend_usage():

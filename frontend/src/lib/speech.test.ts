@@ -43,6 +43,7 @@ vi.mock("./localSpeech/kokoro", () => ({
 }));
 
 import { createSpeechQueue, speakText, stopSpeaking } from "./speech";
+import { reportTiming } from "./telemetry";
 
 const audioInstances: FakeAudio[] = [];
 
@@ -183,5 +184,36 @@ describe("local speech queue cleanup", () => {
     const q=createSpeechQueue();await q.end("First. Second.");
     expect(q.failed).toBe(true);expect(mocks.synthesizeWithKokoro.mock.calls.map(call=>call[0])).toEqual(["First. Second."]);
     expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();expect(audioInstances).toHaveLength(0);
+  });
+
+  it("filters the shared ASR, pronunciation, and native terminal telemetry contract by operation", () => {
+    const fetcher=vi.fn().mockResolvedValue(new Response(null,{status:202}));vi.stubGlobal("fetch",fetcher);
+    const options={
+      reason:"native_error",error_code:"network",state_at_event:7,watchdog_budget_ms:60_000,
+      state_before:1,state_after:7,voice_type:"local",voice_matched:true,
+      pause_count:2,resume_count:1,paused_duration_ms:123.5,visibility_state:"hidden",
+      stage:"open",attempt:2,fallback_reason:"timeout",audio_bytes:128_000,result_class:"nonempty",
+      entry:"follow_read",private_text:"must not leave the browser",
+    } as const;
+    reportTiming("speech.native_end",250,options);
+    reportTiming("asr.attempt",300,options);
+    reportTiming("pronunciation.click_to_result",400,options);
+    reportTiming("pronunciation.stop_to_result",500,{...options,entry:"turn_correction"});
+    reportTiming("speech.complete",600,options);
+    const bodies=fetcher.mock.calls.map(([,init])=>JSON.parse(init.body));
+    expect(bodies[0]).toMatchObject({operation:"speech.native_end",reason:"native_error",error_code:"network",state_at_event:7,
+      watchdog_budget_ms:60_000,pause_count:2,resume_count:1,paused_duration_ms:123.5,visibility_state:"hidden"});
+    expect(bodies[1]).toMatchObject({operation:"asr.attempt",stage:"open",attempt:2,fallback_reason:"timeout",audio_bytes:128_000,result_class:"nonempty"});
+    expect(bodies[2]).toMatchObject({operation:"pronunciation.click_to_result",entry:"follow_read",audio_bytes:128_000});
+    expect(bodies[3]).toMatchObject({operation:"pronunciation.stop_to_result",entry:"turn_correction",audio_bytes:128_000});
+    expect(bodies[0]).not.toHaveProperty("stage");expect(bodies[0]).not.toHaveProperty("audio_bytes");
+    expect(bodies[0]).not.toHaveProperty("state_before");expect(bodies[0]).not.toHaveProperty("voice_type");
+    expect(bodies[1]).not.toHaveProperty("reason");expect(bodies[1]).not.toHaveProperty("entry");
+    expect(bodies[1]).not.toHaveProperty("state_at_event");expect(bodies[1]).not.toHaveProperty("voice_matched");
+    expect(bodies[2]).not.toHaveProperty("stage");expect(bodies[2]).not.toHaveProperty("fallback_reason");
+    for(const body of bodies){expect(body).not.toHaveProperty("private_text");}
+    for(const key of ["reason","error_code","state_at_event","watchdog_budget_ms","pause_count","resume_count","paused_duration_ms","visibility_state","stage","attempt","fallback_reason","audio_bytes","result_class","entry"]){
+      expect(bodies[4]).not.toHaveProperty(key);
+    }
   });
 });

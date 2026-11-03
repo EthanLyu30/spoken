@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
-from app.schemas.telemetry import BrowserTiming
+from app.schemas.telemetry import BrowserTiming, SINK_DIAGNOSTIC_FIELDS
 from app.core.deps import get_optional_client_id
 from app.db import get_db
 from app.services.monitoring import record_visit
@@ -56,11 +56,11 @@ async def client_timing(request: Request):
         raise HTTPException(status_code=422, detail="Invalid telemetry payload") from None
     sink = getattr(request.app.state, "telemetry_sink", None)
     if sink:
-        native = event.model_dump(include={"reason", "error_code", "state_before", "state_after", "voice_type", "voice_matched"}, exclude_none=True)
+        diagnostics = event.model_dump(include=SINK_DIAGNOSTIC_FIELDS, exclude_none=True)
         sink.submit({"trace_id": secrets.token_hex(16), "interaction_id": event.interaction_id, "started_at": datetime.now(timezone.utc).replace(tzinfo=None),
             "operation": event.operation, "source": "browser", "outcome": event.outcome,
             "duration_ms": event.duration_ms, "release": event.release, "model": f"{event.engine}/{event.transport}", "spans_json": json.dumps([
                 {"id": secrets.token_hex(8), "parent_id": None, "name": event.operation, "offset_ms": 0,
-                 "duration_ms": event.duration_ms, "outcome": event.outcome, "attributes": {"engine": event.engine, "transport": event.transport, **native}}
+                 "duration_ms": event.duration_ms, "outcome": event.outcome, "attributes": {"engine": event.engine, "transport": event.transport, **diagnostics}}
             ])})
     return Response(status_code=202)

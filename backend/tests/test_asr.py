@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.api import audio as audio_api
 from app.api.asr import get_asr_client
 from app.main import app
 from app.services.xf_asr import XfAsrError
@@ -30,6 +31,52 @@ def test_asr_returns_transcript():
 def test_asr_empty_body_400():
     resp = client.post("/api/asr", content=b"")
     assert resp.status_code == 400
+
+
+def test_asr_rejects_oversized_stream_before_calling_provider(monkeypatch):
+    monkeypatch.setattr(audio_api, "MAX_AUDIO_BYTES", 4)
+
+    class _Unexpected:
+        async def transcribe(self, pcm, **_kwargs):
+            raise AssertionError("provider must not receive oversized audio")
+
+    app.dependency_overrides[get_asr_client] = lambda: _Unexpected()
+    try:
+        resp = client.post("/api/asr", content=b"\x00" * 6)
+        assert resp.status_code == 413
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_asr_stream_helper_stops_reading_at_the_hard_limit(monkeypatch):
+    import asyncio
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(audio_api, "MAX_AUDIO_BYTES", 4)
+
+    class _Request:
+        def __init__(self):
+            self.reads = 0
+
+        async def stream(self):
+            self.reads += 1
+            yield b"\x00" * 4
+            self.reads += 1
+            yield b"\x00"
+            self.reads += 1
+            raise AssertionError("reader continued beyond the oversized chunk")
+
+    async def run():
+        request = _Request()
+        try:
+            await audio_api.read_pcm(request)
+        except HTTPException as exc:
+            assert exc.status_code == 413
+        else:
+            raise AssertionError("oversized audio was accepted")
+        assert request.reads == 2
+
+    asyncio.run(run())
 
 
 def test_asr_service_error_503():

@@ -1,5 +1,6 @@
 """Speech-to-text: buffered POST /asr and live streaming WS /asr/stream (iFlytek IAT)."""
 
+import asyncio
 import json
 
 from fastapi import (
@@ -12,12 +13,21 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 
+from app.api.audio import read_pcm
 from app.core.config import Settings, get_settings
 from app.core.deps import get_optional_client_id
 from app.services.xf_auth import build_auth_url
 from app.services.xf_asr import XfAsrClient, XfAsrError, XfAsrStream
+from app.services.xf_ise import MAX_AUDIO_BYTES
 
 router = APIRouter(tags=["asr"])
+_START_TIMEOUT = 5.0
+_SESSION_TIMEOUT = 210.0
+_MAX_FRAME_BYTES = 64 * 1024
+
+
+class _ProtocolError(ValueError):
+    """A malformed or oversized client frame; safe to return to the caller."""
 
 
 @router.post("/asr/session")
@@ -45,9 +55,7 @@ async def asr(
     language: str = "en_us",
     client: XfAsrClient = Depends(get_asr_client),
 ) -> dict:
-    pcm = await request.body()
-    if not pcm:
-        raise HTTPException(status_code=400, detail="Empty audio body")
+    pcm = await read_pcm(request)
     try:
         text = await client.transcribe(pcm, language=language)
     except XfAsrError as exc:
@@ -72,6 +80,7 @@ async def _relay_utterance(websocket: WebSocket, settings, make_stream, language
     on the first audio frame so a silent turn never opens a connection.
     """
     stream: XfAsrStream | None = None
+    total = 0
 
     async def on_partial(text: str) -> None:
         await websocket.send_json({"type": "partial", "text": text})
@@ -84,12 +93,24 @@ async def _relay_utterance(websocket: WebSocket, settings, make_stream, language
             data = msg.get("bytes")
             text = msg.get("text")
             if data is not None:
+                total += len(data)
+                if len(data) > _MAX_FRAME_BYTES or len(data) % 2:
+                    raise _ProtocolError("PCM frames must be even-sized and at most 64 KiB")
+                if total > MAX_AUDIO_BYTES:
+                    raise _ProtocolError("Utterance audio exceeds 180 seconds")
+                if not data:
+                    continue
                 if stream is None:
                     stream = make_stream(settings, on_partial, language=language)
                     await stream.open()
                 await stream.send(data)
             elif text is not None:
-                ctrl = json.loads(text) if text else {}
+                try:
+                    ctrl = json.loads(text)
+                except (json.JSONDecodeError, TypeError) as exc:
+                    raise _ProtocolError("Invalid JSON control frame") from exc
+                if not isinstance(ctrl, dict):
+                    raise _ProtocolError("Control frame must be a JSON object")
                 kind = ctrl.get("type")
                 if kind == "end":
                     final = await stream.finish() if stream else ""
@@ -97,6 +118,9 @@ async def _relay_utterance(websocket: WebSocket, settings, make_stream, language
                     return False
                 if kind == "close":
                     return True
+                raise _ProtocolError("Expected end or close control frame")
+            else:
+                raise _ProtocolError("Expected PCM audio or a control frame")
     except WebSocketDisconnect:
         return True
     except XfAsrError as exc:
@@ -129,29 +153,37 @@ async def asr_stream(
     """
     await websocket.accept()
     try:
-        hello = await websocket.receive_text()
-    except WebSocketDisconnect:
-        return
-    try:
-        payload = json.loads(hello)
-    except (json.JSONDecodeError, TypeError):
-        payload = {}
-    if payload.get("type") != "start":
-        await websocket.close()
-        return
-    if not (settings.xf_app_id and settings.xf_api_key and settings.xf_api_secret):
-        await websocket.send_json(
-            {"type": "error", "message": "iFlytek credentials are not configured"}
-        )
-        await websocket.close()
-        return
-    language = payload.get("language") or "en_us"
-    await websocket.send_json({"type": "ready"})
-    try:
-        while True:
-            ended = await _relay_utterance(websocket, settings, make_stream, language)
-            if ended:
-                break
+        async with asyncio.timeout(_SESSION_TIMEOUT):
+            hello = await asyncio.wait_for(websocket.receive(), _START_TIMEOUT)
+            if hello.get("type") == "websocket.disconnect":
+                return
+            try:
+                payload = json.loads(hello.get("text") or "")
+            except (json.JSONDecodeError, TypeError) as exc:
+                raise _ProtocolError("Expected a JSON start message") from exc
+            if not isinstance(payload, dict) or payload.get("type") != "start":
+                raise _ProtocolError("Expected a start message")
+            if not (settings.xf_app_id and settings.xf_api_key and settings.xf_api_secret):
+                await websocket.send_json(
+                    {"type": "error", "message": "iFlytek credentials are not configured"}
+                )
+                return
+            language = payload.get("language") or "en_us"
+            await websocket.send_json({"type": "ready"})
+            while True:
+                ended = await _relay_utterance(websocket, settings, make_stream, language)
+                if ended:
+                    break
+    except TimeoutError:
+        try:
+            await websocket.send_json({"type": "error", "message": "ASR session timed out"})
+        except (RuntimeError, WebSocketDisconnect):
+            pass
+    except _ProtocolError as exc:
+        try:
+            await websocket.send_json({"type": "error", "message": str(exc)})
+        except (RuntimeError, WebSocketDisconnect):
+            pass
     except WebSocketDisconnect:
         pass
     finally:

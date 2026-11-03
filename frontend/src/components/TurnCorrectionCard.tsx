@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
   Copy,
@@ -19,6 +19,8 @@ import type { UserTurnMeta } from "../lib/conversationTurns";
 import { speakText } from "../lib/speech";
 import { InteractiveEnglishText } from "./dictionary/InteractiveEnglishText";
 import { PronunciationFeedback } from "./PronunciationFeedback";
+import { getAuthGeneration } from "../lib/authToken";
+import { bindInteraction, getInteraction, reportTiming } from "../lib/telemetry";
 
 type LoadState<T> =
   | { status: "idle" | "loading" | "error"; data?: undefined }
@@ -40,13 +42,44 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
   const [pronunciationState, setPronunciationState] =
     useState<LoadState<PronunciationResult>>({ status: "idle" });
   const [copied, setCopied] = useState(false);
+  const mountedRef = useRef(true);
+  const controllersRef = useRef<{ text?: AbortController; pronunciation?: AbortController }>({});
+  const revisionsRef = useRef({ text: 0, pronunciation: 0 });
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const controllers = controllersRef.current;
+    return () => {
+      mountedRef.current = false;
+      controllers.text?.abort();
+      controllers.pronunciation?.abort();
+    };
+  }, []);
 
   const canAssessPronunciation = Boolean(props.meta.spokenText && props.meta.pcm);
 
+  function beginRequest(stage: "text" | "pronunciation") {
+    controllersRef.current[stage]?.abort();
+    const controller = new AbortController();
+    bindInteraction(controller.signal, props.meta.interactionId);
+    controllersRef.current[stage] = controller;
+    const revision = ++revisionsRef.current[stage];
+    return { controller, revision, generation: getAuthGeneration() };
+  }
+
+  function isCurrent(stage: "text" | "pronunciation", controller: AbortController, revision: number, generation: number) {
+    return mountedRef.current && controllersRef.current[stage] === controller &&
+      revisionsRef.current[stage] === revision && generation === getAuthGeneration() && !controller.signal.aborted;
+  }
+
+  function cancelRequest(stage: "text" | "pronunciation") {
+    controllersRef.current[stage]?.abort();
+    delete controllersRef.current[stage];
+  }
+
   async function loadText(force = false) {
-    if (!force && (textState.status === "ready" || textState.status === "loading")) {
-      return;
-    }
+    if (!force && (textState.status === "ready" || textState.status === "loading")) return;
+    const { controller, revision, generation } = beginRequest("text");
     setTextState({ status: "loading" });
     try {
       const data = await postTurnCorrection({
@@ -54,31 +87,47 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
         text: props.text,
         previous_partner_message: props.previousPartnerMessage,
         custom: props.custom,
-      });
-      setTextState({ status: "ready", data });
+      }, controller.signal);
+      if (isCurrent("text", controller, revision, generation)) setTextState({ status: "ready", data });
     } catch {
-      setTextState({ status: "error" });
+      if (isCurrent("text", controller, revision, generation)) setTextState({ status: "error" });
+    } finally {
+      if (controllersRef.current.text === controller) delete controllersRef.current.text;
     }
   }
 
   async function loadPronunciation(force = false) {
     if (!canAssessPronunciation) return;
-    if (
-      !force &&
-      (pronunciationState.status === "ready" ||
-        pronunciationState.status === "loading")
-    ) {
-      return;
-    }
+    if (!force && (pronunciationState.status === "ready" || pronunciationState.status === "loading")) return;
+    const { controller, revision, generation } = beginRequest("pronunciation");
+    const startedAt = performance.now();
+    const pcm = props.meta.pcm as ArrayBuffer;
+    let reported = false;
+    const report = (outcome: "ok" | "error" | "cancelled") => {
+      if (reported) return;
+      reported = true;
+      reportTiming("pronunciation.click_to_result", performance.now() - startedAt, {
+        engine: "xfyun", transport: "buffered", interactionId: getInteraction(controller.signal),
+        entry: "turn_correction", audio_bytes: pcm.byteLength, outcome,
+      });
+    };
     setPronunciationState({ status: "loading" });
     try {
       const data = await postPronunciation(
         props.meta.spokenText as string,
-        props.meta.pcm as ArrayBuffer,
+        pcm,
+        controller.signal,
+        "turn_correction",
       );
-      setPronunciationState({ status: "ready", data });
+      const current = isCurrent("pronunciation", controller, revision, generation);
+      if (current) setPronunciationState({ status: "ready", data });
+      report(current ? "ok" : "cancelled");
     } catch {
-      setPronunciationState({ status: "error" });
+      const current = isCurrent("pronunciation", controller, revision, generation);
+      if (current) setPronunciationState({ status: "error" });
+      report(current ? "error" : "cancelled");
+    } finally {
+      if (controllersRef.current.pronunciation === controller) delete controllersRef.current.pronunciation;
     }
   }
 
@@ -88,6 +137,11 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
     if (next) {
       void loadText();
       void loadPronunciation();
+    } else {
+      cancelRequest("text");
+      cancelRequest("pronunciation");
+      setTextState(previous => previous.status === "loading" ? { status: "idle" } : previous);
+      setPronunciationState(previous => previous.status === "loading" ? { status: "idle" } : previous);
     }
   }
 
@@ -232,7 +286,7 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
           {canAssessPronunciation &&
             pronunciationState.status === "loading" && (
               <p aria-live="polite" className="mt-3 text-xs text-muted">
-                正在评测发音…
+                正在上传音频并等待评分，期间可继续聊天…
               </p>
             )}
           {canAssessPronunciation &&

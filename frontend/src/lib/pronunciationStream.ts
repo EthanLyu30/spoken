@@ -1,5 +1,6 @@
 import type { PronunciationResult } from "./api";
 import { assertAuthGeneration, getAuthGeneration, subscribeAuthGeneration } from "./authToken";
+import { MAX_AUDIO_BYTES } from "./audioLimits";
 export interface PronunciationStream {
   send: (pcm: ArrayBuffer) => void;
   /** null means the provider never became ready; buffered POST is then safe. */
@@ -13,7 +14,6 @@ type Outcome = {
 } | {
   fallback: true;
 };
-const MAX_AUDIO_BYTES = 5760000;
 const MAX_BUFFER_BYTES = 384 * 1024;
 const MAX_FRAME_BYTES = 64 * 1024;
 function streamUrl() {
@@ -23,7 +23,7 @@ function streamUrl() {
   return url.href;
 }
 /** One assessment. All background outcomes are handled before finish is called. */
-export function createPronunciationStream(text: string, signal?: AbortSignal, onError?: (error: Error) => void): PronunciationStream {
+export function createPronunciationStream(text: string, signal?: AbortSignal, onError?: (error: Error) => void, entry: "follow_read" = "follow_read"): PronunciationStream {
   const generation = getAuthGeneration();
   let socket: WebSocket | undefined, ready = false, finished = false, ended = false, settled = false;
   let total = 0, queuedBytes = 0;
@@ -162,7 +162,7 @@ export function createPronunciationStream(text: string, signal?: AbortSignal, on
       if (settled || !current())
         return;
       try {
-        socket!.send(JSON.stringify({ type: "start", text, language: "en" }));
+        socket!.send(JSON.stringify({ type: "start", text, language: "en", entry }));
       }
       catch {
         fail("Pronunciation stream unavailable");

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.core.observability import TraceContext
 from app.services import xf_asr
 
 
@@ -13,11 +14,12 @@ SETTINGS = SimpleNamespace(xf_app_id="test", xf_api_key="test", xf_api_secret="t
 
 
 class Socket:
-    def __init__(self, *, close_delay=0, respond=True):
+    def __init__(self, *, close_delay=0, respond=True, text="coffee please"):
         self.frames = []
         self.incoming = asyncio.Queue()
         self.close_delay = close_delay
         self.respond = respond
+        self.text = text
         self.closed = False
 
     async def send(self, raw):
@@ -27,7 +29,7 @@ class Socket:
             await self.incoming.put(json.dumps({
                 "code": 0,
                 "data": {"status": 2, "result": {
-                    "sn": 0, "ls": True, "ws": [{"cw": [{"w": "coffee please"}]}],
+                    "sn": 0, "ls": True, "ws": [{"cw": [{"w": self.text}]}],
                 }},
             }))
 
@@ -232,3 +234,81 @@ def test_provider_rejection_is_not_retried_as_a_transient_dial_failure(monkeypat
         assert socket.closed
 
     asyncio.run(run())
+
+
+def test_buffered_final_wait_has_its_own_short_deadline(monkeypatch):
+    socket = Socket(respond=False)
+    monkeypatch.setattr(xf_asr.websockets, "connect", lambda *_args, **_kwargs: Dial(socket))
+    monkeypatch.setattr(xf_asr, "_FINAL_TIMEOUT", 0.02)
+    monkeypatch.setattr(xf_asr, "_TRANSCRIBE_TIMEOUT", 1.0)
+
+    async def run():
+        with pytest.raises(xf_asr.XfAsrError, match="超时"):
+            await asyncio.wait_for(xf_asr.XfAsrClient(SETTINGS).transcribe(bytes(1280)), 0.3)
+        assert socket.closed
+
+    asyncio.run(run())
+
+
+def test_provider_error_during_upload_cancels_sender_and_closes_socket(monkeypatch):
+    class BlockingSocket(Socket):
+        def __init__(self):
+            super().__init__(respond=False)
+            self.send_started = asyncio.Event()
+            self.send_cancelled = asyncio.Event()
+
+        async def send(self, raw):
+            self.send_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.send_cancelled.set()
+                raise
+
+    socket = BlockingSocket()
+    monkeypatch.setattr(xf_asr.websockets, "connect", lambda *_args, **_kwargs: Dial(socket))
+
+    async def run():
+        await socket.incoming.put(json.dumps({"code": 10005, "message": "rejected"}))
+        with pytest.raises(xf_asr.XfAsrError, match="10005"):
+            await asyncio.wait_for(xf_asr.XfAsrClient(SETTINGS).transcribe(bytes(1280)), 0.3)
+        assert socket.send_started.is_set()
+        assert socket.send_cancelled.is_set()
+        assert socket.closed
+
+    asyncio.run(run())
+
+
+def test_cancelling_buffered_transcribe_cancels_io_and_closes_socket(monkeypatch):
+    socket = Socket(respond=False)
+    monkeypatch.setattr(xf_asr.websockets, "connect", lambda *_args, **_kwargs: Dial(socket))
+
+    async def run():
+        task = asyncio.create_task(xf_asr.XfAsrClient(SETTINGS).transcribe(bytes(2560)))
+        await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert socket.closed
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("text,result_class", [("coffee please", "nonempty"), ("", "empty")])
+def test_buffered_observability_marks_result_without_recording_text(monkeypatch, text, result_class):
+    socket = Socket(text=text)
+    monkeypatch.setattr(xf_asr.websockets, "connect", lambda *_args, **_kwargs: Dial(socket))
+
+    async def run():
+        with TraceContext("POST /api/asr") as trace:
+            assert await xf_asr.XfAsrClient(SETTINGS).transcribe(bytes(1280)) == text
+        return trace.record()
+
+    record = asyncio.run(run())
+    spans = json.loads(record["spans_json"])
+    transcribe = next(span for span in spans if span["name"] == "asr.transcribe")
+    upload = next(span for span in spans if span["name"] == "asr.upload")
+    assert transcribe["attributes"]["result_class"] == result_class
+    assert transcribe["attributes"]["ttft_ms"] >= 0
+    assert upload["attributes"]["audio_bytes"] == 1280
+    assert "coffee please" not in record["spans_json"]

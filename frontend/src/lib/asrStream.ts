@@ -1,68 +1,76 @@
 /**
- * Streaming ASR client for call mode.
- *
- * Opens a WebSocket to the backend relay (`/api/asr/stream`), which forwards
- * audio to iFlytek IAT and pushes back the transcript *as it's recognised* —
- * so the UI can show live captions while the user is still speaking, and the
- * reply can start the instant they stop (no "upload the whole clip and wait").
- *
- * One connection serves the whole call; each utterance is `send()` frames then
- * `finishUtterance()`. If anything fails the caller falls back to the buffered
- * `postAsr` path, so streaming is a pure enhancement, never a hard dependency.
+ * Streaming ASR client for call mode. Direct iFlytek is preferred; the backend
+ * relay remains a bounded fallback when the direct connection cannot open.
  */
-
 import { openDirectAsrStream } from "./directAsr";
-import { measureAsrStream } from "./telemetry";
+import { getInteraction, measureAsrStream, reportTiming } from "./telemetry";
 import { assertAuthGeneration, getAuthGeneration } from "./authToken";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 function streamUrl(): string {
   const path = "/api/asr/stream";
-  if (BASE_URL) return BASE_URL.replace(/^http/, "ws") + path; // http→ws, https→wss
+  if (BASE_URL) return BASE_URL.replace(/^http/, "ws") + path;
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${location.host}${path}`;
 }
 
 export interface AsrStream {
-  /** Forward a chunk of 16 kHz/16-bit/mono PCM for the current utterance. */
   send: (pcm: ArrayBuffer) => void;
-  /** End the current utterance; resolves with the final transcript (or ""). */
   finishUtterance: () => Promise<string>;
-  /** Close the connection and end the call. */
-  close: () => void;
+  close: (error?: unknown) => void;
 }
 
 export interface AsrStreamCallbacks {
-  /** Growing transcript for the in-progress utterance (live captions). */
   onPartial: (text: string) => void;
-  /** The connection dropped — the caller should fall back to buffered ASR. */
   onClose?: () => void;
 }
 
 const READY_TIMEOUT_MS = 5000;
 const FINAL_TIMEOUT_MS = 8000;
+const cancelledError = () => new DOMException("ASR cancelled", "AbortError");
 
-/**
- * Open a streaming ASR session. Resolves once the server handshake succeeds;
- * rejects if streaming is unavailable (unconfigured creds, network, timeout),
- * which is the signal to fall back to the buffered endpoint.
- */
+/** Direct→relay is allowed only while opening; later failures use complete PCM. */
 export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us", signal?: AbortSignal): Promise<AsrStream> {
   const generation = getAuthGeneration();
   assertAuthGeneration(generation, signal);
+  const interactionId = getInteraction(signal);
+  const directStarted = performance.now();
   try {
     const stream = await openDirectAsrStream(cb, language, signal);
     try { assertAuthGeneration(generation, signal); }
     catch (error) { stream.close(); throw error; }
+    reportTiming("asr.attempt", performance.now() - directStarted, {
+      engine: "xfyun", transport: "direct", interactionId, stage: "open", attempt: 1, outcome: "ok",
+    });
     return measureAsrStream(stream, "direct", signal);
   } catch (error) {
+    const cancelled = signal?.aborted || generation !== getAuthGeneration() ||
+      ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError");
+    reportTiming("asr.attempt", performance.now() - directStarted, {
+      engine: "xfyun", transport: "direct", interactionId, stage: "open", attempt: 1,
+      outcome: cancelled ? "cancelled" : "error", fallback_reason: "unavailable",
+    });
     assertAuthGeneration(generation, signal);
+    signal?.throwIfAborted();
     if ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError") throw error;
+  }
+  const relayStarted = performance.now();
+  try {
     const stream = await openRelayAsrStream(cb, language, signal);
     try { assertAuthGeneration(generation, signal); }
     catch (error) { stream.close(); throw error; }
+    reportTiming("asr.attempt", performance.now() - relayStarted, {
+      engine: "xfyun", transport: "relay", interactionId, stage: "open", attempt: 2,
+      outcome: "ok", fallback_reason: "unavailable",
+    });
     return measureAsrStream(stream, "relay", signal);
+  } catch (error) {
+    reportTiming("asr.attempt", performance.now() - relayStarted, {
+      engine: "xfyun", transport: "relay", interactionId, stage: "open", attempt: 2,
+      outcome: signal?.aborted ? "cancelled" : "error", fallback_reason: "unavailable",
+    });
+    throw error;
   }
 }
 
@@ -84,31 +92,40 @@ export function openRelayAsrStream(
     ws.binaryType = "arraybuffer";
 
     let ready = false;
-    let pendingFinal: ((text: string) => void) | null = null;
+    let closeNotified = false;
+    let pendingFinal: { resolve: (text: string) => void; reject: (error: unknown) => void } | null = null;
     let finalTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const settlePending = (text: string) => {
+    const settlePending = (text = "", error?: unknown) => {
       clearTimeout(finalTimer);
       finalTimer = undefined;
-      const r = pendingFinal;
+      const pending = pendingFinal;
       pendingFinal = null;
-      r?.(text);
+      if (error) pending?.reject(error); else pending?.resolve(text);
+    };
+
+    const notifyClose = () => {
+      if (closeNotified) return;
+      closeNotified = true;
+      cb.onClose?.();
     };
 
     const readyTimer = setTimeout(() => {
       if (!ready) {
-        try {
-          ws.close();
-        } catch {
-          /* ignore */
-        }
+        try { ws.close(); } catch { /* already closed */ }
         reject(new Error("asr stream handshake timed out"));
       }
     }, READY_TIMEOUT_MS);
 
     const cancelled = () => {
-      try { assertAuthGeneration(generation, signal); return false; }
-      catch (error) { reject(error); api.close(); return true; }
+      try {
+        assertAuthGeneration(generation, signal);
+        return false;
+      } catch (error) {
+        reject(error);
+        api.close(error);
+        return true;
+      }
     };
     const onAbort = () => { cancelled(); };
 
@@ -116,64 +133,40 @@ export function openRelayAsrStream(
       send: (pcm) => {
         if (cancelled()) return;
         if (ws.readyState === WebSocket.OPEN) {
-          try {
-            ws.send(pcm);
-          } catch {
-            /* a dropped frame is fine; iFlytek tolerates gaps */
-          }
+          try { ws.send(pcm); } catch { /* a dropped frame is recovered from complete PCM */ }
         }
       },
-      finishUtterance: () =>
-        new Promise<string>((res) => {
-          if (cancelled()) { res(""); return; }
-          if (ws.readyState !== WebSocket.OPEN) {
-            res("");
-            return;
-          }
-          pendingFinal = res;
-          try {
-            ws.send(JSON.stringify({ type: "end" }));
-          } catch {
-            settlePending("");
-            return;
-          }
-          // Don't hang the turn if the final never arrives.
-          finalTimer = setTimeout(() => {
-            if (pendingFinal !== res) return;
-            settlePending("");
-            // A late final belongs to this utterance. Retire the connection so
-            // it cannot settle a later turn while buffered ASR is recovering.
-            try {
-              ws.close();
-            } catch {
-              cb.onClose?.();
-            }
-          }, FINAL_TIMEOUT_MS);
-        }),
-      close: () => {
+      finishUtterance: () => new Promise<string>((resolveFinal, rejectFinal) => {
+        if (pendingFinal) { rejectFinal(new Error("ASR final is already pending")); return; }
+        if (cancelled()) { rejectFinal(cancelledError()); return; }
+        if (ws.readyState !== WebSocket.OPEN) { rejectFinal(new Error("ASR connection closed")); return; }
+        pendingFinal = { resolve: resolveFinal, reject: rejectFinal };
+        try {
+          ws.send(JSON.stringify({ type: "end" }));
+        } catch (error) {
+          settlePending("", error);
+          return;
+        }
+        finalTimer = setTimeout(() => {
+          if (!pendingFinal) return;
+          const error = new Error("ASR final timed out");
+          settlePending("", error);
+          try { ws.close(); } catch { /* already closed */ }
+          notifyClose();
+        }, FINAL_TIMEOUT_MS);
+      }),
+      close: (error?: unknown) => {
         clearTimeout(readyTimer);
         signal?.removeEventListener("abort", onAbort);
-        settlePending("");
-        try {
-          ws.send(JSON.stringify({ type: "close" }));
-        } catch {
-          /* ignore */
-        }
-        try {
-          ws.close();
-        } catch {
-          /* ignore */
-        }
+        settlePending("", error ?? new Error("ASR connection closed"));
+        try { ws.send(JSON.stringify({ type: "close" })); } catch { /* already closed */ }
+        try { ws.close(); } catch { /* already closed */ }
       },
     };
 
     ws.onopen = () => {
       if (cancelled()) return;
-      try {
-        ws.send(JSON.stringify({ type: "start", language }));
-      } catch {
-        /* onclose/onerror will reject */
-      }
+      try { ws.send(JSON.stringify({ type: "start", language })); } catch { /* onclose rejects */ }
     };
 
     ws.onmessage = (ev) => {
@@ -181,9 +174,7 @@ export function openRelayAsrStream(
       let msg: { type?: string; text?: string; message?: string };
       try {
         msg = JSON.parse(typeof ev.data === "string" ? ev.data : "");
-      } catch {
-        return;
-      }
+      } catch { return; }
       if (!ready) {
         if (msg.type === "ready") {
           ready = true;
@@ -191,18 +182,14 @@ export function openRelayAsrStream(
           resolve(api);
         } else if (msg.type === "error") {
           clearTimeout(readyTimer);
-          try {
-            ws.close();
-          } catch {
-            /* ignore */
-          }
+          try { ws.close(); } catch { /* already closed */ }
           reject(new Error(msg.message || "asr stream unavailable"));
         }
         return;
       }
       if (msg.type === "partial") cb.onPartial(msg.text ?? "");
       else if (msg.type === "final") settlePending(msg.text ?? "");
-      else if (msg.type === "error") api.close();
+      else if (msg.type === "error") api.close(new Error("ASR provider error"));
     };
 
     ws.onerror = () => {
@@ -215,8 +202,8 @@ export function openRelayAsrStream(
     ws.onclose = () => {
       signal?.removeEventListener("abort", onAbort);
       clearTimeout(readyTimer);
-      settlePending(""); // unblock any in-flight finishUtterance
-      if (ready) cb.onClose?.();
+      settlePending("", signal?.aborted ? cancelledError() : new Error("ASR connection closed"));
+      if (ready) notifyClose();
       else reject(new Error("asr stream closed before ready"));
     };
     signal?.addEventListener("abort", onAbort, { once: true });

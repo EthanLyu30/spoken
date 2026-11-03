@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ vi.mock("../components/PlayfulBackground", () => ({ PlayfulBackground: () => nul
 import Conversation from "./Conversation";
 import { bindInteraction, getInteraction } from "../lib/telemetry";
 import type { CallCallbacks } from "../lib/call";
+import { MAX_AUDIO_BYTES } from "../lib/audioLimits";
 afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
   vi.clearAllMocks();
@@ -125,6 +126,24 @@ it("does not fall back to a new-credential chat request when an old stream fails
   expect(mocks.postChat).toHaveBeenCalledTimes(1);
   view.unmount();
 });
+
+it("stops ordinary recording when the audio byte limit is exceeded without starting ASR", async () => {
+  let emit: ((pcm: ArrayBuffer) => void) | undefined;
+  let captureSignal: AbortSignal | undefined;
+  mocks.startRecording.mockImplementation(async (onPcm, signal) => {
+    emit = onPcm; captureSignal = signal;
+    return { stop: vi.fn().mockResolvedValue(new ArrayBuffer(1280)) };
+  });
+  const user = userEvent.setup();
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", { name: "开始录音" }));
+  act(() => emit?.(new ArrayBuffer(MAX_AUDIO_BYTES + 1)));
+  expect(captureSignal?.aborted).toBe(true);
+  expect(screen.getByText("录音最长180秒，请缩短后再试。")).toBeInTheDocument();
+  expect(mocks.postAsr).not.toHaveBeenCalled();
+});
+
 
 it.each(["identity", "unmount"])("cancels the push-to-talk transcription signal on %s", async reason => {
   const { setToken } = await import("../lib/authToken");
@@ -250,6 +269,12 @@ it("prepares voice discovery after push-to-talk ASR and before its model request
   await screen.findByText("Here you go.");
   expect(mocks.prepareSpeech.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.postAsr.mock.invocationCallOrder[0]);
   expect(mocks.prepareSpeech.mock.invocationCallOrder[0]).toBeLessThan(mocks.streamChat.mock.invocationCallOrder[0]);
+  const asrSignal = mocks.postAsr.mock.calls[0][1] as AbortSignal;
+  const chatSignal = mocks.streamChat.mock.calls[0][3] as AbortSignal;
+  const interactionId = getInteraction(asrSignal);
+  expect(interactionId).toMatch(/^[a-f0-9]{32}$/);
+  expect(getInteraction(chatSignal)).toBe(interactionId);
+  expect(mocks.speakText.mock.calls.at(-1)?.[2]).toMatchObject({ interactionId });
 });
 it("prepares call plain fallback discovery before requesting the fallback reply", async () => {
   const queue = {started:new Promise(() => {}),feed:vi.fn(),end:vi.fn().mockResolvedValue(undefined),stop:vi.fn()};

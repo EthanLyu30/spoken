@@ -3,15 +3,15 @@
  * simple energy-based VAD, then transcribe -> respond -> speak -> resume.
  * Turn-based (not full-duplex): the mic is ignored while Pip thinks/speaks.
  *
- * Resilience: the AudioContext is kept resumed (browsers suspend it when the
- * tab is backgrounded / the device changes), the mic is re-acquired if its
- * track drops, and each turn's transcribe/respond is retried once on a blip.
+ * Resilience: the AudioContext is kept resumed, the mic is re-acquired if its
+ * track drops, and each turn has one bounded complete-recording recovery.
  */
 import { flatten, floatToPcm16, resampleTo16k } from "./recorder";
 import { openAsrStream, type AsrStream } from "./asrStream";
 import { createCaptureProcessor, type CaptureProcessor } from "./audioCapture";
 import { bindInteraction, newInteractionId, reportTiming } from "./telemetry";
 import { assertAuthGeneration, getAuthGeneration, subscribeAuthGeneration } from "./authToken";
+import { asrTurnBudgetMs } from "./transcribe";
 
 export type CallPhase = "listening" | "thinking" | "speaking";
 
@@ -69,15 +69,6 @@ const BARGE_IN_RMS = 0.05; // must be well above residual TTS echo
 const BARGE_IN_MS = 240;
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-async function retryOnce<T>(fn: () => Promise<T>, signal: AbortSignal): Promise<T> {
-  try {
-    return await fn();
-  } catch {
-    signal.throwIfAborted();
-    return await fn();
-  }
-}
 
 export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   const identityGeneration = getAuthGeneration();
@@ -190,6 +181,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     turnController = controller;
     const { signal } = controller;
     bindInteraction(signal, interactionId);
+    const asrTimer = setTimeout(() => controller.abort(), asrTurnBudgetMs(pcm) + 8_000);
     if (asr) bindInteraction(asr, interactionId);
     busy = true;
     bargeFrames = [];
@@ -198,25 +190,24 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
       // Prefer the streaming final (already mid-flight); fall back to a buffered
       // POST if streaming is unavailable or yielded nothing.
       let text = "";
+      let streamAttempted = false;
+      let streamFailed = false;
       if (!useLocalAsr && asr) {
+        streamAttempted = true;
         try {
           text = (await asr.finishUtterance()).trim();
         } catch {
-          text = "";
+          streamFailed = true;
         }
       }
       assertAuthGeneration(identityGeneration, signal);
-      if (!text) {
-        text = (
-          await retryOnce(() => {
-            assertAuthGeneration(identityGeneration, signal);
-            return cb.transcribe(pcm, useLocalAsr ? "local" : "cloud", signal);
-          },
-            signal,
-          )
-        ).trim();
+      if (!text && (!streamAttempted || streamFailed)) {
+        // One complete-clip recovery. Its own direct→HTTP fallback is not
+        // wrapped in another retry, and a real empty stream final is not retried.
+        text = (await cb.transcribe(pcm, useLocalAsr ? "local" : "cloud", signal)).trim();
       }
       assertAuthGeneration(identityGeneration, signal);
+      clearTimeout(asrTimer);
       if (text && !ended && !signal.aborted) {
         // reply() generates and speaks the answer; it flips us to "speaking"
         // (via the callback) as soon as the first sentence starts. That's also
@@ -236,6 +227,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
       outcome = signal.aborted || ended ? "cancelled" : "error";
       if (!ended && !signal.aborted) cb.onError("这一句没接上，继续说就好～");
     } finally {
+      clearTimeout(asrTimer);
       reportTiming("voice.complete", performance.now() - startedAt, { interactionId, outcome: signal.aborted ? "cancelled" : outcome });
       if (generation === turnGeneration) {
         busy = false;

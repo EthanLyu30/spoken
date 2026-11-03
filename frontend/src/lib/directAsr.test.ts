@@ -51,12 +51,20 @@ describe("direct cloud ASR transport", () => {
     expect(socket.readyState).toBe(Socket.CLOSED);
   });
 
+  it("resolves a real empty final without turning it into a transport failure", async () => {
+    const { stream, socket } = await ready();
+    stream.send(new Uint8Array(1280).fill(1).buffer);
+    const final = stream.finishUtterance();
+    socket.result({ status: 2 });
+    await expect(final).resolves.toBe("");
+  });
+
   it("closes an in-flight recording immediately when cancelled", async () => {
     const controller = new AbortController();
     const { stream, socket, onClose } = await ready(controller.signal);
     stream.send(new ArrayBuffer(1280));
     const final = stream.finishUtterance(); controller.abort();
-    expect(await final).toBe("");
+    await expect(final).rejects.toMatchObject({ name: "AbortError" });
     expect(socket.readyState).toBe(Socket.CLOSED);
     expect(onClose).toHaveBeenCalledOnce();
   });
@@ -106,7 +114,7 @@ describe("direct cloud ASR transport", () => {
     socket.onmessage?.({ data: JSON.stringify({ code: 10005, message: "rejected" }) });
     const final = stream.finishUtterance();
     socket.result({ status: 2, result: { sn: 0, ws: [{ cw: [{ w: "tail only" }] }] } });
-    expect(await final).toBe("");
+    await expect(final).rejects.toThrow("ASR connection closed");
   });
 
   it("keeps direct recognition available when an unused connection expires", async () => {
@@ -133,8 +141,9 @@ describe("direct cloud ASR transport", () => {
     stream.send(new ArrayBuffer(1280));
     socket.result({ status: 1, result: { sn: 0, ws: [{ cw: [{ w: "unfinished" }] }] } });
     const final = stream.finishUtterance();
+    const checked = expect(final).rejects.toThrow("ASR final timed out");
     await vi.advanceTimersByTimeAsync(5_100);
-    expect(await final).toBe("");
+    await checked;
     const { openDirectAsrStream } = await import("./directAsr");
     await expect(openDirectAsrStream({ onPartial: vi.fn() })).rejects.toThrow();
     expect(Socket.instances).toHaveLength(1);

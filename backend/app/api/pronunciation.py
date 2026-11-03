@@ -3,11 +3,13 @@
 import asyncio
 import json
 import xml.etree.ElementTree as ET
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 
+from app.api.audio import read_pcm
 from app.schemas.pronunciation import PronunciationResult
-from app.core.observability import trace_error
+from app.core.observability import span, trace_error
 from app.services.pronunciation import parse_ise_xml
 from app.services.xf_ise import MAX_AUDIO_BYTES, XfIseClient, XfIseError
 
@@ -26,15 +28,18 @@ async def pronunciation(
     request: Request,
     text: str,
     language: str = "en",
+    entry: Literal["turn_correction", "follow_read", "unknown"] = "unknown",
     client: XfIseClient = Depends(get_ise_client),
 ) -> PronunciationResult:
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="Missing reference text")
-    pcm = await request.body()
-    if not pcm:
-        raise HTTPException(status_code=400, detail="Empty audio body")
+    text = text.strip()
+    if not 1 <= len(text) <= 2000:
+        raise HTTPException(status_code=400, detail="Reference text must contain 1–2000 characters")
+    if language not in ("en", "cn"):
+        raise HTTPException(status_code=400, detail="Unsupported language")
+    pcm = await read_pcm(request)
     try:
-        xml = await client.evaluate_raw(text, pcm, language=language)
+        with span("pronunciation.request", entry=entry):
+            xml = await client.evaluate_raw(text, pcm, language=language)
     except XfIseError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
@@ -54,10 +59,16 @@ async def pronunciation_stream(ws: WebSocket, client: XfIseClient = Depends(get_
                 raise ValueError("Expected start message")
             text = start.get("text")
             language = start.get("language", "en")
-            if not isinstance(text, str) or not text.strip() or len(text) > 2000:
+            entry = start.get("entry", "unknown")
+            if not isinstance(text, str):
+                raise ValueError("Reference text must contain 1–2000 characters")
+            text = text.strip()
+            if not 1 <= len(text) <= 2000:
                 raise ValueError("Reference text must contain 1–2000 characters")
             if language not in ("en", "cn"):
                 raise ValueError("Unsupported language")
+            if entry not in ("turn_correction", "follow_read", "unknown"):
+                raise ValueError("Unsupported entry")
 
             async def ready():
                 await ws.send_json({"type": "ready"})
@@ -109,18 +120,19 @@ async def pronunciation_stream(ws: WebSocket, client: XfIseClient = Depends(get_
 
             source = audio()
             reader = asyncio.create_task(read_audio())
-            evaluator = asyncio.create_task(client.evaluate_stream(text, source, language=language, on_ready=ready))
-            try:
-                done, _ = await asyncio.wait((reader, evaluator), return_when=asyncio.FIRST_COMPLETED)
-                if reader in done:
-                    reader.result()  # Disconnect/protocol failures interrupt evaluation promptly.
-                xml = await evaluator
-            finally:
-                for task in (reader, evaluator):
-                    if not task.done():
-                        task.cancel()
-                await asyncio.gather(reader, evaluator, return_exceptions=True)
-                await source.aclose()
+            with span("pronunciation.request", entry=entry):
+                evaluator = asyncio.create_task(client.evaluate_stream(text, source, language=language, on_ready=ready))
+                try:
+                    done, _ = await asyncio.wait((reader, evaluator), return_when=asyncio.FIRST_COMPLETED)
+                    if reader in done:
+                        reader.result()  # Disconnect/protocol failures interrupt evaluation promptly.
+                    xml = await evaluator
+                finally:
+                    for task in (reader, evaluator):
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(reader, evaluator, return_exceptions=True)
+                    await source.aclose()
             result = parse_ise_xml(xml)
             await ws.send_json({"type": "result", "result": result.model_dump()})
     except WebSocketDisconnect:

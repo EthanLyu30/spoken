@@ -37,6 +37,8 @@ it("uploads while the microphone is recording and saves one streamed result", as
   act(() => socket.message({ type: "result", result: score })); await act(async () => { });
   expect(screen.getByText("91")).toBeVisible(); expect(assessmentPosts()).toHaveLength(0);
   expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith("/api/practice"))).toHaveLength(1);
+  const metrics = fetcher.mock.calls.filter(([url]) => String(url).includes("/api/telemetry/client")).map(([, init]) => JSON.parse(init.body as string));
+  expect(metrics).toContainEqual(expect.objectContaining({ operation: "pronunciation.stop_to_result", entry: "follow_read", transport: "relay", audio_bytes: 1280, outcome: "ok" }));
 });
 it.each(["error", "timeout", "unsupported"])("uses one complete buffered assessment if startup never becomes ready: %s", async failure => {
   if (failure === "unsupported") vi.stubGlobal("WebSocket", class { constructor() { throw new Error("unsupported"); } });
@@ -80,11 +82,18 @@ it("creates no provider socket when permission is denied or a pending grant is c
   expect(stop).toHaveBeenCalledTimes(1); expect(Socket.instances).toHaveLength(0); expect(fetcher).not.toHaveBeenCalled();
 });
 it("retries only saving the streamed score using the same receipt", async () => {
-  fetcher.mockResolvedValueOnce(new Response("{}", { status: 503 })).mockResolvedValueOnce(new Response("{}"));
+  let practiceAttempts = 0;
+  fetcher.mockImplementation(async (url: string) => {
+    if (String(url).endsWith("/api/practice")) {
+      practiceAttempts += 1;
+      return new Response("{}", { status: practiceAttempts === 1 ? 503 : 200 });
+    }
+    return new Response(JSON.stringify(String(url).includes("/api/pronunciation") ? score : { id: 1 }));
+  });
   const { socket } = await ready(); await act(async () => { fireEvent.click(screen.getByRole("button", { name: "停止评分" })); });
   await act(async () => { socket.message({ type: "result", result: score }); }); expect(screen.getByRole("alert")).toBeVisible();
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "重试保存" })); });
-  const bodies = fetcher.mock.calls.map(([, init]) => JSON.parse(init.body as string));
+  const bodies = fetcher.mock.calls.filter(([url]) => String(url).endsWith("/api/practice")).map(([, init]) => JSON.parse(init.body as string));
   expect(bodies[0].client_request_id).toEqual(expect.any(String)); expect(bodies[1].client_request_id).toBe(bodies[0].client_request_id);
   expect(startRecording).toHaveBeenCalledTimes(1); expect(Socket.instances).toHaveLength(1); expect(assessmentPosts()).toHaveLength(0);
 });

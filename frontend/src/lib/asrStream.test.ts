@@ -35,8 +35,9 @@ describe("streaming ASR final boundaries", () => {
   it("discards a timed-out connection before audio from the next utterance is sent", async () => {
     const { stream, socket, onClose } = await ready();
     const final = stream.finishUtterance();
+    const checked = expect(final).rejects.toThrow("ASR final timed out");
     await vi.advanceTimersByTimeAsync(9_000);
-    expect(await final).toBe("");
+    await checked;
     const before = socket.sent.length;
     stream.send(new ArrayBuffer(1_280));
     expect(socket.sent).toHaveLength(before);
@@ -47,11 +48,9 @@ describe("streaming ASR final boundaries", () => {
     const { stream, socket } = await ready();
     // The transport's close event may arrive much later than a user hangup.
     socket.close = () => { socket.readyState = Socket.CLOSED; };
-    const settled = vi.fn();
-    void stream.finishUtterance().then(settled);
+    const final = stream.finishUtterance();
     stream.close();
-    await Promise.resolve();
-    expect(settled).toHaveBeenCalledWith("");
+    await expect(final).rejects.toThrow("ASR connection closed");
   });
 
   it("returns the final transcript and keeps a healthy connection available", async () => {
@@ -60,6 +59,15 @@ describe("streaming ASR final boundaries", () => {
     socket.message({ type: "partial", text: "coffee" });
     socket.message({ type: "final", text: "coffee please" });
     expect(await final).toBe("coffee please");
+    expect(socket.readyState).toBe(Socket.OPEN);
+    stream.close();
+  });
+
+  it("resolves an explicit empty final without treating it as a transport failure", async () => {
+    const { stream, socket } = await ready();
+    const final = stream.finishUtterance();
+    socket.message({ type: "final", text: "" });
+    await expect(final).resolves.toBe("");
     expect(socket.readyState).toBe(Socket.OPEN);
     stream.close();
   });
@@ -90,7 +98,7 @@ describe("streaming ASR final boundaries", () => {
     socket.message({ type: "error", message: "opening timed out" });
     const final = stream.finishUtterance();
     socket.message({ type: "final", text: "tail only" });
-    expect(await final).toBe("");
+    await expect(final).rejects.toThrow("ASR connection closed");
     expect(onClose).toHaveBeenCalledOnce();
     expect(socket.readyState).toBe(Socket.CLOSED);
   });

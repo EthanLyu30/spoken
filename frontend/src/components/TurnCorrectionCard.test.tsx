@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { postPronunciation, postTurnCorrection } from "../lib/api";
 import { DictionaryProvider } from "./dictionary/DictionaryProvider";
 import { TurnCorrectionCard } from "./TurnCorrectionCard";
@@ -56,6 +56,7 @@ describe("TurnCorrectionCard", () => {
     vi.mocked(postTurnCorrection).mockResolvedValue(correction);
     vi.mocked(postPronunciation).mockResolvedValue(pronunciation);
   });
+  afterEach(() => vi.unstubAllGlobals());
 
   it("checks text only for a typed turn and caches the result", async () => {
     const user = userEvent.setup();
@@ -99,7 +100,7 @@ describe("TurnCorrectionCard", () => {
 
     expect(await screen.findByText("发音参考")).toBeInTheDocument();
     expect(screen.getByText("78")).toBeInTheDocument();
-    expect(postPronunciation).toHaveBeenCalledWith("I very like it", pcm);
+    expect(postPronunciation).toHaveBeenCalledWith("I very like it", pcm, expect.any(AbortSignal), "turn_correction");
   });
 
   it("assesses only the spoken fragment for mixed input", async () => {
@@ -123,8 +124,8 @@ describe("TurnCorrectionCard", () => {
       text: "Could I get I very like it",
       previous_partner_message: "What would you like?",
       custom: undefined,
-    });
-    expect(postPronunciation).toHaveBeenCalledWith("I very like it", pcm);
+    }, expect.any(AbortSignal));
+    expect(postPronunciation).toHaveBeenCalledWith("I very like it", pcm, expect.any(AbortSignal), "turn_correction");
     expect(screen.getByText("评测语音片段：I very like it")).toBeInTheDocument();
   });
 
@@ -170,6 +171,47 @@ describe("TurnCorrectionCard", () => {
     await user.click(await screen.findByRole("button", { name: "放入输入框" }));
 
     expect(onUseSuggestion).toHaveBeenCalledWith("I really like it.");
+  });
+
+  it("cancels unfinished work when collapsed and starts fresh requests on reopen", async () => {
+    const signals: AbortSignal[] = [];
+    vi.mocked(postTurnCorrection).mockImplementation((_payload, signal) => {
+      signals.push(signal!); return new Promise(() => undefined);
+    });
+    vi.mocked(postPronunciation).mockImplementation((_text, _pcm, signal) => {
+      signals.push(signal!); return new Promise(() => undefined);
+    });
+    const user = userEvent.setup();
+    renderWithDictionary(
+      <TurnCorrectionCard scenarioId="cafe" text="I very like it" previousPartnerMessage=""
+        meta={{ source: "voice", spokenText: "I very like it", pcm: new ArrayBuffer(8) }} onUseSuggestion={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: "即时纠错" }));
+    await user.click(screen.getByRole("button", { name: "收起即时纠错" }));
+    expect(signals).toHaveLength(2);
+    expect(signals.every(signal => signal.aborted)).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "即时纠错" }));
+    expect(postTurnCorrection).toHaveBeenCalledTimes(2);
+    expect(postPronunciation).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports bounded click-to-result metrics with the original interaction", async () => {
+    const samples: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      if (url.includes("/api/telemetry/client")) samples.push(JSON.parse(String(init.body)));
+      return new Response(null, { status: 202 });
+    }));
+    const user = userEvent.setup();
+    renderWithDictionary(
+      <TurnCorrectionCard scenarioId="cafe" text="I very like it" previousPartnerMessage=""
+        meta={{ source: "voice", spokenText: "I very like it", pcm: new ArrayBuffer(8), interactionId: "a".repeat(32) }} onUseSuggestion={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: "即时纠错" }));
+    await screen.findByText("发音参考");
+    await vi.waitFor(() => expect(samples).toHaveLength(1));
+    expect(samples[0]).toMatchObject({ operation: "pronunciation.click_to_result", entry: "turn_correction", audio_bytes: 8, interaction_id: "a".repeat(32), outcome: "ok" });
+    expect(JSON.stringify(samples)).not.toContain("I very like it");
   });
 
   it("makes the recommended sentence available for word lookup", async () => {
