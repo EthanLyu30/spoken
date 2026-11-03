@@ -89,11 +89,18 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
           return text || latest.trim();
         } catch (error) {
           if (finishSignal?.aborted) throw error;
-          // A partial transcript is still useful and much cheaper than
-          // replaying a long recording through HTTP.
+          // A deploy can close the relay mid-utterance. Prefer the complete
+          // recording over a truncated partial; keep the partial only if the
+          // recovery request also fails.
           const partial = latest.trim();
+          try {
+            const recovered = (await postAsr(pcm, finishSignal)).trim();
+            if (recovered) return recovered;
+          } catch (recoveryError) {
+            if (finishSignal?.aborted || control.signal.aborted) throw recoveryError;
+          }
           if (partial) return partial;
-          return (await postAsr(pcm, finishSignal)).trim();
+          throw error;
         } finally {
           openedStream.close();
         }
