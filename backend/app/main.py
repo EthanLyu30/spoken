@@ -119,6 +119,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Trace-Id", "Server-Timing"],
+    max_age=86_400,
 )
 
 # API routes are mounted under /api
