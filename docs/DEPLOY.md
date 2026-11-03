@@ -92,7 +92,7 @@ npx --yes wrangler@4.151.2 login
 npx --yes wrangler@4.151.2 deploy --config ops/keepalive/wrangler.jsonc
 ```
 
-- Cron 使用 UTC：`*/5 0-15 * * *`，即北京时间 **08:00–24:00，每 5 分钟一次**；夜间仍允许 Render 休眠，次日首次请求可能需要冷启动。
+- Cron 使用 UTC：`*/5 * * * *`，即 **24/7，每 5 分钟一次**。31 天约消耗 **744 Render instance hours**，免费 workspace 额度为 **750h/月**，只剩约 6 小时余量；必须保持只有一个活跃的免费服务，否则可能超额并导致 Render 暂停免费服务到月初。
 - Worker 只访问 `/api/ready`（数据库就绪探针），没有公开 HTTP 入口，也不调用 DeepSeek / 讯飞。目标地址在配置的 `vars.BACKEND_HEALTH_URL` 中修改。
 - Cloudflare 和 GitHub 复用同一个检查实现：单次最多等 75 秒，失败最多尝试 3 次，间隔 5 秒；必须收到健康 JSON（`status: "ok"`）才算成功，200 状态的 HTML 加载页不算成功。
 - 重试耗尽会让 Worker 调用和 GitHub 任务失败，不再显示虚假的成功。Cloudflare Dashboard → Workers → `spoken-backend-keepalive` → Observability 可检查执行时间、成功和失败日志。

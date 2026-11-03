@@ -6,8 +6,9 @@
   "workers_dev": false,
   "preview_urls": false,
   "triggers": {
-    // UTC: every five minutes, 08:00–24:00 China time, as with the existing job.
-    "crons": ["*/5 0-15 * * *"]
+    // UTC: every five minutes, 24/7. This intentionally uses the full Render
+    // free allowance (~744h in a 31-day month against a 750h workspace cap).
+    "crons": ["*/5 * * * *"]
   },
   "vars": {
     "BACKEND_HEALTH_URL": "https://spoken-backend-sg.onrender.com/api/ready"

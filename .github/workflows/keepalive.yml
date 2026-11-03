@@ -2,12 +2,13 @@ name: Keep backend warm
 
 # Best-effort fallback for the independent Cloudflare Cron in ops/keepalive.
 # GitHub schedule events can be delayed/dropped and cannot guarantee warmth.
-# Both run during 08:00–24:00 China time (~490 Render instance-hours/month).
+# Both run 24/7 to keep the single free Render service awake (~744 instance-hours
+# in a 31-day month against the 750-hour workspace allowance).
 # The shared probe allows cold starts and fails visibly after exhausted retries.
 
 on:
   schedule:
-    - cron: "3-58/5 0-15 * * *" # stagger away from the top of the hour
+    - cron: "3-58/5 * * * *" # stagger away from the top of the hour
   workflow_dispatch: {}
 
 permissions:
