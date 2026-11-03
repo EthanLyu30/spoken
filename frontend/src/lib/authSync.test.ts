@@ -126,6 +126,19 @@ it("bounds unresolved startup so a hung refresh exposes retry without discarding
   } finally { vi.useRealTimers(); }
 });
 
+it("paints a cached account immediately and still validates it in the background", async () => {
+  const payload = btoa(JSON.stringify({ sub: "2" })).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+  localStorage.setItem("spoken-token", `header.${payload}.signature`);
+  localStorage.setItem("spoken-user", JSON.stringify({ subject: "2", user: account(2) }));
+  const { useAuth } = await import("../store/auth");
+  expect(useAuth.getState().user?.id).toBe(2);
+  expect(useAuth.getState().resolving).toBe(false);
+  stop = (await import("./authSync")).initializeAuthSync();
+  await flush();
+  expect(api.getMe).toHaveBeenCalledOnce();
+  expect(useAuth.getState().user?.id).toBe(2);
+});
+
 it("does not restore a late vocabulary mutation after the canonical identity changes", async () => {
   const { token, useAuth, useWords } = await setup();
   token.setToken("a"); useAuth.setState({ user: account(1), resolving: false });

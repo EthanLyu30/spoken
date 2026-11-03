@@ -52,7 +52,6 @@ def create_record(db: Session, client_id: str, payload: PracticeCreate,
     except Exception:
         db.rollback()
         raise
-    db.refresh(record)
     prune_records(db, client_id)
     return record
 

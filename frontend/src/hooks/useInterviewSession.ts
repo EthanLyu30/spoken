@@ -8,7 +8,11 @@ import {
   type InterviewScore,
 } from "../lib/api";
 import { startRecording, type ActiveRecorder } from "../lib/recorder";
-import { transcribeSpeech } from "../lib/transcribe";
+import {
+  createLiveTranscription,
+  transcribeSpeech,
+  type LiveTranscription,
+} from "../lib/transcribe";
 import { speakText, stopSpeaking } from "../lib/speech";
 import { getAuthGeneration } from "../lib/authToken";
 import { createPracticeId } from "../lib/sessionSave";
@@ -65,6 +69,7 @@ export function useInterviewSession(owner: string) {
   ownerRef.current = owner;
   const version = useRef(0);
   const recorder = useRef<ActiveRecorder | null>(null);
+  const live = useRef<LiveTranscription | null>(null);
   const interval = useRef<ReturnType<typeof setInterval> | null>(null);
   const controller = useRef<AbortController | null>(null);
   const locked = useRef(false);
@@ -90,6 +95,8 @@ export function useInterviewSession(owner: string) {
     if (playbackTimer.current) clearTimeout(playbackTimer.current);
     playbackTimer.current = null;
     stopSpeaking();
+    live.current?.close();
+    live.current = null;
     const rec = recorder.current;
     recorder.current = null;
     void rec?.stop().catch(() => undefined);
@@ -187,9 +194,13 @@ export function useInterviewSession(owner: string) {
     stopSpeaking();
     update({ qPhase: "starting", error: null, canRetryRecognition: false });
     pcm.current = null;
+    const liveStream = createLiveTranscription(controller.current?.signal);
+    live.current = liveStream;
     try {
-      const rec = await startRecording();
+      const rec = await startRecording((chunk) => liveStream.send(chunk));
       if (!active(run)) {
+        liveStream.close();
+        live.current = null;
         await rec.stop();
         return;
       }
@@ -205,6 +216,8 @@ export function useInterviewSession(owner: string) {
         if (left === 0) void finish(deck, idx, answers, mode, run);
       }, 200);
     } catch {
+      liveStream.close();
+      if (live.current === liveStream) live.current = null;
       if (active(run)) {
         locked.current = false;
         update({
@@ -236,13 +249,19 @@ export function useInterviewSession(owner: string) {
     clearTimer();
     const rec = recorder.current;
     recorder.current = null;
+    const liveStream = live.current;
+    live.current = null;
     update({ qPhase: "transcribing" });
     try {
       const audio = await rec.stop();
-      if (!active(run)) return;
+      if (!active(run)) {
+        liveStream?.close();
+        return;
+      }
       pcm.current = audio;
-      await recognize(deck, idx, answers, mode, run);
+      await recognize(deck, idx, answers, mode, run, liveStream ?? undefined);
     } catch {
+      liveStream?.close();
       if (active(run)) {
         locked.current = false;
         update({ qPhase: "ready", error: "录音未能完成，请重新录制本题。" });
@@ -255,13 +274,17 @@ export function useInterviewSession(owner: string) {
     answers: string[],
     mode: InterviewMode,
     run: number,
+    liveStream?: LiveTranscription,
   ) {
-    if (!pcm.current || !active(run)) return;
+    if (!pcm.current || !active(run)) {
+      liveStream?.close();
+      return;
+    }
     locked.current = true;
     update({ qPhase: "transcribing", error: null });
     try {
       const text = (
-        await transcribeSpeech(pcm.current, controller.current?.signal)
+        await transcribeSpeech(pcm.current, controller.current?.signal, "auto", liveStream)
       ).trim();
       if (!active(run)) return;
       if (!text) throw new Error("empty");
@@ -270,6 +293,7 @@ export function useInterviewSession(owner: string) {
         update({ draft: text, qPhase: "review", canRetryRecognition: false });
       else await accept(deck, idx, answers, text, mode, run);
     } catch {
+      liveStream?.close();
       if (active(run)) {
         locked.current = false;
         update({

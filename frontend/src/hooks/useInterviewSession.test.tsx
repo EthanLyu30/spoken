@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   savePractice: vi.fn(),
   startRecording: vi.fn(),
   transcribeSpeech: vi.fn(),
+  createLiveTranscription: vi.fn(),
   speakText: vi.fn(),
   stopSpeaking: vi.fn(),
 }));
@@ -38,6 +39,7 @@ beforeEach(() => {
     stop: vi.fn().mockResolvedValue(new ArrayBuffer(16)),
   });
   mocks.transcribeSpeech.mockResolvedValue("I enjoy running in the park.");
+  mocks.createLiveTranscription.mockReturnValue({ send: vi.fn(), finish: vi.fn(), close: vi.fn() });
   mocks.speakText.mockReturnValue({ done: Promise.resolve(), stop: vi.fn() });
   mocks.savePractice.mockResolvedValue({ id: 1 });
 });
@@ -160,6 +162,25 @@ it("keeps recorded audio for retry when recognition fails", async () => {
   expect(result.current.draft).toBe("Recovered answer.");
   expect(mocks.startRecording).toHaveBeenCalledTimes(1);
 });
+it("feeds interview recording chunks into the live ASR stream", async () => {
+  const live = { send: vi.fn(), finish: vi.fn(), close: vi.fn() };
+  mocks.createLiveTranscription.mockReturnValueOnce(live);
+  let emit: ((pcm: ArrayBuffer) => void) | undefined;
+  mocks.startRecording.mockImplementation(async (onPcm) => {
+    emit = onPcm;
+    return { stop: vi.fn().mockResolvedValue(new ArrayBuffer(16)) };
+  });
+  const { result } = renderHook(() => useInterviewSession("device-live"));
+  await act(async () => result.current.begin("practice", "exercise"));
+  await act(async () => result.current.startAnswer());
+  act(() => emit?.(new ArrayBuffer(16)));
+  await act(async () => result.current.finishAnswer());
+  expect(live.send).toHaveBeenCalled();
+  expect(mocks.transcribeSpeech).toHaveBeenCalledWith(
+    expect.any(ArrayBuffer), expect.anything(), "auto", live,
+  );
+});
+
 it("discards old-owner asynchronous results after switching accounts", async () => {
   let resolve!: (value: typeof deck) => void;
   mocks.getInterviewSet.mockReturnValueOnce(

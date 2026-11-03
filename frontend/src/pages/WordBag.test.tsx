@@ -106,28 +106,30 @@ it("excludes unsaved words from the review deck", async () => {
   expect(screen.getAllByRole("button",{name:"开始复习"}).every(button=>(button as HTMLButtonElement).disabled)).toBe(true);
 });
 
-it("keeps a failed review on the same card and retries the original choice", async () => {
+it("advances immediately, keeps a failed review visible, and retries the original choice", async () => {
   let reject!: (error:Error)=>void;
   review.mockReturnValueOnce(new Promise<void>((_resolve,r)=>{reject=r;})).mockResolvedValueOnce(undefined);
   useWords.setState({words:[{id:1,text:"hello",meaning:"你好",example:"",scenario_id:"",kind:"word",mastered:false,created_at:""}]});
   const user=userEvent.setup();render(<MemoryRouter><WordBag /></MemoryRouter>);
   await user.click(screen.getByRole("button",{name:"复习 1"}));
   await user.click(screen.getByRole("button",{name:/记得/}));
-  expect(screen.queryByText("复习完成！")).not.toBeInTheDocument();
-  await act(async()=>{reject(new Error("lost response"));});
-  expect(screen.getByRole("alert")).toBeVisible();
-  expect(screen.getByRole("button",{name:"忘了"})).toBeDisabled();
-  await user.click(screen.getByRole("button",{name:"重试保存"}));
+  // The card advances before the network write settles.
   expect(screen.getByText("复习完成！")).toBeVisible();
+  await act(async()=>{reject(new Error("lost response"));});
+  expect(screen.getByRole("alert")).toHaveTextContent("尚未确认保存");
+  await user.click(screen.getByRole("button",{name:"重试保存"}));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(review.mock.calls.slice(-2)).toEqual([[1,true],[1,true]]);
 });
 
 
-it("recovers the original choice when restarting a deck after an ambiguous save", async()=>{
+it("recovers the original choice when retrying an ambiguous save after advancing", async()=>{
   review.mockReset().mockRejectedValueOnce(Object.assign(new Error("retry original"),{remembered:true})).mockResolvedValueOnce(undefined);
   useWords.setState({words:[{id:1,text:"hello",meaning:"你好",example:"",scenario_id:"",kind:"word",mastered:false,created_at:""}]});
   const user=userEvent.setup();render(<MemoryRouter><WordBag /></MemoryRouter>);
   await user.click(screen.getByRole("button",{name:"复习 1"}));await user.click(screen.getByRole("button",{name:"忘了"}));
+  expect(screen.getByText("复习完成！")).toBeVisible();
   await user.click(screen.getByRole("button",{name:"重试保存"}));
-  expect(review.mock.calls).toEqual([[1,false],[1,true]]);expect(screen.getByText("记得 1 · 待加强 0")).toBeVisible();
+  expect(review.mock.calls).toEqual([[1,false],[1,true]]);
+  expect(screen.getByText("记得 0 · 待加强 1")).toBeVisible();
 });

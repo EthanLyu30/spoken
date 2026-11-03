@@ -55,7 +55,9 @@ export function initializeAuthSync(): () => void {
     cleanup = undefined;
   };
   const changed = reconcile();
-  if (!changed && getToken() && !useAuth.getState().user) void useAuth.getState().refresh();
+  // Always validate the canonical credential once at startup, even when a
+  // cached UI snapshot let the page paint immediately.
+  if (!changed && getToken()) void useAuth.getState().refresh();
   return cleanup;
 }
 export function cleanupAuthSync(): void { cleanup?.(); }

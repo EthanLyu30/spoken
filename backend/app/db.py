@@ -21,7 +21,19 @@ _url = get_settings().database_url
 _connect_args = {"check_same_thread": False} if _url.startswith("sqlite") else {}
 # Managed databases may terminate idle connections while the app stays alive.
 # Check on checkout; never replay an application transaction after failure.
-engine = create_engine(_url, connect_args=_connect_args, future=True, pool_pre_ping=True)
+# Remote Postgres benefits from a slightly larger LIFO pool: the most recently
+# used connection is already warm, and a bounded wait prevents an exhausted
+# pool from hanging a request for SQLAlchemy's 30 s default.
+_pool_options = {} if _url.startswith("sqlite") else {
+    "pool_size": 10,
+    "max_overflow": 20,
+    "pool_recycle": 300,
+    "pool_use_lifo": True,
+    "pool_timeout": 10,
+}
+engine = create_engine(
+    _url, connect_args=_connect_args, future=True, pool_pre_ping=True, **_pool_options
+)
 install_sql_timings()
 SessionLocal = sessionmaker(
     bind=engine, autoflush=False, expire_on_commit=False, class_=MeasuredSession

@@ -78,7 +78,6 @@ def create_word(
     except Exception:
         db.rollback()
         raise
-    db.refresh(entry)
     return entry
 
 
@@ -148,7 +147,6 @@ def review_word(db: Session, entry: WordEntry, remembered: bool,
     except Exception:
         db.rollback()
         raise
-    db.refresh(entry)
     return entry
 
 
@@ -173,5 +171,4 @@ def set_mastered(db: Session, entry: WordEntry, mastered: bool) -> WordEntry:
     _lock_entry(db, entry)
     entry.mastered = mastered
     db.commit()
-    db.refresh(entry)
     return entry

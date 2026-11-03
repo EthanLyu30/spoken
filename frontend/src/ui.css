@@ -2601,3 +2601,47 @@
 #growth-insights {
   scroll-margin-top: 24px;
 }
+
+/* Non-blocking account resolution notice. The route tree stays interactive. */
+.auth-notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 20px;
+  background: #fff4d6;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink);
+  font-size: 13px;
+  position: relative;
+  z-index: 46;
+}
+.auth-notice-error {
+  background: #ffe8e3;
+}
+.auth-notice button {
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  background: transparent;
+  color: var(--coral-deep);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.wordbag-save-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #f3b7ae;
+  border-radius: 14px;
+  background: #fff1ee;
+  color: var(--ink);
+  font-size: 13px;
+}

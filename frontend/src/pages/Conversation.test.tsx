@@ -2,10 +2,11 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ postChat: vi.fn(), postAsr: vi.fn(), streamChat: vi.fn(), speakText: vi.fn(), prepareSpeech: vi.fn(), createSpeechQueue: vi.fn(), postFeedback: vi.fn(), postSession: vi.fn(), startVoiceCall: vi.fn(), startRecording: vi.fn() }));
+const mocks = vi.hoisted(() => ({ postChat: vi.fn(), postAsr: vi.fn(), streamChat: vi.fn(), speakText: vi.fn(), prepareSpeech: vi.fn(), createSpeechQueue: vi.fn(), postFeedback: vi.fn(), postSession: vi.fn(), startVoiceCall: vi.fn(), startRecording: vi.fn(), openAsrStream: vi.fn() }));
 vi.mock("../lib/api", () => ({ ...mocks }));
 vi.mock("../lib/call", () => ({ startVoiceCall: mocks.startVoiceCall }));
 vi.mock("../lib/recorder", () => ({ startRecording: mocks.startRecording }));
+vi.mock("../lib/asrStream", () => ({ openAsrStream: mocks.openAsrStream }));
 vi.mock("../lib/speech", () => ({ speakText: mocks.speakText, prepareSpeech: mocks.prepareSpeech, createSpeechQueue: mocks.createSpeechQueue }));
 vi.mock("../components/ChatBubble", () => ({ ChatBubble: ({ text, onSpeak }: { text: string; onSpeak?: () => void }) => <div>{text}{onSpeak && <button onClick={onSpeak}>Replay {text}</button>}</div> }));
 vi.mock("../components/Buddy", () => ({ Buddy: () => null }));
@@ -24,6 +25,7 @@ beforeEach(() => {
   mocks.postFeedback.mockResolvedValue({ overall: 80, scores: [] });
   mocks.postSession.mockResolvedValue({});
   mocks.startVoiceCall.mockResolvedValue({ end: vi.fn() });
+  mocks.openAsrStream.mockRejectedValue(new Error("live ASR unavailable in test"));
 });
 
 it("reports buffered cloud recognition when the conversation falls back from streaming ASR", async () => {
@@ -125,6 +127,32 @@ it("does not fall back to a new-credential chat request when an old stream fails
   await Promise.resolve(); await Promise.resolve();
   expect(mocks.postChat).toHaveBeenCalledTimes(1);
   view.unmount();
+});
+
+it("streams push-to-talk audio into ASR instead of replaying the clip after stop", async () => {
+  const liveStream = {
+    send: vi.fn(),
+    finishUtterance: vi.fn().mockResolvedValue("A coffee, please."),
+    close: vi.fn(),
+  };
+  mocks.openAsrStream.mockResolvedValue(liveStream);
+  mocks.streamChat.mockResolvedValue("Coffee it is.");
+  let emit: ((pcm: ArrayBuffer) => void) | undefined;
+  mocks.startRecording.mockImplementation(async (onPcm) => {
+    emit = onPcm;
+    return { stop: vi.fn().mockResolvedValue(new ArrayBuffer(1280)) };
+  });
+  const user = userEvent.setup();
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", { name: "开始录音" }));
+  act(() => emit?.(new ArrayBuffer(1280)));
+  await user.click(await screen.findByRole("button", { name: "结束录音" }));
+  await waitFor(() => expect(mocks.streamChat).toHaveBeenCalled());
+  expect(mocks.openAsrStream).toHaveBeenCalledOnce();
+  expect(liveStream.send).toHaveBeenCalled();
+  expect(liveStream.finishUtterance).toHaveBeenCalledOnce();
+  expect(mocks.postAsr).not.toHaveBeenCalled();
 });
 
 it("stops ordinary recording when the audio byte limit is exceeded without starting ASR", async () => {

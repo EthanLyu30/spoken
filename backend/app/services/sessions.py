@@ -75,7 +75,6 @@ def create_session(db: Session, client_id: str, payload: SaveSessionRequest,
     except Exception:
         db.rollback()
         raise
-    db.refresh(session)
     prune_sessions(db, client_id)
     return session
 

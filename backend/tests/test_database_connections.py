@@ -1,7 +1,16 @@
 """Regression coverage for an idle connection closed outside SQLAlchemy."""
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect
 
 import app.db as database
+from app.main import app
+
+
+def test_ready_probe_round_trips_to_the_database():
+    response = TestClient(app).get("/api/ready")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "app": "Spoken", "database": "ok"}
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_closed_idle_connection_is_replaced_before_business_query():

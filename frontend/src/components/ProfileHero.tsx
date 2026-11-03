@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import { Camera, Check, LogOut, Pencil, X } from "lucide-react";
 import { Buddy } from "./Buddy";
 import { ProgressBar } from "./ui/ProgressBar";
@@ -27,7 +27,6 @@ export function ProfileHero({
   const generation = useRef(getAuthGeneration()).current;
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
-  const refresh = useAuth((s) => s.refresh);
   const updateProfile = useAuth((s) => s.updateProfile);
 
   const [authOpen, setAuthOpen] = useState(false);
@@ -35,12 +34,6 @@ export function ProfileHero({
   const [nameDraft, setNameDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  // Validate the persisted token once when the profile opens (clears it if stale).
-  useEffect(() => {
-    if (user) void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const name = user?.display_name?.trim() ?? "";
   const title = name || (user ? "我的账号" : "你好，练习者");

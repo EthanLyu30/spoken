@@ -308,10 +308,15 @@ function ReviewDeck({
   const [stats, setStats] = useState({ know: 0, again: 0 });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  const [failed, setFailed] = useState<{ id: number; remembered: boolean } | null>(null);
   const choice = useRef<boolean | null>(null);
   const locked = useRef(false);
+  const pending = useRef(0);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  // A new card re-opens the click guard; the previous save keeps running in
+  // the background and never blocks this card.
+  useEffect(() => { locked.current = false; }, [i]);
   const w = deck[i];
 
   if (!w) {
@@ -327,36 +332,59 @@ function ReviewDeck({
         <p className="text-xs text-muted">
           记得的词会过段时间再出现，忘了的很快会再考你。
         </p>
+        {saveError && failed && (
+          <div role="alert" className="wordbag-save-error">
+            <span>有一条复习尚未确认保存。</span>
+            <Button onClick={() => void retryFailed()}>重试保存</Button>
+          </div>
+        )}
         <Button onClick={onDone}>回到列表</Button>
       </section>
     );
   }
 
-  async function answer(remembered: boolean) {
-    if (locked.current) return;
+  function answer(remembered: boolean) {
+    if (locked.current || !w) return;
     locked.current = true;
     const generation = getAuthGeneration();
+    const target = w;
     const selected = choice.current ?? remembered;
     choice.current = selected;
+    // Advance immediately. The idempotent, owner-scoped review write continues
+    // in the background; a failure is surfaced with a retry that reuses the
+    // same receipt instead of trapping the learner on this card.
+    setStats((s) => (selected ? { ...s, know: s.know + 1 } : { ...s, again: s.again + 1 }));
+    setFlipped(false);
+    setI((x) => x + 1);
+    choice.current = null;
+    pending.current++;
     setSaving(true);
-    setSaveError(false);
     const current = () => mounted.current && generation === getAuthGeneration();
-    try {
-      await review(w.id, selected);
+    void Promise.resolve(review(target.id, selected)).catch((error: unknown) => {
       if (!current()) return;
-      setStats(s => selected ? {...s,know:s.know+1} : {...s,again:s.again+1});
-      setFlipped(false);
-      setI(x => x + 1);
-      choice.current = null;
-    } catch (error) {
-      if (current()) {
-        // A previous deck may have left an ambiguous save. Recover its original
-        // choice before retrying the same receipt, rather than trapping retries.
-        if (error && typeof error === "object" && "remembered" in error && typeof error.remembered === "boolean") choice.current = error.remembered;
-        setSaveError(true);
-      }
-    } finally {
-      if (current()) {locked.current = false;setSaving(false);}
+      // A previous deck may have left an ambiguous save. Recover its original
+      // choice before retrying the same receipt, rather than trapping retries.
+      const retryChoice = error && typeof error === "object" && "remembered" in error && typeof (error as { remembered?: unknown }).remembered === "boolean"
+        ? (error as { remembered: boolean }).remembered
+        : selected;
+      setFailed({ id: target.id, remembered: retryChoice });
+      setSaveError(true);
+    }).finally(() => {
+      if (!current()) return;
+      pending.current = Math.max(0, pending.current - 1);
+      if (pending.current === 0) setSaving(false);
+    });
+  }
+
+  async function retryFailed() {
+    if (!failed) return;
+    const target = failed;
+    setSaveError(false);
+    try {
+      await review(target.id, target.remembered);
+      if (mounted.current) setFailed(null);
+    } catch {
+      if (mounted.current) setSaveError(true);
     }
   }
 
@@ -394,13 +422,18 @@ function ReviewDeck({
         <span className="text-xs text-muted">点卡片翻面看释义</span>
       </div>
       <div className="flex gap-3">
-        <Button variant="soft" disabled={saving || saveError} onClick={() => void answer(false)}>
+        <Button variant="soft" onClick={() => answer(false)}>
           忘了
         </Button>
-        <Button disabled={saving || saveError} onClick={() => void answer(true)}>记得 ✓</Button>
+        <Button onClick={() => answer(true)}>记得 ✓</Button>
       </div>
-      {saving && <p role="status">正在保存复习…</p>}
-      {saveError && <div><p role="alert">上次选择“{choice.current ? "记得" : "忘了"}”尚未确认保存，请重试。</p><Button onClick={() => void answer(choice.current ?? false)}>重试保存</Button></div>}
+      {saving && <p role="status">正在后台保存复习…</p>}
+      {saveError && failed && (
+        <div role="alert" className="wordbag-save-error">
+          <span>上次选择“{failed.remembered ? "记得" : "忘了"}”尚未确认保存。</span>
+          <Button onClick={() => void retryFailed()}>重试保存</Button>
+        </div>
+      )}
     </section>
   );
 }

@@ -49,8 +49,10 @@ import { startRecording, type ActiveRecorder } from "../lib/recorder";
 import { startVoiceCall, type CallPhase, type VoiceCall } from "../lib/call";
 import { getInteraction, bindInteraction, newInteractionId } from "../lib/telemetry";
 import {
+  createLiveTranscription,
   isMoonshineTranscriptionReady,
   transcribeSpeech,
+  type LiveTranscription,
 } from "../lib/transcribe";
 import { Buddy, type BuddyMood } from "../components/Buddy";
 import { ChatBubble } from "../components/ChatBubble";
@@ -121,6 +123,7 @@ export default function Conversation() {
   const lastSpokenRef = useRef(-1);
   const autoSpeakAllowedRef = useRef(true);
   const recorderRef = useRef<ActiveRecorder | null>(null);
+  const recordingLiveRef = useRef<LiveTranscription | null>(null);
   const recordingOperationRef = useRef<{
     controller: AbortController;
     timer: ReturnType<typeof setTimeout> | null;
@@ -148,6 +151,8 @@ export default function Conversation() {
   function cancelRecordingOperation() {
     const operation = recordingOperationRef.current;
     recordingOperationRef.current = null;
+    recordingLiveRef.current?.close();
+    recordingLiveRef.current = null;
     if (operation?.timer) clearTimeout(operation.timer);
     operation?.controller.abort();
   }
@@ -420,17 +425,28 @@ export default function Conversation() {
       recorderRef.current = null;
       const recordingOperation = recordingOperationRef.current;
       recordingOperationRef.current = null;
+      const live = recordingLiveRef.current;
+      recordingLiveRef.current = null;
       if (recordingOperation?.timer) clearTimeout(recordingOperation.timer);
-      if (!rec) return;
+      if (!rec) {
+        live?.close();
+        return;
+      }
       setTranscribing(true);
       setError(null);
       const controller = new AbortController();
-      bindInteraction(controller.signal, newInteractionId());
+      bindInteraction(
+        controller.signal,
+        getInteraction(recordingOperation?.controller.signal) ?? newInteractionId(),
+      );
       transcriptionControllerRef.current = controller;
       try {
         const pcm = await rec.stop();
-        if (!isCurrent()) return;
-        const spokenText = (await transcribeSpeech(pcm, controller.signal)).trim();
+        if (!isCurrent()) {
+          live?.close();
+          return;
+        }
+        const spokenText = (await transcribeSpeech(pcm, controller.signal, "auto", live ?? undefined)).trim();
         if (!isCurrent()) return;
         if (spokenText) {
           // Speaking app: send the recognized speech right away (combining any
@@ -451,18 +467,24 @@ export default function Conversation() {
       } catch {
         if (isCurrent()) setError("语音识别失败，请检查麦克风权限或后端，或直接打字。");
       } finally {
+        live?.close();
         if (transcriptionControllerRef.current === controller) transcriptionControllerRef.current = null;
         if (isCurrent()) setTranscribing(false);
       }
     } else {
       setError(null);
       const operation = { controller: new AbortController(), timer: null as ReturnType<typeof setTimeout> | null, bytes: 0, limited: false };
+      bindInteraction(operation.controller.signal, newInteractionId());
       recordingOperationRef.current = operation;
+      const live = createLiveTranscription(operation.controller.signal);
+      recordingLiveRef.current = live;
       const limitRecording = () => {
         if (operation.limited) return;
         operation.limited = true;
         if (operation.timer) clearTimeout(operation.timer);
         recordingOperationRef.current = null;
+        recordingLiveRef.current = null;
+        live.close();
         recorderRef.current = null;
         operation.controller.abort();
         if (isCurrent()) {
@@ -475,9 +497,12 @@ export default function Conversation() {
         const rec = await startRecording(pcm => {
           if (recordingOperationRef.current !== operation) return;
           operation.bytes += pcm.byteLength;
+          live.send(pcm);
           if (operation.bytes > MAX_AUDIO_BYTES) limitRecording();
         }, operation.controller.signal);
         if (!isCurrent() || operation.limited) {
+          live.close();
+          recordingLiveRef.current = null;
           await rec.stop();
           return;
         }
@@ -485,6 +510,8 @@ export default function Conversation() {
         operation.timer = setTimeout(limitRecording, MAX_RECORDING_MS);
         setRecording(true);
       } catch {
+        live.close();
+        recordingLiveRef.current = null;
         if (operation.timer) clearTimeout(operation.timer);
         recordingOperationRef.current = null;
         recorderRef.current = null;

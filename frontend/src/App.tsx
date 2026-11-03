@@ -28,22 +28,42 @@ const Admin = lazy(() => import("./pages/Admin"));
 export default function App() {
   const location = useLocation();
   const generation = useAuth((s) => s.generation);
+  const user = useAuth((s) => s.user);
   const resolving = useAuth((s) => s.resolving);
   const resolutionError = useAuth((s) => s.resolutionError);
   const focused = location.pathname.startsWith("/practice/");
   const section = location.pathname.split("/")[1] || "home";
-  if (resolving || resolutionError) return (
-    <div role="status" className="route-loading">
-      {resolving ? "正在确认账户…" : "暂时无法确认账户，请重试。"}
-      {resolutionError && <button onClick={() => void useAuth.getState().refresh()}>重试</button>}
-      <button onClick={() => useAuth.getState().logout()}>退出账户</button>
-    </div>
-  );
+  // Account resolution must never hide the routes: Home, Scenes and practice
+  // remain usable while `/auth/me` validates in the background. Only an
+  // unresolved credential shows a non-blocking notice.
+  const authNotice = resolving || (resolutionError && !user);
   return (
     <DictionaryProvider key={generation}>
       <SiteVisitTracker />
       <SpeechPlaybackError />
       <div className={`app-route route-${section}`}>
+        {authNotice && (
+          <div
+            className={`auth-notice${resolutionError ? " auth-notice-error" : ""}`}
+            role={resolutionError ? "alert" : "status"}
+          >
+            <span>
+              {resolutionError
+                ? "账户信息暂时无法确认，你仍可继续以游客身份练习。"
+                : "正在确认账户…"}
+            </span>
+            {resolutionError && (
+              <>
+                <button type="button" onClick={() => void useAuth.getState().refresh()}>
+                  重试
+                </button>
+                <button type="button" onClick={() => useAuth.getState().logout()}>
+                  退出账户
+                </button>
+              </>
+            )}
+          </div>
+        )}
         {!focused && <AppHeader />}
         <RouteErrorBoundary key={location.pathname}>
         <Suspense

@@ -255,7 +255,7 @@ class TelemetryMiddleware:
                 and get_settings().telemetry_enabled):
             return await self._assessment_socket(scope, receive, send)
         if (scope["type"] != "http" or not path.startswith("/api/") or
-                path.startswith(("/api/admin", "/api/telemetry", "/api/auth", "/api/health")) or
+                path.startswith(("/api/admin", "/api/telemetry", "/api/auth", "/api/health", "/api/ready")) or
                 scope.get("method") == "OPTIONS" or not get_settings().telemetry_enabled):
             return await self.app(scope, receive, send)
         interaction = next((value for key, value in scope.get("headers", []) if key.lower() == b"x-interaction-id"), b"")

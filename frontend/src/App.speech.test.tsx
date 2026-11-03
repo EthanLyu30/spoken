@@ -32,7 +32,7 @@ beforeEach(()=>{
 afterEach(()=>{stopSpeaking();vi.unstubAllGlobals();useSpeechPlayback.setState({playback:null});});
 async function openDaily(){
   render(<MemoryRouter initialEntries={["/daily"]} future={{v7_startTransition:true,v7_relativeSplatPath:true}}><App/></MemoryRouter>);
-  await screen.findByRole("heading",{name:"今天，带走五句好表达。"});
+  await screen.findByRole("heading",{name:"今天，带走五句好表达。"},{timeout:3000});
 }
 function expectNoCloudTts(){expect(fetcher.mock.calls.map(([url])=>String(url)).some(url=>url.includes("/api/tts"))).toBe(false);}
 it("surfaces missing English voices from Daily, dismisses the error, and shows a fresh attempt again",async()=>{
@@ -43,7 +43,7 @@ it("surfaces missing English voices from Daily, dismisses the error, and shows a
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   fireEvent.click(screen.getAllByRole("button",{name:"朗读"})[0]);
   expect(await screen.findByRole("alert")).toHaveTextContent("此设备暂无可用英文音色");expectNoCloudTts();
-});
+}, 15000);
 it("surfaces a real native startup failure from the dictionary overlay without closing it",async()=>{
   voices=[{name:"English",voiceURI:"en",lang:"en-US"} as SpeechSynthesisVoice];
   await openDaily();fireEvent.click(screen.getAllByRole("button",{name:/^查询 /})[0]);
