@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.middleware import SelectiveGZipMiddleware
 from app.core.observability import TelemetryMiddleware
 from app.services.telemetry import TelemetrySink, RetentionWorker, configured_bootstrap_admin
-from app.services.deepseek import create_http_client
+from app.services.deepseek import DeepSeekClient, create_http_client
 from app.api import admin, telemetry
 from app.api import (
     asr,
@@ -65,6 +65,20 @@ async def _warm_database() -> None:
         await asyncio.sleep(_DB_WARMUP_SECONDS)
 
 
+async def _warm_daily_scene(application) -> None:
+    """Generate the day's cached pickup before a first visitor asks for it."""
+    if not settings.deepseek_api_key:
+        return
+    await asyncio.sleep(0.5)
+    try:
+        client = DeepSeekClient(http_client=application.state.deepseek_http)
+        await custom.scenario_suggestion(fresh=False, client=client)
+    except Exception as exc:  # warming is best-effort
+        logging.getLogger(__name__).info(
+            "Daily scene warm-up skipped: %s", type(exc).__name__
+        )
+
+
 async def _stop_warmer(task: asyncio.Task) -> None:
     task.cancel()
     with suppress(asyncio.CancelledError):
@@ -88,6 +102,8 @@ async def lifespan(application):
             if not get_settings().database_url.startswith("sqlite"):
                 warmer = asyncio.create_task(_warm_database())
                 resources.push_async_callback(_stop_warmer, warmer)
+                daily = asyncio.create_task(_warm_daily_scene(application))
+                resources.push_async_callback(_stop_warmer, daily)
             yield
     finally:
         application.state.deepseek_http = None
