@@ -17,11 +17,18 @@ export function InterviewResults({
   exitLabel?: string;
 }) {
   const [selected, setSelected] = useState(0);
+  const [sampleOption, setSampleOption] = useState(0);
   useEffect(() => () => stopSpeaking(), [selected]);
   const current = result.results[selected];
   const scoreMax = interviewScoreMax(result);
-  const wordCount = current?.sample_word_count ?? (current?.sample_answer.match(/[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)*/g)?.length ?? 0);
-  const estimatedSeconds = current?.sample_estimated_seconds ?? Math.round(wordCount / 110 * 60 + 4);
+  const referenceAnswers = current?.reference_answers ?? [];
+  const selectedAnswer = referenceAnswers[sampleOption] ?? current?.sample_answer ?? "";
+  const wordCount = referenceAnswers.length
+    ? (selectedAnswer.match(/[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)*/g)?.length ?? 0)
+    : current?.sample_word_count ?? (selectedAnswer.match(/[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)*/g)?.length ?? 0);
+  const estimatedSeconds = referenceAnswers.length
+    ? Math.round(wordCount / 110 * 60 + 4)
+    : current?.sample_estimated_seconds ?? Math.round(wordCount / 110 * 60 + 4);
   return (
     <div className="interview-results">
       <div className="ui-page-head">
@@ -75,17 +82,36 @@ export function InterviewResults({
                     <h3>参考表达</h3>
                     <button
                       type="button"
-                      onClick={() => speakText(current.sample_answer)}
+                      onClick={() => speakText(selectedAnswer)}
                       aria-label="朗读范例"
                     >
                       <Volume2 />
                     </button>
                   </div>
+                  {referenceAnswers.length > 1 && (
+                    <div className="sample-answer-options" role="group" aria-label="参考答案">
+                      {referenceAnswers.map((_, index) => (
+                        <button
+                          key={index}
+                          type="button"
+                          aria-pressed={sampleOption === index}
+                          onClick={() => setSampleOption(index)}
+                        >
+                          回答 {index + 1}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <p className="sample-answer-meta">{wordCount} 词 · 约 {estimatedSeconds} 秒</p>
                   <p className="sample-answer-source">
-                    {current.sample_source === "video_reference" ? "参考思路 · AI 改写" : "AI 口语示例"}
+                    {referenceAnswers.length
+                      ? "参考答案 · 文字转录（OCR）"
+                      : current.sample_source === "video_reference" ? "参考思路 · AI 改写" : "AI 口语示例"}
                   </p>
-                  <p>{current.sample_answer}</p>
+                  <p>{selectedAnswer}</p>
+                  {referenceAnswers.length > 0 && (
+                    <p className="sample-answer-estimate">文字来自视频答案页 OCR 转录，可能存在少量识别误差。</p>
+                  )}
                   {current.reference_notes && (
                     <div className="sample-reference-notes">
                       <h4>参考思路要点</h4>
@@ -106,7 +132,7 @@ export function InterviewResults({
               type="button"
               aria-pressed={selected === i}
               onClick={() => {
-                if (selected !== i) setSelected(i);
+                if (selected !== i) { setSelected(i); setSampleOption(0); }
               }}
             >
               <span>

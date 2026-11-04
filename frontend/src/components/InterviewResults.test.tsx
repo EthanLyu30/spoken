@@ -52,6 +52,27 @@ it.each([
   expect(screen.getByText("参考思路 · AI 改写")).toBeVisible();
 });
 
+it("shows transcribed video answers as selectable text", async () => {
+  const user = userEvent.setup();
+  const { container } = showAnswer({
+    ...savedAnswer,
+    reference_answers: [
+      "The first transcribed sample answer is useful.",
+      "The second transcribed sample answer adds a reason.",
+      "The third transcribed sample answer gives another view.",
+    ],
+  });
+  expect(screen.getByText("The first transcribed sample answer is useful.")).toBeVisible();
+  expect(screen.getByText(/参考答案 · 文字转录/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "回答 1" })).toHaveAttribute("aria-pressed", "true");
+  await user.click(screen.getByRole("button", { name: "回答 2" }));
+  expect(screen.getByText("The second transcribed sample answer adds a reason.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "回答 2" })).toHaveAttribute("aria-pressed", "true");
+  await user.click(screen.getByRole("button", { name: "朗读范例" }));
+  expect(speakText).toHaveBeenCalledWith("The second transcribed sample answer adds a reason.");
+  expect(container.querySelector("iframe")).toBeNull();
+});
+
 it("shows the new five-point content rubric without claiming audio or official bands", async () => {
   render(<InterviewResults result={{ overall: 4, results: [savedAnswer], score_max: 5, scoring_version: "ets-interview-text-v1", scoring_basis: "transcript" }} onRestart={vi.fn()} onExit={vi.fn()} />);
   expect(screen.getByRole("heading", { name: "内容参考分" })).toBeVisible();

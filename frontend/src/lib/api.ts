@@ -484,6 +484,7 @@ export interface InterviewResult {
   sample_word_count?: number;
   sample_estimated_seconds?: number;
   reference_notes?: string | null;
+  reference_answers?: string[];
 }
 
 export interface InterviewScore {

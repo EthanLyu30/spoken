@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from app.api.chat import get_client
 from app.data.interview_questions import get_interview_sets
 from app.data.interview_answer_references import load_answer_references
+from app.data.interview_answer_texts import load_answer_texts
 from app.data.interview_rubric import SCORE_LEVELS, TEXT_RUBRIC, is_nonresponse
 from app.schemas.interview import (
     InterviewQuestions,
@@ -177,6 +178,7 @@ async def _score_interview(req: InterviewScoreRequest, client: DeepSeekClient) -
         matches = [group for group in sets if group.questions == questions]
         group = matches[0] if len(matches) == 1 else None
     reference = None
+    reference_answers = {}
     if group is not None and group.collection == "inspire":
         try:
             candidate = load_answer_references(sets=sets)[group.id]
@@ -184,6 +186,14 @@ async def _score_interview(req: InterviewScoreRequest, client: DeepSeekClient) -
             raise HTTPException(status_code=503, detail="Interview answer references are unavailable") from exc
         if candidate.status == "reviewed":
             reference = candidate
+            try:
+                reference_answers = {
+                    item.question_index: item.options
+                    for item in load_answer_texts(sets=sets).get(group.id, ())
+                }
+            except (OSError, ValueError, TypeError):
+                # The written sample remains a safe fallback if the OCR file is unavailable.
+                reference_answers = {}
     body = json.dumps({"items": [item.model_dump() for item in req.items]}, ensure_ascii=False)
     messages = [
         {"role": "system", "content": _SCORE_SYSTEM},
@@ -223,6 +233,7 @@ async def _score_interview(req: InterviewScoreRequest, client: DeepSeekClient) -
                 raise ValueError("empty sample answer")
             result.sample_estimated_seconds = round(result.sample_word_count / 110 * 60 + 4)
             result.reference_notes = reference.answers[index].notes if reference is not None else None
+            result.reference_answers = list(reference_answers.get(index + 1, ()))
         overall = sum(r.score for r in results) / len(results)
         overall = round(overall, 1)
         return InterviewScoreResponse(overall=overall, results=results)

@@ -42,6 +42,7 @@ class InterviewResult(BaseModel):
     sample_word_count: int = Field(default=0, ge=0)
     sample_estimated_seconds: int = Field(default=0, ge=0)
     reference_notes: str | None = None
+    reference_answers: list[str] = Field(default_factory=list)
 
 
 class InterviewScoreResponse(BaseModel):
