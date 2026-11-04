@@ -121,7 +121,10 @@ export default function Conversation() {
   const callQueueRef = useRef<SpeechQueue | null>(null);
   const callPreparationRef = useRef<ReturnType<typeof prepareSpeech> | null>(null);
   const lastSpokenRef = useRef(-1);
-  const autoSpeakAllowedRef = useRef(true);
+  // Never autoplay the scripted opener: a freshly opened page has no user
+  // activation, and browsers can reject speechSynthesis with `not-allowed`.
+  // Replies become auto-speakable after a learner action (send/record/call).
+  const autoSpeakAllowedRef = useRef(false);
   const recorderRef = useRef<ActiveRecorder | null>(null);
   const recordingLiveRef = useRef<LiveTranscription | null>(null);
   const recordingOperationRef = useRef<{
@@ -203,7 +206,6 @@ export default function Conversation() {
     // see (and, once the request settles, start) the conversation.
     setMessages([{ role: "assistant", content: fallbackOpener }]);
     setBooting(false);
-    autoSpeakAllowedRef.current = false;
     postChat(id, [], ctrl.signal)
       .then((r) => {
         if (!isCurrent() || ctrl.signal.aborted) return;
@@ -211,14 +213,11 @@ export default function Conversation() {
         // scripted opener was in flight.
         if (messagesRef.current.length === 1 && messagesRef.current[0].role === "assistant") {
           setMessages([{ role: "assistant", content: r.reply }]);
-          autoSpeakAllowedRef.current = true;
         }
       })
       .catch(() => {
-        if (ctrl.signal.aborted || !isCurrent()) return;
         // The local opener is already visible; a failed opener refresh should
-        // not block the learner from trying the conversation.
-        autoSpeakAllowedRef.current = true;
+        // not block the learner from trying the conversation or auto-speak.
       });
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps

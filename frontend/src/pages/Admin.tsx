@@ -132,6 +132,18 @@ export default function Admin() {
 
   const operationOptions = [...new Set([filters.operation, ...(data?.facets?.operations ?? data?.operations ?? [])])].filter(Boolean);
   const update = (patch: Partial<AdminFilters>) => { setOffset(0); setFilters(old => ({ ...old, ...patch })); };
+  const showFailures = async () => {
+    if (!data) return;
+    const outcome = data.errors > 0 ? "error" : "timeout";
+    update({ outcome });
+    window.requestAnimationFrame(() => document.querySelector(".admin-traces")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    try {
+      const list = await getAdminTraces({ ...filters, outcome }, 0, false);
+      if (list.items[0]) await inspect(list.items[0].trace_id);
+    } catch {
+      // The filtered list remains available even if the direct detail lookup fails.
+    }
+  };
   const chart = useMemo(() => {
     const points = data?.trend ?? [];
     const operations = [...new Set(points.map(p => p.operation))];
@@ -206,7 +218,7 @@ export default function Admin() {
         <article><span><Activity size={16} />{filters.source === "server" ? "保留请求数" : "上报样本"}</span><strong>{number(data.count)}</strong><small>保留 {data.collection.retention_days} 天 · {data.collection.cleanup?.active ? '自动清理' : '写入时清理'}</small></article>
         <article><span><ShieldCheck size={16} />{filters.source === "server" ? "请求成功率" : "正常上报样本"}</span><strong>{filters.source === "browser" ? number(data.count - data.errors - data.timeouts - data.cancelled) : data.success_rate == null ? "—" : `${(data.success_rate * 100).toFixed(1)}%`}</strong><small>{filters.source === "server" ? `取消 ${data.cancelled} 次排除` : "端侧自报，独立于后端成功数"}</small></article>
         <article><span><Clock3 size={16} />P95 总耗时</span><strong>{ms(data.latency.p95)}</strong><small>P50 {ms(data.latency.p50)} · P99 {ms(data.latency.p99)}</small></article>
-        <article className={data.errors + data.timeouts ? "admin-metric-alert" : ""}><span><TriangleAlert size={16} />失败 / 超时</span><strong>{number(data.errors + data.timeouts)}</strong><div className="admin-issue-actions"><button aria-pressed={filters.outcome === "error"} onClick={() => update({ outcome: "error" })}>失败 {data.errors}</button><button aria-pressed={filters.outcome === "timeout"} onClick={() => update({ outcome: "timeout" })}>超时 {data.timeouts}</button><ArrowRight size={14} /></div></article>
+        <article className={`${data.errors + data.timeouts ? "admin-metric-alert" : ""}${data.errors + data.timeouts ? " admin-failure-card" : ""}`} onClick={data.errors + data.timeouts ? showFailures : undefined} onKeyDown={event => { if ((data.errors + data.timeouts) && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); showFailures(); } }} role={data.errors + data.timeouts ? "button" : undefined} tabIndex={data.errors + data.timeouts ? 0 : undefined} title={data.errors + data.timeouts ? "查看失败调用及具体错误" : undefined}><span><TriangleAlert size={16} />失败 / 超时</span><strong>{number(data.errors + data.timeouts)}</strong><div className="admin-issue-actions"><button aria-pressed={filters.outcome === "error"} onClick={event => { event.stopPropagation(); update({ outcome: "error" }); }}>失败 {data.errors}</button><button aria-pressed={filters.outcome === "timeout"} onClick={event => { event.stopPropagation(); update({ outcome: "timeout" }); }}>超时 {data.timeouts}</button>{data.errors + data.timeouts > 0 && <button type="button" className="admin-failure-arrow" aria-label="查看失败调用" onClick={event => { event.stopPropagation(); showFailures(); }}><ArrowRight size={14} /></button>}</div></article>
       </section>
       <section className={`admin-panels${filters.source === "browser" ? " admin-panels-single" : ""}`}>
         <article className="admin-panel admin-trend"><div className="admin-panel-heading"><h2>耗时趋势</h2><span>每小时 P95 · 按业务分别统计</span></div>
@@ -255,6 +267,9 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
     return () => document.removeEventListener("keydown", escape);
   }, [onClose]);
   const failed = detail.outcome === "error" || detail.outcome === "timeout";
+  const failedSpans = (detail.spans ?? []).filter(span => span.outcome === "error" || span.outcome === "timeout");
+  const diagnosticText = (span: NonNullable<AdminTrace["spans"]>[number]) =>
+    Object.entries(span.attributes ?? {}).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value)).map(([key, value]) => `${key}=${String(value)}`).join(" · ");
   return <aside className="admin-detail" aria-label="调用详情"><header><div><span className="admin-eyebrow">调用详情</span><h2>{names[detail.operation] ?? detail.operation}</h2></div><button aria-label="关闭调用详情" onClick={onClose}><X size={20} /></button></header>
     <div className="admin-detail-status"><span className={`admin-badge ${detail.outcome}`}>{labels[detail.outcome] ?? detail.outcome}</span><time dateTime={detail.started_at}>{date(detail.started_at)}</time></div>
     <code className="admin-trace-id">{detail.trace_id}</code>
@@ -266,6 +281,7 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
         : detail.error_type ? <><div className="admin-error-types"><code>{detail.error_type}</code>{detail.error_cause_type && <><ArrowRight size={13} /><code>{detail.error_cause_type}</code></>}</div><p>已采集异常类名；可按调用时间和编号核对服务端日志。</p></>
         : detail.http_status != null && detail.http_status >= 400 ? <p>服务返回 HTTP {detail.http_status}，响应中的具体错误内容未留存。</p>
         : <p>此记录未采集异常类型，无法仅凭耗时判断原因；请结合时间和路径核对服务端日志。</p>}
+      {!!failedSpans.length && <div className="admin-failure-diagnostics"><h4>阶段诊断</h4>{failedSpans.map(span => <p key={span.id}><strong>{span.name}</strong><span>{diagnosticText(span) || "未采集更多阶段参数"}</span></p>)}</div>}
       <small>历史失败保留用于追踪，不代表接口当前仍在报错。</small>
     </section>}
     {!!detail.related?.length && <section className="admin-related"><h3>同一轮交互</h3><p>各端时钟独立，分别查看，不跨端累加。</p>{detail.related.map(row => <button key={row.trace_id} onClick={() => onInspect(row.trace_id)}><span>{names[row.operation] ?? row.operation}<small>{row.source === "browser" ? "浏览器上报" : "后端请求"}</small></span><b>{ms(row.duration_ms)}</b></button>)}</section>}

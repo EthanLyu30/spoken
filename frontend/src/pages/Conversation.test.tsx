@@ -75,7 +75,7 @@ it("recovers an interrupted stream through the plain endpoint and speaks only th
   await user.click(screen.getByRole("button", { name: /^发送$/ }));
   await screen.findByText("Complete reply");
   expect(mocks.postChat).toHaveBeenCalledTimes(2);
-  expect(mocks.speakText.mock.calls.map(([text]) => text)).toEqual(["Hello", "Complete reply"]);
+  expect(mocks.speakText.mock.calls.map(([text]) => text)).toEqual(["Complete reply"]);
   expect(screen.queryByRole("button", { name: "重试回复" })).not.toBeInTheDocument();
 });
 
@@ -209,7 +209,7 @@ it("prepares typed replies before generation and passes the same request identit
   expect(mocks.prepareSpeech).toHaveBeenCalledOnce();
   expect(mocks.prepareSpeech.mock.invocationCallOrder[0]).toBeLessThan(mocks.streamChat.mock.invocationCallOrder[0]);
   expect(mocks.createSpeechQueue).not.toHaveBeenCalled();
-  expect(mocks.speakText.mock.calls.map(([text]) => text)).toEqual(["Hello"]);
+  expect(mocks.speakText.mock.calls.map(([text]) => text)).toEqual([]);
   const signal = mocks.streamChat.mock.calls[0][3] as AbortSignal;
   expect(getInteraction(signal)).toMatch(/^[a-f0-9]{32}$/);
   complete("Fresh reply.");
@@ -241,7 +241,7 @@ it("does not prepare cloud speech for a reply sent while already muted", async (
   await user.click(screen.getByRole("button",{name:/^发送$/}));
   await screen.findByText("Muted reply.");
   expect(mocks.prepareSpeech).not.toHaveBeenCalled();
-  expect(mocks.speakText.mock.calls.map(([text])=>text)).toEqual(["Hello"]);
+  expect(mocks.speakText.mock.calls.map(([text])=>text)).toEqual([]);
 });
 it("keeps manual replay independent while a fresh reply is generating", async () => {
   const {user, complete} = await pendingTypedReply();
@@ -269,7 +269,7 @@ it.each(["mute", "identity", "unmount"])("disposes pending discovery on %s and s
     await screen.findByText("Should not autoplay.");
     await user.click(screen.getByRole("button", {name:"开启朗读"}));
   } else await Promise.resolve();
-  expect(mocks.speakText.mock.calls.map(([text]) => text)).toEqual(["Hello"]);
+  expect(mocks.speakText.mock.calls.map(([text]) => text)).toEqual([]);
 });
 it("reuses typed discovery through plain fallback and releases sending before audio ends", async () => {
   mocks.streamChat.mockRejectedValueOnce(new Error("Unavailable"));
@@ -367,9 +367,10 @@ it("releases call fallback discovery immediately when muted during the pending p
     expect(speak).not.toHaveBeenCalled();
     complete({reply:"Muted final reply."});await pending;
     expect(queue.end).toHaveBeenCalledWith("");
-    expect(mocks.speakText.mock.calls.map(([text])=>text)).toEqual(["Hello"]);
+    expect(mocks.speakText.mock.calls.map(([text])=>text)).toEqual([]);
   } finally {
     controller.abort();complete?.({reply:"Cleanup"});await pending.catch(()=>undefined);
     timer.mockRestore();clear.mockRestore();
   }
 });
+
