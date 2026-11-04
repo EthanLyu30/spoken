@@ -2,25 +2,20 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSpeechPlayback, type SpeechPlayback } from "../store/speechPlayback";
 
-function PlaybackDetails({playback}:{playback:SpeechPlayback}) {
-  const engine = playback.effectiveEngine === "browser" ? "浏览器语音"
-    : playback.effectiveEngine === "local" ? "本地 AI 语音" : "语音";
-  const phase = {waiting:"等待回复",preparing:"正在准备",speaking:"正在播放",completed:"播放完成",cancelled:"已停止",error:"播放失败"}[playback.phase];
-  const reason = playback.fallbackReason === "browser-unavailable" ? "此设备暂无可用英文音色，可继续文字练习。"
-    : playback.fallbackReason === "browser-start-failed" ? "浏览器朗读未能完成，可继续文字练习。"
-    : playback.fallbackReason === "local-unavailable" ? "本地发音尚未就绪，已使用浏览器语音。" : "";
-  return <>
-    <p>{phase}{playback.effectiveEngine && <> · 实际声音：{engine}{playback.voice ? ` · ${playback.voice}` : ""}</>}</p>
-    {reason && <p>{reason}</p>}
-    {playback.phase === "error" && <p>请重试或选择其他可用音色。</p>}
-  </>;
+function PlaybackMessage({ playback }: { playback: SpeechPlayback }) {
+  if (playback.phase === "error") {
+    return <p>朗读暂时不可用，可继续文字练习。</p>;
+  }
+  if (playback.phase === "preparing") return <p>正在准备朗读…</p>;
+  if (playback.phase === "speaking") return <p>正在朗读…</p>;
+  return null;
 }
 
 export function SpeechPlaybackStatus({suppressInlineErrors=false}:{suppressInlineErrors?:boolean}) {
   const playback = useSpeechPlayback(s => s.playback);
-  if (!playback || playback.phase === "waiting" || (suppressInlineErrors && playback.phase === "error")) return null;
+  if (!playback || playback.phase === "waiting" || playback.phase === "completed" || playback.phase === "cancelled" || (suppressInlineErrors && playback.phase === "error")) return null;
   return <div role={playback.phase === "error" ? "alert" : "status"} className="mt-3 break-words text-xs leading-relaxed text-muted">
-    <PlaybackDetails playback={playback}/>
+    <PlaybackMessage playback={playback}/>
   </div>;
 }
 
@@ -42,7 +37,7 @@ export function SpeechPlaybackError() {
   },[visible]);
   if (!visible || !playback) return null;
   return createPortal(<section role="alert" className="fixed inset-x-4 top-4 z-[100] mx-auto max-w-lg rounded-2xl border border-coral bg-surface p-4 text-sm leading-relaxed text-ink shadow-pop">
-    <PlaybackDetails playback={playback}/>
+    <PlaybackMessage playback={playback}/>
     <button type="button" aria-label="关闭朗读错误提示" onClick={()=>setDismissedId(playback.id)} className="mt-2 rounded-full border border-border px-3 py-1 text-xs font-bold">关闭提示</button>
   </section>,host);
 }
