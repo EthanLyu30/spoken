@@ -36,10 +36,26 @@ export default function WordBag() {
   const [deck, setDeck] = useState<Word[]>([]); // snapshot for the review session
   const [tab, setTab] = useState<"word" | "sentence">("word");
   const [newWord, setNewWord] = useState("");
+  const lastRefreshRef = useRef(Date.now());
 
   useEffect(() => {
     ensureLoaded();
   }, [ensureLoaded]);
+  useEffect(() => {
+    const revalidate = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastRefreshRef.current < 60_000) return;
+      if (useWords.getState().refreshing) return;
+      lastRefreshRef.current = Date.now();
+      void useWords.getState().refresh();
+    };
+    window.addEventListener("focus", revalidate);
+    document.addEventListener("visibilitychange", revalidate);
+    return () => {
+      window.removeEventListener("focus", revalidate);
+      document.removeEventListener("visibilitychange", revalidate);
+    };
+  }, []);
   useEffect(() => subscribeAuthGeneration(() => setReview(false)), []);
 
   function addWord() {

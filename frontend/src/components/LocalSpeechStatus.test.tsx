@@ -13,7 +13,7 @@ it("shows independent model readiness and recovers a failed recognition model wi
   runtime.coordinator=createLocalSpeechCoordinator({capability:{eligible:true},loadKokoro:async()=>{},loadMoonshine:recognition});
   render(<LocalSpeechStatus/>);
   await act(async()=>{await runtime.coordinator!.preload({includeKokoro:true,priority:"kokoro"});});
-  expect(screen.getByText(/Kokoro · Heart/)).toBeInTheDocument();
+  expect(screen.getByText("本机朗读")).toBeInTheDocument();
   expect(screen.getByText("已就绪")).toBeInTheDocument();
   expect(screen.getByText("加载或运行失败")).toBeInTheDocument();
   await userEvent.setup().click(screen.getByRole("button",{name:"重试未就绪模型"}));

@@ -513,8 +513,16 @@ export interface InterviewDeck extends Omit<InterviewSetSummary, "id" | "questio
   questions: string[];
   hints: string[];
 }
+const INTERVIEW_SETS_TTL_MS = 5 * 60_000;
+let interviewSetsCache: { at: number; sets: InterviewSetSummary[] } | null = null;
 export function getInterviewSets(signal?: AbortSignal): Promise<InterviewSetSummary[]> {
-  return request<{ sets: InterviewSetSummary[] }>("/api/interview/sets", { signal }).then(r => r.sets);
+  if (interviewSetsCache && Date.now() - interviewSetsCache.at < INTERVIEW_SETS_TTL_MS) {
+    return Promise.resolve(interviewSetsCache.sets);
+  }
+  return request<{ sets: InterviewSetSummary[] }>("/api/interview/sets", { signal }).then(r => {
+    interviewSetsCache = { at: Date.now(), sets: r.sets };
+    return r.sets;
+  });
 }
 export function getInterviewSet(
   setId?: string,

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, MessageCircle, Sparkles, Timer, TrendingUp } from "lucide-react";
 import { Buddy, type BuddyMood } from "./Buddy";
 import { Button } from "./ui/Button";
@@ -46,23 +46,61 @@ const SLIDES: Slide[] = [
 export function Onboarding() {
   const [open, setOpen] = useState(() => !hasOnboarded());
   const [i, setI] = useState(0);
-
-  if (!open) return null;
-  const slide = SLIDES[i];
-  const last = i === SLIDES.length - 1;
-  const Icon = slide.icon;
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   function finish() {
     markOnboarded();
     setOpen(false);
   }
 
+  useEffect(() => {
+    if (!open) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusables = () => [...dialog.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )].filter(element => element.offsetParent !== null);
+    const initial = focusables().at(-1);
+    initial?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        finish();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusables();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      previous?.focus();
+    };
+  // `finish` is a stable user action for this open session.
+  }, [open]);
+
+  if (!open) return null;
+  const slide = SLIDES[i];
+  const last = i === SLIDES.length - 1;
+  const Icon = slide.icon;
+
   return (
     <div
-      role="dialog" aria-modal="true" aria-label="认识 Spoken" className="onboarding-overlay fixed inset-0 z-[60] grid place-items-center p-5 backdrop-blur-sm"
+      role="dialog" aria-modal="true" aria-labelledby="onboarding-title" className="onboarding-overlay fixed inset-0 z-[60] grid place-items-center p-5 backdrop-blur-sm"
       style={{ background: "rgba(67,48,43,0.45)" }}
     >
-      <div className="card w-full max-w-md p-7 text-center shadow-pop">
+      <div ref={dialogRef} className="card w-full max-w-md p-7 text-center shadow-pop">
         <div className="relative mx-auto grid place-items-center">
           <Buddy mood={slide.mood} size={132} />
         </div>
@@ -72,7 +110,7 @@ export function Onboarding() {
         >
           <Icon className="h-5 w-5" />
         </span>
-        <h2 className="mt-3 font-display text-2xl font-semibold text-ink">{slide.title}</h2>
+        <h2 id="onboarding-title" className="mt-3 font-display text-2xl font-semibold text-ink">{slide.title}</h2>
         <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-muted">{slide.body}</p>
 
         <div className="mt-5 flex justify-center gap-1.5">

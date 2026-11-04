@@ -11,8 +11,8 @@ const labels:Record<LocalSpeechModelState,string> = {
 export function LocalSpeechStatus() {
   const snapshot = useSyncExternalStore(localSpeechCoordinator.subscribe,localSpeechCoordinator.getSnapshot);
   const models = [
-    {id:"kokoro" as const,label:"本机朗读 · Kokoro · Heart"},
-    {id:"moonshine" as const,label:"本机识别 · Moonshine"},
+    {id:"kokoro" as const,label:"本机朗读"},
+    {id:"moonshine" as const,label:"本机识别"},
   ];
   const states = models.map(({id})=>snapshot[id].state);
   const hasError = states.includes("error");
