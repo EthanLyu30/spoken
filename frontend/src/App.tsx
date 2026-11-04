@@ -7,12 +7,12 @@ import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { SiteVisitTracker } from "./components/SiteVisitTracker";
 import { SpeechPlaybackError } from "./components/SpeechPlaybackStatus";
 import { useAuth } from "./store/auth";
+import Home from "./pages/Home";
 
-// Route-level code splitting: each page ships as its own chunk and loads on
-// navigation, so the initial bundle (Home) stays small. Heavy deps that only a
-// few pages use — e.g. echarts on Profile/Progress — no longer weigh down first
-// paint.
-const Home = lazy(() => import("./pages/Home"));
+// Route-level code splitting keeps deep pages out of the first request. Home is
+// eager because it is the landing route: lazy-loading it added a chunk waterfall
+// before the first stats/scenario requests could start. Heavy deps that only a
+// few pages use — e.g. echarts on Profile/Progress — stay split.
 const Scenes = lazy(() => import("./pages/Scenes"));
 const Conversation = lazy(() => import("./pages/Conversation"));
 const Report = lazy(() => import("./pages/Report"));
