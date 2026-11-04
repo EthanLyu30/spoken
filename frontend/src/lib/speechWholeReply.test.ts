@@ -80,6 +80,22 @@ it("buffers generated text and speaks exactly one complete native utterance at e
   expect(utterances[0].text).toBe("First. Second.");utterances[0].onstart?.();utterances[0].onend?.();await done;
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();expect(mocks.fetchTtsStream).not.toHaveBeenCalled();
 });
+it("starts the first complete browser sentence before the final reply arrives", async () => {
+  const q=createSpeechQueue();q.startEarly?.();
+  q.feed("First sentence. Partial answer");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(1));
+  expect(utterances[0].text).toBe("First sentence.");
+  utterances[0].onstart?.();
+  utterances[0].onend?.();
+
+  const done=q.end("First sentence. Second sentence.");
+  await vi.waitFor(()=>expect(utterances).toHaveLength(2));
+  expect(utterances[1].text).toBe("Second sentence.");
+  utterances[1].onstart?.();utterances[1].onend?.();
+  await done;
+  expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
+});
+
 it("overlaps empty browser discovery with generation so final text has no repeated 500 ms wait", async () => {
   vi.useFakeTimers(); mocks.settings.engine="browser";
   const subscribe=vi.fn(), unsubscribe=vi.fn();

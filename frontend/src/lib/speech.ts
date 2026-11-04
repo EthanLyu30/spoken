@@ -16,10 +16,24 @@ export interface SpeechQueue {
   readonly status?: SpeechPlayback;
   /** Cache cumulative text; audio starts only when end supplies final text. */
   feed: (full: string) => void;
+  /** Explicitly opt in to starting the first complete browser sentence early. */
+  startEarly?: () => void;
   end: (full: string) => Promise<void>;
   started: Promise<void>;
   stop: () => void;
   readonly failed?: boolean;
+}
+
+function firstCompleteSentence(text: string): string | null {
+  // Require a likely sentence boundary (uppercase/quote/end) so abbreviations,
+  // decimals and "e.g." do not get spoken as a standalone first utterance.
+  const match = text.match(/^[\s\S]*?[.!?](?=\s+["“'A-Z]|\s*$)/);
+  if (!match) return null;
+  const sentence = match[0].trim();
+  if (sentence.length < 3) return null;
+  const lastWord = sentence.slice(0, -1).trim().split(/\s+/).at(-1)?.replace(/[^A-Za-z.]/g, "") ?? "";
+  if (/^(mr|mrs|ms|dr|prof|sr|jr|st|vs|e\.g|i\.e)\.?$/i.test(lastWord)) return null;
+  return sentence;
 }
 type VoiceSettings = ReturnType<typeof useVoice.getState>;
 const hasSpeech = () => typeof window !== "undefined" &&
@@ -272,6 +286,9 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
   let engine: "browser" | "local" | "unknown" = "unknown";
   let transport: "local" | "unknown" = "unknown";
   let active: Speaking | null = null;
+  let earlyEnabled = false, earlyText = "";
+  let releaseEarly: () => void = () => {};
+  const earlyReady = new Promise<void>(resolve => { releaseEarly = resolve; });
   const controller = new AbortController();
   bindInteraction(controller.signal, interactionId);
   // Discovery overlaps model generation; synthesis still requires final text.
@@ -292,12 +309,63 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
     playback.update({phase:"speaking"});
     reportTiming("speech.first_audio", firstAt - requestedAt, {engine, transport, interactionId});
     if (context?.submittedAt !== undefined) reportTiming("speech.request_to_audio", firstAt - context.submittedAt, {engine, transport, interactionId});
-    if (finalTextAt !== undefined) reportTiming("speech.final_text_to_audio", firstAt - finalTextAt, {engine, transport, interactionId});
+    if (finalTextAt !== undefined && firstAt >= finalTextAt) reportTiming("speech.final_text_to_audio", firstAt - finalTextAt, {engine, transport, interactionId});
     markStarted();
+  };
+  const reportNativeStart = (duration: number, diagnostic: NativeDiagnostic, outcome: "ok" | "error" | "cancelled") => {
+    reportTiming("speech.native_start", duration, {engine: "browser", transport: "unknown", interactionId, outcome, ...diagnostic});
+  };
+  const reportNativeEnd = (duration: number, diagnostic: NativeEndDiagnostic, outcome: "ok" | "error" | "cancelled") => {
+    reportTiming("speech.native_end", duration, {engine: "browser", transport: "unknown", interactionId, outcome, ...diagnostic});
   };
   const consumer = (async () => {
     let completed = false;
     try {
+      await earlyReady;
+      if (stopped) return;
+      const early = earlyText.trim();
+      if (early) {
+        // The first complete sentence can start while the model is still
+        // streaming. Resolve the browser voice before speaking it, then speak
+        // only the remaining text once the final reply arrives.
+        const resolutionStart = performance.now();
+        let browserMode = await preparedMode;
+        if (!stopped && browserMode) {
+          if (listBrowserVoices().length > 0) browserMode = {kind:"browser"};
+          else if (browserMode.kind === "browser") {
+            browserMode = await resolveVoiceMode("browser", voiceSource(), controller.signal);
+          }
+        }
+        if (!stopped) reportTiming("speech.voice_resolution", performance.now() - resolutionStart, {
+          engine: browserMode?.kind === "browser" ? "browser" : "unknown", transport: "unknown", interactionId,
+        });
+        const browserVoice = !stopped && browserMode?.kind === "browser" ? pickBrowserVoice(settings.browserVoiceURI) : null;
+        if (browserVoice) {
+          preparation?.dispose();
+          engine = "browser"; transport = "unknown";
+          playback.update({effectiveEngine:"browser",voice:browserVoice.name,
+            fallbackReason:settings.engine === "local" ? "local-unavailable" : null});
+          active = speakBrowser(early, settings, browserVoice, didStart, reportNativeStart, reportNativeEnd);
+          await active.done;
+          if (stopped) return;
+          if (active.failed) {
+            failed = true;
+            playback.update({fallbackReason:"browser-start-failed"});
+            return;
+          }
+          const final = (await finalText).trim();
+          const remainder = final.startsWith(early) ? final.slice(early.length).trim() : final.trim();
+          if (remainder && !stopped) {
+            active = speakBrowser(remainder, settings, browserVoice, didStart, reportNativeStart, reportNativeEnd);
+            await active.done;
+            failed = Boolean(active.failed) && !stopped;
+            if (failed) playback.update({fallbackReason:"browser-start-failed"});
+          }
+          completed = !stopped && !failed;
+          return;
+        }
+        // No browser voice: fall through and use the normal whole-reply path.
+      }
       const text = (await finalText).trim();
       if (stopped || !text) return;
       playback.update({phase:"preparing"});
@@ -334,11 +402,7 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
         engine = "browser"; transport = "unknown";
         playback.update({effectiveEngine:"browser",voice:browserVoice.name,
           fallbackReason:settings.engine === "local" ? "local-unavailable" : null});
-        active = speakBrowser(text, settings, browserVoice, didStart, (duration, diagnostic, outcome) => {
-          reportTiming("speech.native_start", duration, {engine: "browser", transport: "unknown", interactionId, outcome, ...diagnostic});
-        }, (duration, diagnostic, outcome) => {
-          reportTiming("speech.native_end", duration, {engine: "browser", transport: "unknown", interactionId, outcome, ...diagnostic});
-        });
+        active = speakBrowser(text, settings, browserVoice, didStart, reportNativeStart, reportNativeEnd);
       } else if (url) {
         preparation?.dispose();
         if (stopped) { URL.revokeObjectURL(url); return; }
@@ -373,11 +437,29 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
   void consumer.catch(() => undefined);
   const done = Promise.race([consumer, cancelled]);
   void done.catch(() => undefined);
+  const armEarly = () => {
+    if (!earlyEnabled || earlyText || stopped || noMore) return;
+    const sentence = firstCompleteSentence(buffered);
+    if (sentence) {
+      earlyText = sentence;
+      releaseEarly();
+    }
+  };
   const queue: SpeechQueue = {
     get status() { return playback.status; },
-    feed: full => { if (!stopped && !noMore) buffered = full; },
+    feed: full => {
+      if (stopped || noMore) return;
+      buffered = full;
+      armEarly();
+    },
+    startEarly: () => {
+      if (earlyEnabled || stopped || noMore || settled || settings.engine !== "browser") return;
+      earlyEnabled = true;
+      armEarly();
+    },
     end: full => {
       if (!stopped && !noMore) { noMore = true; buffered = full; finalTextAt = performance.now(); provideText(full); }
+      releaseEarly();
       return done;
     },
     started,
@@ -386,6 +468,7 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
       if (stopped || settled) return;
       stopped = true; controller.abort();
       playback.update({phase:"cancelled"});
+      releaseEarly();
       try { active?.stop(); } catch { /* cancellation must always settle */ }
       provideText(""); cancel();
     },

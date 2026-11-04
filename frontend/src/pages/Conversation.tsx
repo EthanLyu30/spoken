@@ -586,6 +586,7 @@ export default function Conversation() {
 
           // Stream the text bubble, then speak the complete final reply once.
           const queue = createSpeechQueue(id, getInteraction(signal));
+          queue.startEarly?.();
           callQueueRef.current = queue;
           void queue.started.then(() => {
             if (!signal.aborted && isCurrent()) onSpeaking();
