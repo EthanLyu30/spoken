@@ -8,8 +8,9 @@
 #                  redeploy). The container binds $PORT automatically.
 services:
   - type: web
-    name: spoken-backend
+    name: spoken-backend-sg
     runtime: docker
+    region: singapore
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     plan: free

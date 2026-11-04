@@ -8,10 +8,12 @@ from contextlib import AsyncExitStack, asynccontextmanager, suppress
 import asyncio
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.middleware import SelectiveGZipMiddleware
+from app.core.ratelimit import limiter, limit_for
 from app.core.observability import TelemetryMiddleware
 from app.services.telemetry import TelemetrySink, RetentionWorker, configured_bootstrap_admin
 from app.services.deepseek import DeepSeekClient, create_http_client
@@ -100,6 +102,11 @@ async def lifespan(application):
             resources.push_async_callback(retention.close)
             await retention.start()
             if not get_settings().database_url.startswith("sqlite"):
+                if len(get_settings().jwt_secret) < 32:
+                    logging.getLogger(__name__).warning(
+                        "JWT_SECRET is shorter than 32 characters; rotate it to a "
+                        "random secret before exposing accounts to the public."
+                    )
                 warmer = asyncio.create_task(_warm_database())
                 resources.push_async_callback(_stop_warmer, warmer)
                 daily = asyncio.create_task(_warm_daily_scene(application))
@@ -137,6 +144,41 @@ app.add_middleware(
     expose_headers=["X-Trace-Id", "Server-Timing"],
     max_age=86_400,
 )
+
+
+@app.middleware("http")
+async def protect_costly_endpoints(request: Request, call_next):
+    # Keep tests and local SQLite development frictionless. Production uses
+    # Postgres, where this in-process guard protects the shared provider quota.
+    if request.method != "OPTIONS" and not settings.database_url.startswith("sqlite"):
+        rule = limit_for(request.url.path)
+        if rule is not None:
+            limit, window = rule
+            client = request.client.host if request.client else "unknown"
+            key = f"{client}:{request.url.path.split('/')[2] if request.url.path.count('/') >= 2 else 'api'}"
+            if not limiter.allow(key, limit=limit, window_seconds=window):
+                origin = request.headers.get("origin")
+                headers = {"Retry-After": str(window)}
+                if origin in settings.cors_origin_list:
+                    headers.update({
+                        "Access-Control-Allow-Origin": origin,
+                        "Access-Control-Allow-Credentials": "true",
+                        "Vary": "Origin",
+                    })
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "请求过于频繁，请稍后再试。"},
+                    headers=headers,
+                )
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(self), geolocation=()")
+    if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
 
 # API routes are mounted under /api
 app.include_router(health.router, prefix="/api")

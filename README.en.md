@@ -29,9 +29,9 @@ growth curve.
 
 - **Fast/slow dual-path architecture** with **streaming chat replies** — the
   conversation stays snappy while assessment runs asynchronously.
-- **iFlytek voice pipeline** — streaming ASR, pronunciation scoring and
-  streamed PCM playback by default for new users. Device voices and local
-  Moonshine/Kokoro models are optional; models download only after opting in.
+- **Voice pipeline** — iFlytek streaming ASR and pronunciation scoring, with
+  the device voice as the default read-aloud engine. Local Moonshine/Kokoro
+  models are optional; models download only after opting in.
   Call mode provides live captions and preserves the beginning of barge-in
   speech. AudioWorklet capture has a compatibility fallback. Alternatively,
   tap to record, tap again to finish, and send the transcription automatically.
@@ -59,7 +59,7 @@ growth curve.
   dimension and whether each skill is climbing — all driven by real activity.
   Each post-session debrief exports to **PDF in one tap**.
 - **Resilient** — request timeouts, streaming fallback, and voice-call
-  auto-reconnect; 60+ backend tests.
+  auto-reconnect; 600+ backend tests.
 
 ## Architecture
 
@@ -105,9 +105,9 @@ npm run dev
 ```
 
 With **only `DEEPSEEK_API_KEY`** you get text chat, timed Q&A scoring, quotes and
-custom scenarios. Configure `XF_*` for the default cloud voice pipeline and
-pronunciation scoring, or select device speech in voice settings. Set a private,
-stable `JWT_SECRET` for production and multi-worker deployments.
+custom scenarios. Device speech is the default read-aloud path; configure `XF_*`
+for streaming ASR and pronunciation scoring. Local speech models are optional.
+Set a private, stable `JWT_SECRET` for production and multi-worker deployments.
 
 ## License
 
