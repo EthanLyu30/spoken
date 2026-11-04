@@ -198,15 +198,27 @@ export default function Conversation() {
       setBooting(false);
       return;
     }
+    // Show a usable opener immediately. The server opener is scripted, but the
+    // first paint should not wait for an HTTP round trip before the learner can
+    // see (and, once the request settles, start) the conversation.
+    setMessages([{ role: "assistant", content: fallbackOpener }]);
+    setBooting(false);
+    autoSpeakAllowedRef.current = false;
     postChat(id, [], ctrl.signal)
-      .then((r) => { if (isCurrent() && !ctrl.signal.aborted) setMessages([{ role: "assistant", content: r.reply }]); })
+      .then((r) => {
+        if (!isCurrent() || ctrl.signal.aborted) return;
+        // Do not overwrite a turn the learner already started while the
+        // scripted opener was in flight.
+        if (messagesRef.current.length === 1 && messagesRef.current[0].role === "assistant") {
+          setMessages([{ role: "assistant", content: r.reply }]);
+          autoSpeakAllowedRef.current = true;
+        }
+      })
       .catch(() => {
         if (ctrl.signal.aborted || !isCurrent()) return;
-        setMessages([{ role: "assistant", content: fallbackOpener }]);
-        setError("后端未连接，先看看界面。启动后端后刷新即可与 Pip 对话。");
-      })
-      .finally(() => {
-        if (!ctrl.signal.aborted && isCurrent()) setBooting(false);
+        // The local opener is already visible; a failed opener refresh should
+        // not block the learner from trying the conversation.
+        autoSpeakAllowedRef.current = true;
       });
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
