@@ -40,8 +40,17 @@ const ms = (n: number | null | undefined) => n == null ? "—" : n >= 1000 ? `${
 const number = (n: number | null) => n == null ? "—" : n.toLocaleString("zh-CN");
 const date = (s: string) => new Date(s).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const forbidden = (err: unknown) => err instanceof AdminApiError && (err.status === 401 || err.status === 403);
-const dataOperations = new Set(['GET /api/stats', 'GET /api/words', 'GET /api/sessions', 'GET /api/practice', 'GET /api/interview/sets']);
-const modelLabel = (trace: AdminTrace) => trace.model ?? (dataOperations.has(trace.operation) ? '数据读取' : '未记录模型');
+const dataOperations = new Set(['GET /api/stats', 'GET /api/words', 'GET /api/sessions', 'GET /api/practice', 'GET /api/interview/sets', 'GET /api/progress/sessions', 'GET /api/sessions/{session_id}']);
+const voiceOperation = /(^|\/)(asr|pronunciation|tts)(\/|$)/i;
+const modelLabel = (trace: AdminTrace) => {
+  if (trace.model && !trace.model.startsWith('unknown')) return trace.model;
+  if (trace.source === 'browser') return '浏览器端';
+  if (trace.operation === 'GET /api/scenario-suggestion') return 'AI 场景生成';
+  if (dataOperations.has(trace.operation) || trace.operation.startsWith('GET /api/')) return '数据读取';
+  if (voiceOperation.test(trace.operation)) return '语音引擎';
+  if (trace.operation === 'POST /api/sessions' || trace.operation === 'POST /api/practice') return '数据写入';
+  return '模型未记录';
+};
 
 export default function Admin() {
   const user = useAuth(s => s.user);
@@ -175,13 +184,13 @@ export default function Admin() {
         <button key={source} role="tab" aria-selected={filters.source === source} onClick={() => update({ source, operation: "", model: "", release: "", outcome: "" })}>{source === "server" ? "后端调用" : "浏览器体验"}</button>)}</div>
       <label>时间范围<select value={filters.hours} onChange={e => update({ hours: Number(e.target.value) })}><option value={24}>近 24 小时</option><option value={168}>近 7 天</option><option value={336}>近 14 天</option></select></label>
       <label className="admin-operation">业务操作<select value={filters.operation} onChange={e => update({ operation: e.target.value })}><option value="">所有操作（混合样本）</option>{operationOptions.map(op => <option key={op} value={op}>{names[op] ?? op}</option>)}</select></label>
-      <label>{filters.source === "server" ? "模型" : "引擎 / 传输"}<select aria-label="模型或引擎" value={filters.model} onChange={e => update({ model: e.target.value })}><option value="">全部</option>{(data?.facets?.models ?? []).map(m => <option key={m}>{m}</option>)}</select></label>
+      {filters.source === "server" && <label>模型<select aria-label="模型" value={filters.model} onChange={e => update({ model: e.target.value })}><option value="">全部</option>{(data?.facets?.models ?? []).map(m => <option key={m}>{m}</option>)}</select></label>}
       <label>发布版本<select value={filters.release} onChange={e => update({ release: e.target.value })}><option value="">全部</option>{(data?.facets?.releases ?? []).map(r => <option key={r} value={r}>{r === "unknown" ? "未提供版本" : r.slice(0, 10)}</option>)}</select></label>
     </div>
     <div className="admin-scope-caption"><span>{filters.operation ? names[filters.operation] ?? filters.operation : "全部业务概览"}{!filters.operation && " · 性能比较请先选同一种操作"}</span><span>{updatedAt ? `概览更新于 ${date(updatedAt)}` : "仅展示已采集的真实记录"}</span></div>
     <p className="admin-perspective">{filters.source === 'server'
-      ? '服务端视角：接口收到请求至响应结束，看业务处理、模型调用和错误。'
-      : '用户端视角：记录识别收尾、说完至首声、播放完成，包含网络、队列与播放等待。'}</p>
+      ? '服务端视角：接口收到请求至响应结束，看业务处理、模型调用和错误。模型列只对实际调用大模型的请求显示；读取和语音接口分别标为数据读取 / 语音引擎。'
+      : '用户端视角：记录识别收尾、说完至首声、播放完成，包含网络、队列与播放等待。浏览器样本不提供后端模型或 Token，因此隐藏模型与费用区。'}</p>
     {error && <p className="admin-notice" role="alert">{error}</p>}
     {overviewError && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{overviewError}</span><button onClick={() => setRevision(v => v + 1)}>重试</button></p>}
     {overviewLoading && !data && <p className="admin-loading" role="status">正在读取运行概览…</p>}
@@ -199,12 +208,12 @@ export default function Admin() {
         <article><span><Clock3 size={16} />P95 总耗时</span><strong>{ms(data.latency.p95)}</strong><small>P50 {ms(data.latency.p50)} · P99 {ms(data.latency.p99)}</small></article>
         <article className={data.errors + data.timeouts ? "admin-metric-alert" : ""}><span><TriangleAlert size={16} />失败 / 超时</span><strong>{number(data.errors + data.timeouts)}</strong><div className="admin-issue-actions"><button aria-pressed={filters.outcome === "error"} onClick={() => update({ outcome: "error" })}>失败 {data.errors}</button><button aria-pressed={filters.outcome === "timeout"} onClick={() => update({ outcome: "timeout" })}>超时 {data.timeouts}</button><ArrowRight size={14} /></div></article>
       </section>
-      <section className="admin-panels">
+      <section className={`admin-panels${filters.source === "browser" ? " admin-panels-single" : ""}`}>
         <article className="admin-panel admin-trend"><div className="admin-panel-heading"><h2>耗时趋势</h2><span>每小时 P95 · 按业务分别统计</span></div>
           {data.trend.length ? <EChart height={176} option={chart} /> : <div className="admin-chart-empty"><Clock3 size={23} /><strong>当前筛选还没有耗时样本</strong><span>可调整业务或时间范围；采集到真实请求后展示趋势。</span></div>}
           <div className="admin-status-line"><span>取消 <b>{data.cancelled}</b> 次，单独记录</span><span>各业务耗时独立观察</span></div>
         </article>
-        <article className="admin-panel admin-usage"><div className="admin-panel-heading"><h2><Database size={16} />模型与费用</h2>{data.pricing && <code className="admin-model-name">{data.pricing.configured_model}</code>}</div>
+        {filters.source === "server" && <article className="admin-panel admin-usage"><div className="admin-panel-heading"><h2><Database size={16} />模型与费用</h2>{data.pricing && <code className="admin-model-name">{data.pricing.configured_model}</code>}</div>
           {data.pricing && <details className="admin-price-details"><summary><span>输入 ¥{data.pricing.rates.input_hit[0]}–{data.pricing.rates.input_miss[1]} /百万</span><span>输出 ¥{data.pricing.rates.output.join('–')} /百万</span></summary><div>
             <p>人民币 / 百万 Token。缓存命中输入 ¥{data.pricing.rates.input_hit.join('–')}，未命中输入 ¥{data.pricing.rates.input_miss.join('–')}。各项低/高值对应空闲/高峰。</p>
             <p>高峰为北京时间非节假日的工作日 9–12、14–18 点。费用区间采用全命中空闲价至全未命中高峰价，未考虑赠送额度或折扣。</p>
@@ -212,8 +221,8 @@ export default function Admin() {
           </div></details>}
           <dl><div><dt>输入 Token</dt><dd>{number(data.input_tokens)}</dd></div><div><dt>输出 Token</dt><dd>{number(data.output_tokens)}</dd></div><div><dt>模型首文本 P95</dt><dd>{ms(data.ttft.p95)}</dd></div><div><dt>费用参考区间</dt><dd className="admin-cost-value">{referenceCost(data.pricing?.min_cny, data.pricing?.max_cny)}</dd></div></dl>
           <div className="admin-usage-coverage"><span>{data.pricing ? <>计价覆盖 <b>{data.pricing.priced_records} / {data.pricing.model_records}</b></> : <>完整用量 <b>{data.usage_known} / {data.count}</b></>}</span><span>首文本样本 <b>{data.ttft_known ?? 0}</b></span></div>
-          <p>{filters.source === "browser" ? "浏览器样本不提供后端模型 TTFT / Token。" : data.pricing && data.pricing.model_records === 0 ? '当前没有模型调用样本。语音费用按所选引擎与讯飞资源包另计。' : `按公开单价重估已知用量，不代表实扣账单；${(data.pricing?.unknown_usage_records ?? 0) + (data.pricing?.unpriced_records ?? 0)} 条调用未完整计价。语音另计。`}</p>
-        </article>
+          <p>{data.pricing && data.pricing.model_records === 0 ? '当前没有模型调用样本。语音费用按所选引擎与讯飞资源包另计。' : `按公开单价重估已知用量，不代表实扣账单；${(data.pricing?.unknown_usage_records ?? 0) + (data.pricing?.unpriced_records ?? 0)} 条调用未完整计价。语音另计。`}</p>
+        </article>}
       </section>
     </>}
     <section className="admin-panel admin-traces" aria-label="调用记录">
@@ -226,9 +235,9 @@ export default function Admin() {
         <select aria-label="调用状态" value={filters.outcome} onChange={e => update({ outcome: e.target.value })}><option value="">全部状态</option>{Object.entries(labels).map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select>
       </div></div>
       {listError && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{listError}</span><button onClick={() => setRevision(v => v + 1)}>重试</button></p>}
-      <div className="admin-table-wrap" aria-busy={listLoading}><table><thead><tr><th>时间 · 北京</th><th>业务操作</th><th>状态</th><th>耗时</th><th>模型 / 引擎</th><th>费用参考</th><th>Trace</th></tr></thead><tbody>
-        {rows.map(row => <tr key={row.trace_id} data-outcome={row.outcome}><td><time dateTime={row.started_at}>{date(row.started_at)}</time></td><td className="admin-operation-cell"><strong>{names[row.operation] ?? row.operation}</strong><small>版本 {row.release === "unknown" ? "未提供" : row.release.slice(0, 10)}</small></td><td><span className={`admin-badge ${row.outcome}`}>{labels[row.outcome] ?? row.outcome}</span></td><td className="admin-duration">{ms(row.duration_ms)}</td><td>{modelLabel(row)}</td><td className="admin-row-cost" title="按已采集用量与公开单价参考；未计价不代表零费用">{referenceCost(row.cost_min_cny, row.cost_max_cny)}</td><td><button aria-label={`查看调用 ${row.trace_id.slice(0, 8)}`} onClick={() => void inspect(row.trace_id)}>{row.trace_id.slice(0, 8)} <ArrowRight size={14} /></button></td></tr>)}
-        {!rows.length && <tr><td colSpan={7} className="admin-empty">{listLoading ? "正在读取调用记录…" : listError ? "列表读取失败，可点击上方重试。" : "暂无调用记录。可切换业务操作、状态或时间范围；这里不会生成演示数据。"}</td></tr>}
+      <div className="admin-table-wrap" aria-busy={listLoading}><table><thead><tr><th>时间 · 北京</th><th>业务操作</th><th>状态</th><th>耗时</th>{filters.source === "server" && <><th>模型</th><th>费用参考</th></>}<th>Trace</th></tr></thead><tbody>
+        {rows.map(row => <tr key={row.trace_id} data-outcome={row.outcome}><td><time dateTime={row.started_at}>{date(row.started_at)}</time></td><td className="admin-operation-cell"><strong>{names[row.operation] ?? row.operation}</strong><small>版本 {row.release === "unknown" ? "未提供" : row.release.slice(0, 10)}</small></td><td><span className={`admin-badge ${row.outcome}`}>{labels[row.outcome] ?? row.outcome}</span></td><td className="admin-duration">{ms(row.duration_ms)}</td>{filters.source === "server" && <><td>{modelLabel(row)}</td><td className="admin-row-cost" title="按已采集用量与公开单价参考；未计价不代表零费用">{referenceCost(row.cost_min_cny, row.cost_max_cny)}</td></>}<td><button aria-label={`查看调用 ${row.trace_id.slice(0, 8)}`} onClick={() => void inspect(row.trace_id)}>{row.trace_id.slice(0, 8)} <ArrowRight size={14} /></button></td></tr>)}
+        {!rows.length && <tr><td colSpan={filters.source === "server" ? 7 : 5} className="admin-empty">{listLoading ? "正在读取调用记录…" : listError ? "列表读取失败，可点击上方重试。" : "暂无调用记录。可切换业务操作、状态或时间范围；这里不会生成演示数据。"}</td></tr>}
       </tbody></table></div>
       <div className="admin-pagination"><span>{listLoading ? "列表更新中 · " : ""}第 {total ? offset + 1 : 0}–{Math.min(offset + rows.length, total)} 条 / {total} · 状态筛选仅影响列表</span><div><button aria-label="上一页" disabled={listLoading || offset === 0} onClick={() => setOffset(v => Math.max(0, v - 50))}><ArrowLeft size={15} /></button><button aria-label="下一页" disabled={listLoading || offset + 50 >= total} onClick={() => setOffset(v => v + 50)}><ArrowRight size={15} /></button></div></div>
     </section>
@@ -249,9 +258,9 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
   return <aside className="admin-detail" aria-label="调用详情"><header><div><span className="admin-eyebrow">调用详情</span><h2>{names[detail.operation] ?? detail.operation}</h2></div><button aria-label="关闭调用详情" onClick={onClose}><X size={20} /></button></header>
     <div className="admin-detail-status"><span className={`admin-badge ${detail.outcome}`}>{labels[detail.outcome] ?? detail.outcome}</span><time dateTime={detail.started_at}>{date(detail.started_at)}</time></div>
     <code className="admin-trace-id">{detail.trace_id}</code>
-    <div className="admin-trace-root"><div><span>总耗时</span><strong>{ms(detail.duration_ms)}</strong></div><div><span>模型 / 引擎</span><b>{modelLabel(detail)}</b></div></div>
-    <p className="admin-detail-cost">费用参考：{referenceCost(detail.cost_min_cny, detail.cost_max_cny)}<small>依据当前公开价与已知用量区间，未计价不代表零费用。</small></p>
-    <dl className="admin-detail-meta"><div><dt>采集来源</dt><dd>{detail.source === "browser" ? "浏览器上报" : "后端请求"}</dd></div><div><dt>响应</dt><dd>{detail.source === "browser" ? "不适用 HTTP 状态" : detail.http_status == null ? "HTTP 状态未采集" : `HTTP ${detail.http_status}`}</dd></div><div><dt>发布版本</dt><dd>{detail.release === "unknown" ? "未提供版本" : detail.release.slice(0, 12)}</dd></div><div><dt>模型首文本</dt><dd>{ms(detail.ttft_ms)}</dd></div></dl>
+    <div className="admin-trace-root"><div><span>总耗时</span><strong>{ms(detail.duration_ms)}</strong></div>{detail.source === "server" && <div><span>模型</span><b>{modelLabel(detail)}</b></div>}</div>
+    {detail.source === "server" && <p className="admin-detail-cost">费用参考：{referenceCost(detail.cost_min_cny, detail.cost_max_cny)}<small>依据当前公开价与已知用量区间，未计价不代表零费用。</small></p>}
+    <dl className="admin-detail-meta"><div><dt>采集来源</dt><dd>{detail.source === "browser" ? "浏览器上报" : "后端请求"}</dd></div><div><dt>响应</dt><dd>{detail.source === "browser" ? "不适用 HTTP 状态" : detail.http_status == null ? "HTTP 状态未采集" : `HTTP ${detail.http_status}`}</dd></div><div><dt>发布版本</dt><dd>{detail.release === "unknown" ? "未提供版本" : detail.release.slice(0, 12)}</dd></div>{detail.source === "server" && <div><dt>模型首文本</dt><dd>{ms(detail.ttft_ms)}</dd></div>}</dl>
     {failed && <section className="admin-failure-context"><h3><TriangleAlert size={16} />失败线索</h3>
       {detail.source === "browser" ? <p>此失败由浏览器上报，请结合关联的后端调用排查；上报可能缺失或被修改。</p>
         : detail.error_type ? <><div className="admin-error-types"><code>{detail.error_type}</code>{detail.error_cause_type && <><ArrowRight size={13} /><code>{detail.error_cause_type}</code></>}</div><p>已采集异常类名；可按调用时间和编号核对服务端日志。</p></>
