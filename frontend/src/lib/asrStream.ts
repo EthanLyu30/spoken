@@ -16,6 +16,7 @@ function streamUrl(): string {
 }
 
 export interface AsrStream {
+  readonly transport?: "direct" | "relay";
   send: (pcm: ArrayBuffer) => void;
   finishUtterance: () => Promise<string>;
   close: (error?: unknown) => void;

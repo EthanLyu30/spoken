@@ -34,7 +34,9 @@ it("reports buffered cloud recognition when the conversation falls back from str
     samples.push(JSON.parse(String(options.body)));
     return new Response(null, { status: 202 });
   });
-  mocks.postAsr.mockResolvedValue("A coffee, please.");
+  mocks.postAsr.mockImplementation(async (_pcm, _signal, onTransport) => {
+    onTransport?.("buffered"); return "A coffee, please.";
+  });
   const user = userEvent.setup();
   render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
   await screen.findByText("Hello");
@@ -156,6 +158,29 @@ it("streams push-to-talk audio into ASR instead of replaying the clip after stop
   expect(liveStream.send).toHaveBeenCalled();
   expect(liveStream.finishUtterance).toHaveBeenCalledOnce();
   expect(mocks.postAsr).not.toHaveBeenCalled();
+});
+
+it("keeps incomplete speech editable and never sends it until the learner confirms", async () => {
+  mocks.openAsrStream.mockImplementation(async callbacks => {
+    callbacks.onPartial("I would like");
+    return { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn().mockRejectedValue(new Error("ASR closed")) };
+  });
+  mocks.postAsr.mockRejectedValue(new Error("recovery unavailable"));
+  mocks.startRecording.mockResolvedValue({ stop: vi.fn().mockResolvedValue(new ArrayBuffer(1280)) });
+  mocks.streamChat.mockResolvedValue("A latte, coming up.");
+  const user = userEvent.setup();
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", { name: "开始录音" }));
+  await user.click(await screen.findByRole("button", { name: "结束录音" }));
+  const input = await screen.findByRole("textbox", { name: "英文回复" });
+  await waitFor(() => expect(input).toHaveValue("I would like"));
+  expect(mocks.streamChat).not.toHaveBeenCalled();
+  expect(mocks.postChat).toHaveBeenCalledTimes(1);
+  await user.type(input, " a latte.");
+  await user.click(screen.getByRole("button", { name: /^发送$/ }));
+  await screen.findByText("A latte, coming up.");
+  expect(mocks.streamChat.mock.calls[0][1]).toContainEqual(expect.objectContaining({ role: "user", content: "I would like a latte." }));
 });
 
 it("stops ordinary recording when the audio byte limit is exceeded without starting ASR", async () => {

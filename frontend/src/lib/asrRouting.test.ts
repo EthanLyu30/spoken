@@ -12,7 +12,9 @@ describe("cloud ASR routing", () => {
 
   it("uses a successful direct transcript without uploading the recording to the relay", async () => {
     direct.transcribe.mockResolvedValue("complete direct transcript");
-    expect(await postAsr(new ArrayBuffer(1280))).toBe("complete direct transcript");
+    const onTransport = vi.fn();
+    expect(await postAsr(new ArrayBuffer(1280), undefined, onTransport)).toBe("complete direct transcript");
+    expect(onTransport).toHaveBeenLastCalledWith("direct");
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/api/asr"))).toHaveLength(0);
   });
 
@@ -20,7 +22,9 @@ describe("cloud ASR routing", () => {
     direct.transcribe.mockRejectedValue(new Error("network unavailable"));
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ text: "complete relay transcript" })));
     const pcm = new Uint8Array([1, 2, 3, 4]).buffer;
-    expect(await postAsr(pcm)).toBe("complete relay transcript");
+    const onTransport = vi.fn();
+    expect(await postAsr(pcm, undefined, onTransport)).toBe("complete relay transcript");
+    expect(onTransport).toHaveBeenLastCalledWith("buffered");
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/asr"), expect.objectContaining({ body: pcm }));
   });
 
@@ -47,6 +51,7 @@ describe("cloud ASR routing", () => {
     const stream = { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn().mockResolvedValue("direct transcript") };
     direct.open.mockResolvedValue(stream);
     const selected = await openAsrStream({ onPartial: vi.fn() });
+    expect(selected.transport).toBe("direct");
     const pcm = new ArrayBuffer(16);
     selected.send(pcm);
     expect(await selected.finishUtterance()).toBe("direct transcript");
@@ -106,6 +111,7 @@ it("keeps same-owner streaming relay fallback available after a direct failure",
     close() { this.readyState = 3; this.onclose?.(); }
   });
   const stream = await openAsrStream({ onPartial: vi.fn() });
+  expect(stream.transport).toBe("relay");
   const pcm = new ArrayBuffer(1280);
   stream.send(pcm); stream.close();
   expect(frames).toContain(pcm);

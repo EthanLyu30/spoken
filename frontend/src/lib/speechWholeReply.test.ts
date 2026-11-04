@@ -96,6 +96,39 @@ it("starts the first complete browser sentence before the final reply arrives", 
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
 });
 
+it.each(["The price is $3.", "The price is $3. "])("does not speak a decimal split across streaming chunks: %s", async partial => {
+  vi.useFakeTimers();
+  const q = createSpeechQueue();
+  q.startEarly?.();
+  q.feed(partial);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(utterances).toHaveLength(0);
+
+  q.feed("The price is $3.50 per cup. Anything else?");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(utterances.map(u => u.text)).toEqual(["The price is $3.50 per cup."]);
+  utterances[0].onstart?.(); utterances[0].onend?.();
+  const done = q.end("The price is $3.50 per cup. Anything else?");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(utterances[1].text).toBe("Anything else?");
+  utterances[1].onstart?.(); utterances[1].onend?.();
+  await done;
+});
+
+it("waits for the final signal before speaking a single sentence at the buffer edge", async () => {
+  vi.useFakeTimers();
+  const q = createSpeechQueue();
+  q.startEarly?.();
+  q.feed("A coffee costs $3.50.");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(utterances).toHaveLength(0);
+  const done = q.end("A coffee costs $3.50.");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(utterances.map(u => u.text)).toEqual(["A coffee costs $3.50."]);
+  utterances[0].onstart?.(); utterances[0].onend?.();
+  await done;
+});
+
 it("overlaps empty browser discovery with generation so final text has no repeated 500 ms wait", async () => {
   vi.useFakeTimers(); mocks.settings.engine="browser";
   const subscribe=vi.fn(), unsubscribe=vi.fn();

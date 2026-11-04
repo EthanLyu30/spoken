@@ -2,7 +2,7 @@ import { postAsr } from "./api";
 import { openAsrStream, type AsrStream } from "./asrStream";
 import { isLocalSpeechModelReady, localSpeechCoordinator } from "./localSpeech/runtime";
 import { useVoice } from "../store/voice";
-import { getInteraction, bindInteraction, reportTiming } from "./telemetry";
+import { getInteraction, bindInteraction, reportTiming, type Transport } from "./telemetry";
 import { withTimeout } from "./requestTimeout";
 import { assertAuthGeneration, getAuthGeneration } from "./authToken";
 
@@ -39,11 +39,21 @@ export async function transcribeSpeechWith(
 }
 
 export interface LiveTranscription {
+  /** Actual latest route, including complete-recording recovery. */
+  readonly transport?: Transport;
   /** Feed captured PCM while the microphone is still recording. */
   send: (pcm: ArrayBuffer) => void;
   /** Finish the utterance and return its transcript, buffered only on failure. */
   finish: (pcm: ArrayBuffer, signal?: AbortSignal) => Promise<string>;
   close: () => void;
+}
+
+/** A partial is editable recovery text, never a confirmed answer. */
+export class IncompleteTranscriptionError extends Error {
+  constructor(readonly partialText: string) {
+    super("语音识别不完整，请确认补全后发送，或重新录音。");
+    this.name = "IncompleteTranscriptionError";
+  }
 }
 
 /**
@@ -55,8 +65,11 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
   let stream: AsrStream | null = null;
   let closed = false;
   let latest = "";
+  let transport: Transport = "unknown";
+  const onTransport = (actual: "direct" | "buffered") => { transport = actual; };
   const queue: ArrayBuffer[] = [];
   const control = new AbortController();
+  if (signal?.aborted) control.abort();
   const interactionId = getInteraction(signal);
   if (interactionId) bindInteraction(control.signal, interactionId);
   const abort = () => control.abort();
@@ -67,11 +80,13 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
     control.signal,
   ).then((openedStream) => {
     stream = openedStream;
+    transport = openedStream.transport ?? "unknown";
     for (const pcm of queue) openedStream.send(pcm);
     queue.length = 0;
     return openedStream;
   }).catch(() => null);
   return {
+    get transport() { return transport; },
     send(pcm) {
       if (closed) return;
       if (stream) stream.send(pcm);
@@ -83,23 +98,27 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
       finishSignal?.addEventListener("abort", cancel, { once: true });
       try {
         const openedStream = stream ?? await opened;
-        if (!openedStream) return (await postAsr(pcm, finishSignal)).trim();
+        control.signal.throwIfAborted();
+        finishSignal?.throwIfAborted();
+        if (!openedStream) return (await postAsr(pcm, finishSignal, onTransport)).trim();
         try {
           const text = (await openedStream.finishUtterance()).trim();
-          return text || latest.trim();
+          if (!text && latest.trim()) throw new IncompleteTranscriptionError(latest.trim());
+          return text;
         } catch (error) {
-          if (finishSignal?.aborted || control.signal.aborted) throw error;
+          if (finishSignal?.aborted || control.signal.aborted ||
+              (error instanceof Error && error.name === "AbortError")) throw error;
           // A deploy can close the relay mid-utterance. Prefer the complete
-          // recording over a truncated partial; keep the partial only if the
-          // recovery request also fails.
+          // recording; an unconfirmed partial must never be auto-submitted.
           const partial = latest.trim();
           try {
-            const recovered = (await postAsr(pcm, finishSignal)).trim();
+            const recovered = (await postAsr(pcm, finishSignal, onTransport)).trim();
             if (recovered) return recovered;
           } catch (recoveryError) {
-            if (finishSignal?.aborted || control.signal.aborted) throw recoveryError;
+            if (finishSignal?.aborted || control.signal.aborted ||
+                (recoveryError instanceof Error && recoveryError.name === "AbortError")) throw recoveryError;
           }
-          if (partial) return partial;
+          if (partial) throw new IncompleteTranscriptionError(partial);
           throw error;
         } finally {
           openedStream.close();
@@ -136,7 +155,7 @@ export async function transcribeSpeech(
   const start = performance.now();
   const turnSignal = withTimeout(signal, asrTurnBudgetMs(pcm));
   if (turnSignal) bindInteraction(turnSignal, getInteraction(signal));
-  const measurement: { engine: "local" | "xfyun" | "unknown" } = { engine: "unknown" };
+  const measurement: { engine: "local" | "xfyun" | "unknown"; transport: Transport } = { engine: "unknown", transport: "unknown" };
   // A live stream wins unless the learner explicitly prepared the local model.
   // The stream already contains the whole utterance, so there is no replay.
   const useLive = !!live && !(mode !== "cloud" && isMoonshineTranscriptionReady());
@@ -152,6 +171,7 @@ export async function transcribeSpeech(
         isMoonshineReady: () => mode !== "cloud" && isMoonshineTranscriptionReady(),
         moonshine: async (audio) => {
           measurement.engine = "local";
+          measurement.transport = "local";
           const { transcribeWithMoonshine } = await import(
             "./localSpeech/moonshine"
           );
@@ -159,20 +179,28 @@ export async function transcribeSpeech(
           try { return await transcribeWithMoonshine(audio); }
           catch (error) { assertAuthGeneration(generation, turnSignal); localSpeechCoordinator.markError("moonshine",error); throw error; }
         },
-        cloud: (audio) => { measurement.engine = "xfyun"; return postAsr(audio, turnSignal); },
+        cloud: (audio) => {
+          measurement.engine = "xfyun";
+          measurement.transport = "unknown";
+          return postAsr(audio, turnSignal, transport => { measurement.transport = transport; });
+        },
       }, turnSignal);
     }
     assertAuthGeneration(generation, turnSignal);
     reportTiming("asr.transcribe", performance.now() - start, {
       engine: measurement.engine,
       interactionId: getInteraction(turnSignal),
-      transport: useLive ? "direct" : measurement.engine === "local" ? "local" : "buffered",
+      transport: useLive ? live?.transport ?? "unknown" : measurement.transport,
       outcome: text ? "ok" : "error",
     });
     return text;
   } catch (error) {
     if (live && !useLive) live.close();
-    reportTiming("asr.transcribe", performance.now() - start, { engine: measurement.engine, interactionId: getInteraction(turnSignal), outcome: signal?.aborted || generation !== getAuthGeneration() ? "cancelled" : "error" });
+    reportTiming("asr.transcribe", performance.now() - start, {
+      engine: measurement.engine, interactionId: getInteraction(turnSignal),
+      transport: useLive ? live?.transport ?? "unknown" : measurement.transport,
+      outcome: signal?.aborted || generation !== getAuthGeneration() ? "cancelled" : "error",
+    });
     throw error;
   }
 }

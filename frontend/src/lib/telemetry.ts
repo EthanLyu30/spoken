@@ -33,7 +33,7 @@ type Operation = "asr.transcribe" | "asr.finalize" | "asr.attempt" | "speech.fir
   | "speech.voice_resolution" | "speech.final_text_to_audio" | "speech.native_start" | "speech.native_end" | "speech.cloud_fetch" | "speech.play_start"
   | "pronunciation.click_to_result" | "pronunciation.stop_to_result";
 type Engine = "local" | "xfyun" | "browser" | "unknown";
-type Transport = "direct" | "relay" | "buffered" | "local" | "unknown";
+export type Transport = "direct" | "relay" | "buffered" | "local" | "unknown";
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const interactions = new WeakMap<object, string>();
 export function newInteractionId(): string | undefined {
@@ -117,6 +117,7 @@ export function reportTiming(operation: Operation, durationMs: number, options: 
 export function measureAsrStream(stream: AsrStream, transport: "direct" | "relay", signal?: AbortSignal): AsrStream {
   let closed = false;
   const measured: AsrStream = {
+    transport,
     send: (pcm) => stream.send(pcm), close: () => { closed = true; stream.close(); },
     finishUtterance: async () => {
       const start = performance.now();

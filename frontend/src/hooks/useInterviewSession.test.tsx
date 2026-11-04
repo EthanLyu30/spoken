@@ -162,6 +162,21 @@ it("keeps recorded audio for retry when recognition fails", async () => {
   expect(result.current.draft).toBe("Recovered answer.");
   expect(mocks.startRecording).toHaveBeenCalledTimes(1);
 });
+
+it("does not advance or score a simulation answer when recognition is incomplete", async () => {
+  vi.useFakeTimers();
+  mocks.transcribeSpeech.mockRejectedValueOnce(Object.assign(new Error("incomplete"), { name: "IncompleteTranscriptionError", partialText: "I like" }));
+  const { result } = renderHook(() => useInterviewSession("incomplete-simulation"));
+  await act(async () => result.current.begin("simulation", "exercise"));
+  await act(async () => vi.advanceTimersByTimeAsync(45_000));
+  expect(result.current.idx).toBe(0);
+  expect(result.current.answers).toEqual([]);
+  expect(result.current.canRetryRecognition).toBe(true);
+  expect(mocks.scoreInterview).not.toHaveBeenCalled();
+  await act(async () => result.current.retryRecognition());
+  expect(result.current.answers).toEqual(["I enjoy running in the park."]);
+  expect(result.current.idx).toBe(1);
+});
 it("feeds interview recording chunks into the live ASR stream", async () => {
   const live = { send: vi.fn(), finish: vi.fn(), close: vi.fn() };
   mocks.createLiveTranscription.mockReturnValueOnce(live);

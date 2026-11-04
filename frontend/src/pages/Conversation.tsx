@@ -50,6 +50,7 @@ import { startVoiceCall, type CallPhase, type VoiceCall } from "../lib/call";
 import { getInteraction, bindInteraction, newInteractionId } from "../lib/telemetry";
 import {
   createLiveTranscription,
+  IncompleteTranscriptionError,
   isMoonshineTranscriptionReady,
   transcribeSpeech,
   type LiveTranscription,
@@ -475,8 +476,17 @@ export default function Conversation() {
         } else {
           setError("没听清，再说一次试试？");
         }
-      } catch {
-        if (isCurrent()) setError("语音识别失败，请检查麦克风权限或后端，或直接打字。");
+      } catch (error) {
+        if (isCurrent()) {
+          if (error instanceof IncompleteTranscriptionError) {
+            const typedPrefix = input.trim();
+            setInput(typedPrefix ? `${typedPrefix} ${error.partialText}` : error.partialText);
+            setInputMode("text");
+            setError(error.message);
+          } else {
+            setError("语音识别失败，请检查麦克风权限或后端，或直接打字。");
+          }
+        }
       } finally {
         live?.close();
         if (transcriptionControllerRef.current === controller) transcriptionControllerRef.current = null;

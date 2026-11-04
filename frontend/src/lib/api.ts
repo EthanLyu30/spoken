@@ -338,13 +338,18 @@ function asrFallbackReason(error: unknown): AsrFallbackReason {
 }
 
 /** Transcribe 16 kHz mono PCM via the backend (iFlytek ASR). */
-export async function postAsr(pcm: ArrayBuffer, signal?: AbortSignal): Promise<string> {
+export async function postAsr(
+  pcm: ArrayBuffer,
+  signal?: AbortSignal,
+  onTransport?: (transport: "direct" | "buffered") => void,
+): Promise<string> {
   const generation = getAuthGeneration();
   assertAudioWithinLimit(pcm);
   assertAuthGeneration(generation, signal);
   const interactionId = getInteraction(signal);
   let fallbackReason: AsrFallbackReason = "unknown";
   const directStarted = performance.now();
+  onTransport?.("direct");
   try {
     const text = await transcribeDirect(pcm, signal);
     assertAuthGeneration(generation, signal);
@@ -367,6 +372,7 @@ export async function postAsr(pcm: ArrayBuffer, signal?: AbortSignal): Promise<s
     if ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError") throw error;
   }
   const bufferedStarted = performance.now();
+  onTransport?.("buffered");
   try {
     const res = await fetch(`${BASE_URL}/api/asr`, {
       method: "POST",

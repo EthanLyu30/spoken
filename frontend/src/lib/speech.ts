@@ -25,9 +25,10 @@ export interface SpeechQueue {
 }
 
 function firstCompleteSentence(text: string): string | null {
-  // Require a likely sentence boundary (uppercase/quote/end) so abbreviations,
-  // decimals and "e.g." do not get spoken as a standalone first utterance.
-  const match = text.match(/^[\s\S]*?[.!?](?=\s+["“'A-Z]|\s*$)/);
+  // A streaming buffer edge is not a sentence boundary: the next chunk may
+  // extend "$3." to "$3.50". Require following text; end() handles the final
+  // sentence when generation is actually complete.
+  const match = text.match(/^[\s\S]*?[.!?](?=\s+["“'A-Z])/);
   if (!match) return null;
   const sentence = match[0].trim();
   if (sentence.length < 3) return null;
