@@ -6,7 +6,6 @@ import {
   BookOpen,
   Check,
   ChevronRight,
-  ExternalLink,
   Lightbulb,
   Loader2,
   Mic,
@@ -171,26 +170,13 @@ export default function Interview() {
                       : catalogueError
                         ? "收录数量暂时无法读取，请重新加载题库。"
                         : `博主系列已收录 ${inspireCount} 组，ETS 公开样题 ${etsCount} 组。`}
-                    来自已核实的 Inspire SpeakEasy 视频与 ETS 新版公开样题，按原题意改编，每组保留同主题四题与来源链接。练习和模拟共用所选来源，随机抽取完整题组。它们是练习材料，不是已核实的考场原题；不会混入临时 AI 生成题。
+                    来自已核实的 Inspire SpeakEasy 文字题库与 ETS 新版公开样题，按原题意改编，每组保留同主题四题与文字参考。练习和模拟共用所选来源，随机抽取完整题组。它们是练习材料，不是已核实的考场原题；不会混入临时 AI 生成题。
                   </p>
                   {selection && (
-                    <a
-                      href={selection.source_url}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
+                    <p className="interview-source-note">
                       当前主题来源 · {selection.source_title}
-                      <ExternalLink size={12} />
-                    </a>
+                    </p>
                   )}
-                  <a
-                    href="https://www.youtube.com/playlist?list=PLfNWEZJODl5iNLcLDJX27jebB_psDCPec"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Inspire SpeakEasy · 完整 Interview 系列
-                    <ExternalLink size={12} />
-                  </a>
                 </details>
               </section>
               <aside className="interview-start-panel">
@@ -469,10 +455,7 @@ export default function Interview() {
                     ? "回答中带一个具体细节，往往比堆砌观点更有说服力。"
                     : "听完问题后直接作答，尽量持续表达并给出理由。"}
                 </p>
-                <a href={deck.source_url} target="_blank" rel="noreferrer">
-                  {deck.source_title}
-                  <ExternalLink size={12} />
-                </a>
+                <p className="interview-source-note">{deck.source_title}</p>
               </aside>
             </div>
           </>

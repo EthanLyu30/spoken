@@ -41,6 +41,7 @@ class InterviewResult(BaseModel):
     sample_source_url: str | None = None
     sample_word_count: int = Field(default=0, ge=0)
     sample_estimated_seconds: int = Field(default=0, ge=0)
+    reference_notes: str | None = None
 
 
 class InterviewScoreResponse(BaseModel):

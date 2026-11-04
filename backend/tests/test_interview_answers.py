@@ -141,6 +141,7 @@ def test_reviewed_context_is_used_and_server_owns_source_and_timing(api, bank, r
         assert result["sample_source_url"] == f"{bank[0].source_url}&t={300 + index}"
         assert result["sample_word_count"] == 57
         assert result["sample_estimated_seconds"] == 35
+        assert result["reference_notes"] == f"Unique source idea {index}: consider shared study or quiet focus."
     prompt = "\n".join(message["content"] for message in service.messages[0])
     assert "Unique source idea 1" in prompt and "Unique source idea 4" in prompt
     assert "55–75" in prompt and "45" in prompt

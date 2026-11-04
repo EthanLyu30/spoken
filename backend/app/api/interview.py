@@ -222,6 +222,7 @@ async def _score_interview(req: InterviewScoreRequest, client: DeepSeekClient) -
             if result.sample_word_count < 1:
                 raise ValueError("empty sample answer")
             result.sample_estimated_seconds = round(result.sample_word_count / 110 * 60 + 4)
+            result.reference_notes = reference.answers[index].notes if reference is not None else None
         overall = sum(r.score for r in results) / len(results)
         overall = round(overall, 1)
         return InterviewScoreResponse(overall=overall, results=results)
