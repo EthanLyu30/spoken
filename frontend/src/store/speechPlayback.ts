@@ -7,7 +7,7 @@ export interface SpeechPlayback {
   effectiveEngine: "browser" | "local" | null;
   voice: string | null;
   phase: "waiting" | "preparing" | "speaking" | "completed" | "cancelled" | "error";
-  fallbackReason: "browser-unavailable" | "browser-start-failed" | "local-unavailable" | null;
+  fallbackReason: "browser-unavailable" | "browser-start-failed" | "browser-voice-unavailable" | "local-unavailable" | null;
 }
 
 // Playback is transient device state, never a persisted voice preference.

@@ -75,7 +75,7 @@ function pickBrowserVoice(uri: string | null): SpeechSynthesisVoice | null {
     (voice.lang.toLowerCase() === "en-us" ? 10 : 0);
   return [...voices].sort((a, b) => score(b) - score(a))[0] ?? null;
 }
-function speakBrowser(text: string, settings: VoiceSettings, voice: SpeechSynthesisVoice, onStarted: () => void, onOutcome: (duration: number, diagnostic: NativeDiagnostic, outcome: "ok" | "error" | "cancelled") => void, onTerminal: (duration: number, diagnostic: NativeEndDiagnostic, outcome: "ok" | "error" | "cancelled") => void): Speaking {
+function speakBrowser(text: string, settings: VoiceSettings, voice: SpeechSynthesisVoice, onStarted: () => void, onOutcome: (duration: number, diagnostic: NativeDiagnostic, outcome: "ok" | "error" | "cancelled") => void, onTerminal: (duration: number, diagnostic: NativeEndDiagnostic, outcome: "ok" | "error" | "cancelled") => void): Speaking & {readonly canRecoverStartup: boolean} {
   const synth = window.speechSynthesis;
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.voice = voice;
@@ -83,6 +83,7 @@ function speakBrowser(text: string, settings: VoiceSettings, voice: SpeechSynthe
   utterance.rate = 0.7 + ((settings.speed ?? 50) / 100) * 0.8;
   utterance.pitch = 0.6 + ((settings.pitch ?? 50) / 100) * 0.9;
   let failed = false, finished = false, started = false;
+  let recoverableStartup = false;
   let startupTimer = 0, completionTimer = 0;
   const attemptStartedAt = performance.now();
   const completionBudget = Math.max(60_000, text.length * 150 / utterance.rate);
@@ -139,6 +140,8 @@ function speakBrowser(text: string, settings: VoiceSettings, voice: SpeechSynthe
   const failStartup = (reason: NativeDiagnostic["reason"], error?: string) => {
     if (finished) return;
     failed = true;
+    recoverableStartup = !started && (reason === "end_before_start" || reason === "startup_timeout" ||
+      (reason === "speech_error" && ["network", "synthesis-unavailable", "synthesis-failed", "voice-unavailable", "language-unavailable"].includes(error ?? "")));
     const stateAtEvent = state();
     cancelNative();
     reportStart(reason, error, stateAtEvent);
@@ -212,7 +215,7 @@ function speakBrowser(text: string, settings: VoiceSettings, voice: SpeechSynthe
     nativeRequestedAt = performance.now();
     synth.speak(utterance);
   } catch { failStartup("speak_exception", "unknown"); }
-  return { done, get failed() { return failed; }, stop: () => {
+  return { done, get failed() { return failed; }, get canRecoverStartup() { return recoverableStartup; }, stop: () => {
     if (finished) return;
     const stateAtEvent = state(); // Sample before cancel, including native pending/speaking bits.
     cancelNative();
@@ -319,6 +322,23 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
   const reportNativeEnd = (duration: number, diagnostic: NativeEndDiagnostic, outcome: "ok" | "error" | "cancelled") => {
     reportTiming("speech.native_end", duration, {engine: "browser", transport: "unknown", interactionId, outcome, ...diagnostic});
   };
+  let browserRecoveryUsed = false;
+  const playBrowser = async (text: string, voice: SpeechSynthesisVoice): Promise<{voice: SpeechSynthesisVoice; failed: boolean}> => {
+    const onStarted = () => { playback.update({phase: "speaking"}); didStart(); };
+    const first = speakBrowser(text, settings, voice, onStarted, reportNativeStart, reportNativeEnd);
+    active = first;
+    await first.done;
+    // A listed online voice can end without producing sound. Recover only
+    // before this utterance starts, once per reply, using real local English.
+    if (stopped || !first.canRecoverStartup || voice.localService !== false || browserRecoveryUsed) return {voice, failed: Boolean(first.failed)};
+    const fallback = listBrowserVoices().find(candidate => candidate.localService === true && candidate.voiceURI !== voice.voiceURI);
+    if (!fallback) return {voice, failed: Boolean(first.failed)};
+    browserRecoveryUsed = true;
+    playback.update({phase: "preparing", voice: fallback.name, fallbackReason: "browser-voice-unavailable"});
+    active = speakBrowser(text, settings, fallback, onStarted, reportNativeStart, reportNativeEnd);
+    await active.done;
+    return {voice: fallback, failed: Boolean(active.failed)};
+  };
   const consumer = (async () => {
     let completed = false;
     try {
@@ -340,16 +360,16 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
         if (!stopped) reportTiming("speech.voice_resolution", performance.now() - resolutionStart, {
           engine: browserMode?.kind === "browser" ? "browser" : "unknown", transport: "unknown", interactionId,
         });
-        const browserVoice = !stopped && browserMode?.kind === "browser" ? pickBrowserVoice(settings.browserVoiceURI) : null;
+        let browserVoice = !stopped && browserMode?.kind === "browser" ? pickBrowserVoice(settings.browserVoiceURI) : null;
         if (browserVoice) {
           preparation?.dispose();
           engine = "browser"; transport = "unknown";
           playback.update({effectiveEngine:"browser",voice:browserVoice.name,
             fallbackReason:settings.engine === "local" ? "local-unavailable" : null});
-          active = speakBrowser(early, settings, browserVoice, didStart, reportNativeStart, reportNativeEnd);
-          await active.done;
+          const earlyPlayback = await playBrowser(early, browserVoice);
+          browserVoice = earlyPlayback.voice;
           if (stopped) return;
-          if (active.failed) {
+          if (earlyPlayback.failed) {
             failed = true;
             playback.update({fallbackReason:"browser-start-failed"});
             return;
@@ -357,9 +377,8 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
           const final = (await finalText).trim();
           const remainder = final.startsWith(early) ? final.slice(early.length).trim() : final.trim();
           if (remainder && !stopped) {
-            active = speakBrowser(remainder, settings, browserVoice, didStart, reportNativeStart, reportNativeEnd);
-            await active.done;
-            failed = Boolean(active.failed) && !stopped;
+            const remainderPlayback = await playBrowser(remainder, browserVoice);
+            failed = remainderPlayback.failed && !stopped;
             if (failed) playback.update({fallbackReason:"browser-start-failed"});
           }
           completed = !stopped && !failed;
@@ -403,7 +422,8 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
         engine = "browser"; transport = "unknown";
         playback.update({effectiveEngine:"browser",voice:browserVoice.name,
           fallbackReason:settings.engine === "local" ? "local-unavailable" : null});
-        active = speakBrowser(text, settings, browserVoice, didStart, reportNativeStart, reportNativeEnd);
+        const result = await playBrowser(text, browserVoice);
+        failed = result.failed && !stopped;
       } else if (url) {
         preparation?.dispose();
         if (stopped) { URL.revokeObjectURL(url); return; }
@@ -411,13 +431,13 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
           reportTiming("speech.play_start", duration, {engine, transport, interactionId});
           didStart();
         });
+        await active.done;
+        failed = Boolean(active.failed) && !stopped;
       } else {
         failed = true;
         playback.update({effectiveEngine:null,voice:null,fallbackReason:"browser-unavailable"});
         return;
       }
-      await active.done;
-      failed = Boolean(active.failed) && !stopped;
       if (failed && engine === "browser") playback.update({fallbackReason:"browser-start-failed"});
       completed = !stopped;
     } catch (error) {

@@ -320,6 +320,164 @@ it("reports native startup failure without pretending another voice played", asy
   expect(q.status).toMatchObject({effectiveEngine:"browser",fallbackReason:"browser-start-failed",phase:"error"});expect(q.failed).toBe(true);
   expect(audios).toHaveLength(0);expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
 });
+
+it.each(["end_before_start", "network", "startup_timeout"])("recovers an online voice's %s once through an available local English voice", async failure => {
+  vi.useFakeTimers();
+  const voices = [
+    {name:"Microsoft Ava Online (Natural)",voiceURI:"natural",lang:"en-US",localService:false,default:false},
+    {name:"Microsoft Zira",voiceURI:"zira",lang:"en-US",localService:true,default:true},
+  ] as SpeechSynthesisVoice[];
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue(voices);
+  mocks.settings.browserVoiceURI = "natural";
+  const q = createSpeechQueue();
+  let audible = false;
+  void q.started.then(() => { audible = true; });
+  const done = q.end("The price is $3.50 per cup.");
+  await vi.advanceTimersByTimeAsync(0);
+  if (failure === "end_before_start") utterances[0].onend?.();
+  else if (failure === "network") utterances[0].onerror?.({error:"network"});
+  else await vi.advanceTimersByTimeAsync(5_000);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(audible).toBe(false);
+  expect(utterances.map(u=>[u.voice?.voiceURI,u.text])).toEqual([
+    ["natural","The price is $3.50 per cup."], ["zira","The price is $3.50 per cup."],
+  ]);
+  utterances[1].onstart?.(); utterances[1].onend?.();
+  await done;
+  expect(q.failed).toBe(false);
+  expect(q.status).toMatchObject({voice:"Microsoft Zira",phase:"completed",fallbackReason:"browser-voice-unavailable"});
+  expect(mocks.settings.browserVoiceURI).toBe("natural");
+  expect(samples.filter(s=>s.operation==="speech.first_audio")).toHaveLength(1);
+  expect(samples).toContainEqual(expect.objectContaining({operation:"speech.complete",outcome:"ok",engine:"browser"}));
+  expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
+});
+
+it.each(["not-allowed", "interrupted", "canceled"])("does not switch voices after native %s", async error => {
+  vi.useFakeTimers();
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([
+    {name:"Natural English",voiceURI:"natural",lang:"en-US",localService:false},
+    {name:"System English",voiceURI:"system",lang:"en-US",localService:true},
+  ] as SpeechSynthesisVoice[]);
+  const q=createSpeechQueue();const done=q.end("Keep user control.");
+  await vi.advanceTimersByTimeAsync(0);
+  utterances[0].onerror?.({error});
+  await done;
+  expect(utterances).toHaveLength(1);
+  expect(q.failed).toBe(true);
+});
+
+it("never replays an online voice that already started, even with a local fallback available", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([
+    {name:"Natural English",voiceURI:"natural",lang:"en-US",localService:false},
+    {name:"System English",voiceURI:"system",lang:"en-US",localService:true},
+  ] as SpeechSynthesisVoice[]);
+  const q=createSpeechQueue();const done=q.end("Already spoken words.");
+  await vi.advanceTimersByTimeAsync(0);
+  utterances[0].onstart?.();utterances[0].onerror?.({error:"network"});
+  await done;
+  expect(utterances).toHaveLength(1);
+  expect(q.failed).toBe(true);
+});
+
+it("stops after one failed local recovery rather than cycling through voices", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([
+    {name:"Natural English",voiceURI:"natural",lang:"en-US",localService:false},
+    {name:"System English",voiceURI:"system",lang:"en-US",localService:true},
+    {name:"Another English",voiceURI:"another",lang:"en-GB",localService:true},
+  ] as SpeechSynthesisVoice[]);
+  const q=createSpeechQueue();const done=q.end("One recovery only.");
+  await vi.advanceTimersByTimeAsync(0);
+  utterances[0].onend?.();await vi.advanceTimersByTimeAsync(0);
+  expect(utterances).toHaveLength(2);
+  utterances[1].onend?.();await done;
+  expect(utterances).toHaveLength(2);
+  expect(q.failed).toBe(true);
+});
+
+it("does not substitute a Chinese system voice for failed English speech", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([
+    {name:"Natural English",voiceURI:"natural",lang:"en-US",localService:false},
+    {name:"System Chinese",voiceURI:"chinese",lang:"zh-CN",localService:true},
+  ] as SpeechSynthesisVoice[]);
+  const q=createSpeechQueue();const done=q.end("English only.");
+  await vi.advanceTimersByTimeAsync(0);
+  utterances[0].onend?.();await done;
+  expect(utterances).toHaveLength(1);
+  expect(q.failed).toBe(true);
+});
+
+it("cancels before a failed online startup can launch local recovery", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([
+    {name:"Natural English",voiceURI:"natural",lang:"en-US",localService:false},
+    {name:"System English",voiceURI:"system",lang:"en-US",localService:true},
+  ] as SpeechSynthesisVoice[]);
+  const q=createSpeechQueue();const done=q.end("Cancelled recovery.");
+  await vi.advanceTimersByTimeAsync(0);
+  utterances[0].onend?.();q.stop();await done;
+  expect(utterances).toHaveLength(1);
+  expect(q.status?.phase).toBe("cancelled");
+});
+
+it("keeps recovered early speech and its remainder on the working English voice", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([
+    {name:"Natural English",voiceURI:"natural",lang:"en-US",localService:false},
+    {name:"System English",voiceURI:"system",lang:"en-US",localService:true},
+  ] as SpeechSynthesisVoice[]);
+  const q=createSpeechQueue();q.startEarly?.();q.feed("The price is $3.50 per cup. Would you");
+  await vi.advanceTimersByTimeAsync(0);
+  utterances[0].onend?.();await vi.advanceTimersByTimeAsync(0);
+  expect(utterances).toHaveLength(2);
+  expect(q.status?.phase).toBe("preparing");
+  utterances[1].onstart?.();utterances[1].onend?.();
+  const done=q.end("The price is $3.50 per cup. Would you like one?");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(utterances[2].voice?.voiceURI).toBe("system");
+  expect(utterances[2].text).toBe("Would you like one?");
+  utterances[2].onstart?.();utterances[2].onend?.();await done;
+  expect(q.failed).toBe(false);
+});
+
+it("recovers only the unspoken remainder and reports its preparation and playback states", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([
+    {name:"Natural English",voiceURI:"natural",lang:"en-US",localService:false},
+    {name:"System English",voiceURI:"system",lang:"en-US",localService:true},
+  ] as SpeechSynthesisVoice[]);
+  const q=createSpeechQueue();q.startEarly?.();q.feed("First sentence. Second");
+  await vi.advanceTimersByTimeAsync(0);
+  utterances[0].onstart?.();utterances[0].onend?.();
+  const done=q.end("First sentence. Second sentence.");
+  await vi.advanceTimersByTimeAsync(0);
+  utterances[1].onend?.();await vi.advanceTimersByTimeAsync(0);
+  expect(utterances[2].text).toBe("Second sentence.");
+  expect(q.status?.phase).toBe("preparing");
+  utterances[2].onstart?.();
+  expect(q.status?.phase).toBe("speaking");
+  utterances[2].onend?.();await done;
+  expect(q.failed).toBe(false);
+  expect(samples.filter(s=>s.operation==="speech.first_audio")).toHaveLength(1);
+});
+
+it("cancels local recovery and ignores its late native callback", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([
+    {name:"Natural English",voiceURI:"natural",lang:"en-US",localService:false},
+    {name:"System English",voiceURI:"system",lang:"en-US",localService:true},
+  ] as SpeechSynthesisVoice[]);
+  const q=createSpeechQueue();const done=q.end("Cancelled local recovery.");
+  await vi.advanceTimersByTimeAsync(0);
+  utterances[0].onend?.();await vi.advanceTimersByTimeAsync(0);
+  const lateStart=utterances[1].onstart;
+  q.stop();lateStart?.();await done;
+  expect(q.status?.phase).toBe("cancelled");
+  expect(utterances).toHaveLength(2);
+  expect(samples.some(s=>s.operation==="speech.first_audio")).toBe(false);
+});
 it("does not synthesize or play when stopped before final text", async () => {
   const q=createSpeechQueue(); q.feed("First sentence. "); q.stop(); await q.end("First sentence. Second sentence.");
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled(); expect(audios).toHaveLength(0);

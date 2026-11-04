@@ -27,3 +27,22 @@ it("suppresses inline errors when the App owns the shared error alert",()=>{
   render(<SpeechPlaybackStatus suppressInlineErrors />);
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
+
+it("explains when English voices are missing so the learner can restore them",()=>{
+  const playback=beginSpeechPlayback("browser");playback.update({phase:"error",fallbackReason:"browser-unavailable"});
+  render(<SpeechPlaybackStatus />);
+  expect(screen.getByRole("alert")).toHaveTextContent("英语音色");
+  expect(screen.getByRole("alert")).toHaveTextContent("语音设置");
+});
+
+it("discloses the temporary system voice during and after recovered playback",()=>{
+  const playback=beginSpeechPlayback("browser");
+  playback.update({phase:"preparing",effectiveEngine:"browser",voice:"Microsoft Zira",fallbackReason:"browser-voice-unavailable"});
+  render(<SpeechPlaybackStatus />);
+  expect(screen.getByRole("status")).toHaveTextContent("准备系统英语音色");
+  act(()=>playback.update({phase:"speaking"}));
+  expect(screen.getByRole("status")).toHaveTextContent("系统英语音色");
+  act(()=>playback.update({phase:"completed"}));
+  expect(screen.getByRole("status")).toHaveTextContent("系统英语音色");
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});

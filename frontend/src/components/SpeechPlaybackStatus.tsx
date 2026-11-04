@@ -4,7 +4,14 @@ import { useSpeechPlayback, type SpeechPlayback } from "../store/speechPlayback"
 
 function PlaybackMessage({ playback }: { playback: SpeechPlayback }) {
   if (playback.phase === "error") {
+    if (playback.fallbackReason === "browser-unavailable") {
+      return <p>朗读暂时不可用：浏览器尚未提供英语音色。请稍后重试，或检查设备的英语语音设置。</p>;
+    }
     return <p>朗读暂时不可用，可继续文字练习。</p>;
+  }
+  if (playback.fallbackReason === "browser-voice-unavailable") {
+    if (playback.phase === "preparing") return <p>原音色暂时不可用，正在准备系统英语音色…</p>;
+    return <p>{playback.phase === "completed" ? "本次已使用系统英语音色朗读。" : "原音色暂时不可用，正在使用系统英语音色朗读…"}</p>;
   }
   if (playback.phase === "preparing") return <p>正在准备朗读…</p>;
   if (playback.phase === "speaking") return <p>正在朗读…</p>;
@@ -13,7 +20,7 @@ function PlaybackMessage({ playback }: { playback: SpeechPlayback }) {
 
 export function SpeechPlaybackStatus({suppressInlineErrors=false}:{suppressInlineErrors?:boolean}) {
   const playback = useSpeechPlayback(s => s.playback);
-  if (!playback || playback.phase === "waiting" || playback.phase === "completed" || playback.phase === "cancelled" || (suppressInlineErrors && playback.phase === "error")) return null;
+  if (!playback || playback.phase === "waiting" || (playback.phase === "completed" && playback.fallbackReason !== "browser-voice-unavailable") || playback.phase === "cancelled" || (suppressInlineErrors && playback.phase === "error")) return null;
   return <div role={playback.phase === "error" ? "alert" : "status"} className="mt-3 break-words text-xs leading-relaxed text-muted">
     <PlaybackMessage playback={playback}/>
   </div>;
