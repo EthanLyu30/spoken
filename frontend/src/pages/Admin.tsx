@@ -9,7 +9,7 @@ import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, type Ad
 import "../admin.css";
 
 const defaults: AdminFilters = { hours: 24, source: "server", operation: "", model: "", release: "", outcome: "" };
-const FRONTEND_RELEASE = import.meta.env.VITE_RELEASE ?? "unknown";
+const frontendRelease = () => import.meta.env.VITE_RELEASE ?? "unknown";
 type ReleaseMode = "current" | "all" | "history";
 const isTestRelease = (release: string) => /^(development|test|qa)([-_]|$)/i.test(release);
 const releaseLabel = (release: string) => release === "unknown" ? "未知版本" : isTestRelease(release) ? `测试 · ${release}` : release.slice(0, 10);
@@ -124,8 +124,13 @@ export default function Admin() {
   }, [rejectAccess]);
 
   const knownRelease = (release: string | null | undefined) => release && release !== "unknown" ? release : undefined;
-  const currentServerRelease = releaseMode === "current" ? knownRelease(serverRelease) : releaseMode === "all" ? undefined : filters.release || undefined;
-  const currentBrowserRelease = releaseMode === "current" ? knownRelease(FRONTEND_RELEASE) : releaseMode === "all" ? undefined : filters.release || undefined;
+  const EXPERIENCE_ALL = "__all";
+  const currentServerRelease = releaseMode === "current"
+    ? serverRelease === null ? undefined : serverRelease === "unknown" ? EXPERIENCE_ALL : serverRelease
+    : releaseMode === "all" ? undefined : filters.release || undefined;
+  const currentBrowserRelease = releaseMode === "current"
+    ? frontendRelease() === "unknown" ? EXPERIENCE_ALL : frontendRelease()
+    : releaseMode === "all" ? undefined : filters.release || undefined;
   useEffect(() => {
     const controller = new AbortController();
     scopeController.current = controller;
@@ -203,7 +208,7 @@ export default function Admin() {
   };
   const openPlaybackDiagnostics = () => {
     const release = overviewReleaseMode === "current"
-      ? knownRelease(FRONTEND_RELEASE) ?? ""
+      ? knownRelease(frontendRelease()) ?? ""
       : overviewReleaseMode === "all" ? "" : overviewFilters.release;
     setDiagnosticReleaseMode(overviewReleaseMode);
     setDiagnosticFilters({ ...overviewFilters, source: "browser", operation: "speech.complete", model: "", release, outcome: "" });
@@ -213,14 +218,14 @@ export default function Admin() {
   };
   const changeSource = (source: "server" | "browser") => {
     const release = releaseMode === "current"
-      ? source === "browser" ? knownRelease(FRONTEND_RELEASE) ?? "" : knownRelease(serverRelease) ?? ""
+      ? source === "browser" ? knownRelease(frontendRelease()) ?? "" : knownRelease(serverRelease) ?? ""
       : releaseMode === "all" ? "" : filters.release;
     update({ source, operation: "", model: "", release, outcome: "" });
   };
   const changeRelease = (value: string) => {
     if (value === "__current") {
       setReleaseMode("current");
-      update({ release: filters.source === "browser" ? knownRelease(FRONTEND_RELEASE) ?? "" : knownRelease(serverRelease) ?? "" });
+      update({ release: filters.source === "browser" ? knownRelease(frontendRelease()) ?? "" : knownRelease(serverRelease) ?? "" });
     } else if (value === "__all") {
       setReleaseMode("all");
       update({ release: "" });
@@ -231,7 +236,7 @@ export default function Admin() {
   };
   const versionValue = releaseMode === "current" ? "__current" : releaseMode === "all" ? "__all" : filters.release;
   const versionLabel = releaseMode === "current"
-    ? `当前发布（${filters.source === "browser" ? releaseLabel(FRONTEND_RELEASE) : serverRelease ? releaseLabel(serverRelease) : "读取中"}）`
+    ? `当前发布（${filters.source === "browser" ? releaseLabel(frontendRelease()) : serverRelease ? releaseLabel(serverRelease) : "读取中"}）`
     : releaseMode === "all" ? "全部保留" : releaseLabel(filters.release);
 
   const timeRange = <label className="admin-period">时间范围<select value={filters.hours}

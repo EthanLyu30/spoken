@@ -171,6 +171,8 @@ def test_experience_uses_server_and_browser_releases_independently(client):
     import secrets
 
     owner = account(client, admin=True)
+    baseline = {s["operation"]: s["samples"] for s in client.get(
+        "/api/admin/overview?include_experience=true", headers=owner).json()["experience"]["stages"]}
     releases = ("server-current-test", "server-old-test", "browser-current-test", "browser-old-test")
     now = utcnow()
     with SessionLocal() as db:
@@ -196,6 +198,48 @@ def test_experience_uses_server_and_browser_releases_independently(client):
         assert stages["model.first_text"]["p50"] == 111
         assert stages["chat.first_text"]["samples"] == 1
         assert stages["chat.first_text"]["p50"] == 222
+    finally:
+        with SessionLocal() as db:
+            db.query(TelemetryRecord).filter(TelemetryRecord.release.in_(releases)).delete(synchronize_session=False)
+            db.commit()
+
+
+def test_experience_all_sentinel_does_not_inherit_the_other_side_release(client):
+    from app.db import SessionLocal
+    from app.models.telemetry import TelemetryRecord
+    import secrets
+
+    owner = account(client, admin=True)
+    baseline = {s["operation"]: s["samples"] for s in client.get(
+        "/api/admin/overview?include_experience=true", headers=owner).json()["experience"]["stages"]}
+    releases = ("server-current-test", "server-old-test", "browser-current-test", "browser-old-test")
+    now = utcnow()
+    with SessionLocal() as db:
+        db.add_all([
+            TelemetryRecord(trace_id=secrets.token_hex(16), started_at=now, operation="POST /api/chat/stream",
+                source="server", outcome="ok", duration_ms=100, ttft_ms=111, model="deepseek-flash",
+                release="server-current-test", spans_json="[]"),
+            TelemetryRecord(trace_id=secrets.token_hex(16), started_at=now, operation="POST /api/chat/stream",
+                source="server", outcome="ok", duration_ms=100, ttft_ms=999, model="deepseek-flash",
+                release="server-old-test", spans_json="[]"),
+            TelemetryRecord(trace_id=secrets.token_hex(16), started_at=now, operation="chat.first_text",
+                source="browser", outcome="ok", duration_ms=222, release="browser-current-test", spans_json="[]"),
+            TelemetryRecord(trace_id=secrets.token_hex(16), started_at=now, operation="chat.first_text",
+                source="browser", outcome="ok", duration_ms=999, release="browser-old-test", spans_json="[]"),
+        ])
+        db.commit()
+    try:
+        browser_all = ("/api/admin/overview?source=browser&release=server-current-test&include_experience=true"
+                       "&experience_server_release=server-current-test&experience_browser_release=__all")
+        stages = {s["operation"]: s for s in client.get(browser_all, headers=owner).json()["experience"]["stages"]}
+        assert stages["model.first_text"]["samples"] == baseline["model.first_text"] + 1
+        assert stages["chat.first_text"]["samples"] == baseline["chat.first_text"] + 2
+
+        server_all = ("/api/admin/overview?source=browser&release=browser-current-test&include_experience=true"
+                      "&experience_server_release=__all&experience_browser_release=browser-current-test")
+        stages = {s["operation"]: s for s in client.get(server_all, headers=owner).json()["experience"]["stages"]}
+        assert stages["model.first_text"]["samples"] == baseline["model.first_text"] + 2
+        assert stages["chat.first_text"]["samples"] == 1
     finally:
         with SessionLocal() as db:
             db.query(TelemetryRecord).filter(TelemetryRecord.release.in_(releases)).delete(synchronize_session=False)

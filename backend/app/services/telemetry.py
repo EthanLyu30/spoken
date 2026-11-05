@@ -230,9 +230,11 @@ def _read_spans(raw):
 
 def experience_summary(db, *, hours, release=None, server_release=None, browser_release=None):
     # A current-release view can span two independently deployed versions:
-    # server-side model timing and browser-side playback timing.
-    server_release = server_release or release
-    browser_release = browser_release or release
+    # server-side model timing and browser-side playback timing. "__all" means
+    # the caller knows that side's current version is unknown; it must not
+    # inherit the other side's main release filter.
+    server_release = None if server_release == "__all" else server_release or release
+    browser_release = None if browser_release == "__all" else browser_release or release
     stages = {key: [] for key in (
         "model.first_text", "chat.first_text", "chat.complete", "speech.request_to_audio",
     )}
