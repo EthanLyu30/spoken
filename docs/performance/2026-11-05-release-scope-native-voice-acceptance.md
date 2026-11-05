@@ -41,7 +41,7 @@
 
 ### 验证
 
-- 前端全量 **546 passed**；后端全量 **638 passed**；TypeScript / ESLint / 生产构建通过。
+- 前端全量 **547 passed**；后端全量 **638 passed**；TypeScript / ESLint / 生产构建通过。
 - 前端 `Admin.test.tsx` 覆盖：当前后端版本默认、全部保留、历史测试版本、未知版本、当前发布空状态、钻取时版本保留。
 - 后端 `test_experience_uses_server_and_browser_releases_independently` 覆盖：后端版本和前端版本不同，模型阶段只取后端版本，浏览器阶段只取前端版本。
 - 现有鉴权、14 天保留策略不变。
