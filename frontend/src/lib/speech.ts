@@ -325,15 +325,33 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
   let browserRecoveryUsed = false;
   const playBrowser = async (text: string, voice: SpeechSynthesisVoice): Promise<{voice: SpeechSynthesisVoice; failed: boolean}> => {
     const onStarted = () => { playback.update({phase: "speaking"}); didStart(); };
-    const first = speakBrowser(text, settings, voice, onStarted, reportNativeStart, reportNativeEnd);
+    // Do not count a failed online voice as a dashboard error until we know
+    // whether the intentional local-English recovery succeeds.
+    let pendingStartError: [number, NativeDiagnostic, "error"] | null = null;
+    const captureStart = (duration: number, diagnostic: NativeDiagnostic, outcome: "ok" | "error" | "cancelled") => {
+      if (outcome === "error") pendingStartError = [duration, diagnostic, "error"];
+      else reportNativeStart(duration, diagnostic, outcome);
+    };
+    const first = speakBrowser(text, settings, voice, onStarted, captureStart, reportNativeEnd);
     active = first;
     await first.done;
+    const flushStartError = () => { if (pendingStartError) reportNativeStart(...pendingStartError); pendingStartError = null; };
     // A listed online voice can end without producing sound. Recover only
     // before this utterance starts, once per reply, using real local English.
-    if (stopped || !first.canRecoverStartup || voice.localService !== false || browserRecoveryUsed) return {voice, failed: Boolean(first.failed)};
+    if (stopped) return {voice, failed: Boolean(first.failed)};
+    if (!first.canRecoverStartup || voice.localService !== false || browserRecoveryUsed) {
+      flushStartError();
+      return {voice, failed: Boolean(first.failed)};
+    }
     const fallback = listBrowserVoices().find(candidate => candidate.localService === true && candidate.voiceURI !== voice.voiceURI);
-    if (!fallback) return {voice, failed: Boolean(first.failed)};
+    if (!fallback) {
+      flushStartError();
+      return {voice, failed: Boolean(first.failed)};
+    }
     browserRecoveryUsed = true;
+    // The original startup attempt is internal once recovery is selected.
+    // If recovery itself fails, that failed start is reported normally.
+    pendingStartError = null;
     playback.update({phase: "preparing", voice: fallback.name, fallbackReason: "browser-voice-unavailable"});
     active = speakBrowser(text, settings, fallback, onStarted, reportNativeStart, reportNativeEnd);
     await active.done;

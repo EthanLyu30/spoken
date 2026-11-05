@@ -349,6 +349,7 @@ it.each(["end_before_start", "network", "startup_timeout"])("recovers an online 
   expect(mocks.settings.browserVoiceURI).toBe("natural");
   expect(samples.filter(s=>s.operation==="speech.first_audio")).toHaveLength(1);
   expect(samples).toContainEqual(expect.objectContaining({operation:"speech.complete",outcome:"ok",engine:"browser"}));
+  expect(samples.filter(s=>s.operation==="speech.native_start" && s.outcome==="error")).toHaveLength(0);
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
 });
 
