@@ -24,6 +24,8 @@ function show(view = "diagnostics") {
   return render(<MemoryRouter initialEntries={[`/admin?view=${view}`]}><Admin /></MemoryRouter>);
 }
 const releaseParam = (url: string) => new URL(String(url), "http://localhost").searchParams.get("release");
+const modelExperience = (samples: number, p50: number) => ({ stages: [{ operation: "model.first_text", samples, p50, p95: p50, p99: p50 }],
+  playback: { completed: samples, failed: 0, cancelled: 0, classified: 0, never_started: 0, recovered: 0, recovery_failed: 0, recovery_cancelled: 0 } });
 beforeEach(() => {
   setToken("test-admin-session");
   useAuth.setState({ user });
@@ -228,6 +230,48 @@ it("uses the frontend release for playback drilldown while keeping the backend s
   })).toBe(true));
 });
 
+it("keeps the model card on the full retained scope when current release is unknown", async () => {
+  fetcher.mockImplementation(async (url: string) => {
+    if (!String(url).includes("/overview")) return new Response(JSON.stringify({ items: [], total: 0 }));
+    const params = new URL(String(url), "http://localhost").searchParams;
+    const filtered = params.get("experience_server_release") === "unknown";
+    return new Response(JSON.stringify({ ...overview, count: 2, server_release: "unknown",
+      experience: modelExperience(filtered ? 1 : 2, filtered ? 900 : 100) }));
+  });
+  show("overview");
+  expect(await screen.findByText(/后端当前版本未知/)).toBeVisible();
+  const stages = await screen.findByRole("region", { name: "新对话等待" });
+  const row = within(stages).getByRole("row", { name: /模型请求至首段文本/ });
+  expect(within(row).getAllByText("100 ms")).toHaveLength(2);
+  expect(within(row).getByText("2")).toBeVisible();
+  expect(within(row).queryByText("900 ms")).not.toBeInTheDocument();
+  expect(fetcher.mock.calls.filter(([url]) => String(url).includes("/overview"))
+    .every(([url]) => new URL(String(url), "http://localhost").searchParams.get("experience_server_release") === null)).toBe(true);
+});
+
+it("keeps an explicitly selected unknown version filtered", async () => {
+  fetcher.mockImplementation(async (url: string) => {
+    if (!String(url).includes("/overview")) return new Response(JSON.stringify({ items: [], total: 0 }));
+    const params = new URL(String(url), "http://localhost").searchParams;
+    const explicitUnknown = params.get("release") === "unknown" || params.get("experience_server_release") === "unknown";
+    return new Response(JSON.stringify({ ...overview, count: explicitUnknown ? 1 : 2, server_release: "server-current",
+      facets: { ...overview.facets, releases: ["server-current", "unknown"] },
+      experience: modelExperience(explicitUnknown ? 1 : 2, explicitUnknown ? 900 : 100) }));
+  });
+  show("overview");
+  await waitFor(() => expect(screen.getByLabelText("发布版本")).toHaveValue("__current"));
+  fireEvent.change(screen.getByLabelText("发布版本"), { target: { value: "unknown" } });
+  await waitFor(() => {
+    const latest = fetcher.mock.calls.map(([url]) => new URL(String(url), "http://localhost")).filter(url => url.pathname.endsWith("/admin/overview")).at(-1);
+    expect(latest?.searchParams.get("release")).toBe("unknown");
+    expect(latest?.searchParams.get("experience_server_release")).toBe("unknown");
+  });
+  const stages = await screen.findByRole("region", { name: "新对话等待" });
+  const row = within(stages).getByRole("row", { name: /模型请求至首段文本/ });
+  expect(within(row).getAllByText("900 ms")).toHaveLength(2);
+  expect(within(row).getByText("1")).toBeVisible();
+});
+
 it("keeps browser source and operation when filtering failures inside diagnostics", async () => {
   const browserOverview = { ...overview, source: "browser", count: 2, errors: 1, failure: 0,
     facets: { ...overview.facets, operations: ["speech.complete"] } };
@@ -299,21 +343,32 @@ it("clears the old release query when a known release refreshes to unknown", asy
   fetcher.mockImplementation(async (url: string) => {
     if (String(url).includes("/overview")) {
       overviewCalls += 1;
+      const params = new URL(String(url), "http://localhost").searchParams;
       const current = overviewCalls <= 2;
-      return new Response(JSON.stringify({ ...overview, count: 1,
-        server_release: current ? "server-current" : "unknown" }));
+      const filtered = params.get("experience_server_release") === "unknown";
+      return new Response(JSON.stringify({ ...overview, count: current ? 2 : 2,
+        server_release: current ? "server-current" : "unknown",
+        experience: modelExperience(filtered ? 1 : 2, filtered ? 900 : 100) }));
     }
     return new Response(JSON.stringify({ items: [], total: 0 }));
   });
   show("overview");
   await waitFor(() => expect(fetcher.mock.calls.some(([url]) => releaseParam(String(url)) === "server-current")).toBe(true));
+  const refresh = screen.getByRole("button", { name: "刷新数据" });
+  await waitFor(() => expect(refresh).toBeEnabled());
   const before = fetcher.mock.calls.length;
-  fireEvent.click(screen.getByRole("button", { name: "刷新数据" }));
+  fireEvent.click(refresh);
   expect(await screen.findByText(/后端当前版本未知/)).toBeVisible();
   const overviewAfter = fetcher.mock.calls.slice(before)
     .map(([url]) => new URL(String(url), "http://localhost"))
     .filter(url => url.pathname.endsWith("/admin/overview"));
   expect(overviewAfter.at(-1)?.searchParams.get("release")).toBeNull();
+  expect(overviewAfter.at(-1)?.searchParams.get("experience_server_release")).toBeNull();
+  const stages = await screen.findByRole("region", { name: "新对话等待" });
+  const row = within(stages).getByRole("row", { name: /模型请求至首段文本/ });
+  expect(within(row).getAllByText("100 ms")).toHaveLength(2);
+  expect(within(row).getByText("2")).toBeVisible();
+  expect(within(row).queryByText("900 ms")).not.toBeInTheDocument();
 });
 
 it("opens the first scoped failure from the overview shortcut", async () => {

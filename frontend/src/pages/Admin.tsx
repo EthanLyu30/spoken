@@ -123,8 +123,9 @@ export default function Admin() {
     } finally { if (!controller.signal.aborted) setDetailLoading(false); }
   }, [rejectAccess]);
 
-  const currentServerRelease = releaseMode === "current" ? serverRelease ?? undefined : releaseMode === "all" ? undefined : filters.release || undefined;
-  const currentBrowserRelease = releaseMode === "current" ? FRONTEND_RELEASE : releaseMode === "all" ? undefined : filters.release || undefined;
+  const knownRelease = (release: string | null | undefined) => release && release !== "unknown" ? release : undefined;
+  const currentServerRelease = releaseMode === "current" ? knownRelease(serverRelease) : releaseMode === "all" ? undefined : filters.release || undefined;
+  const currentBrowserRelease = releaseMode === "current" ? knownRelease(FRONTEND_RELEASE) : releaseMode === "all" ? undefined : filters.release || undefined;
   useEffect(() => {
     const controller = new AbortController();
     scopeController.current = controller;
@@ -202,7 +203,7 @@ export default function Admin() {
   };
   const openPlaybackDiagnostics = () => {
     const release = overviewReleaseMode === "current"
-      ? FRONTEND_RELEASE
+      ? knownRelease(FRONTEND_RELEASE) ?? ""
       : overviewReleaseMode === "all" ? "" : overviewFilters.release;
     setDiagnosticReleaseMode(overviewReleaseMode);
     setDiagnosticFilters({ ...overviewFilters, source: "browser", operation: "speech.complete", model: "", release, outcome: "" });
@@ -212,14 +213,14 @@ export default function Admin() {
   };
   const changeSource = (source: "server" | "browser") => {
     const release = releaseMode === "current"
-      ? source === "browser" ? FRONTEND_RELEASE : serverRelease && serverRelease !== "unknown" ? serverRelease : ""
+      ? source === "browser" ? knownRelease(FRONTEND_RELEASE) ?? "" : knownRelease(serverRelease) ?? ""
       : releaseMode === "all" ? "" : filters.release;
     update({ source, operation: "", model: "", release, outcome: "" });
   };
   const changeRelease = (value: string) => {
     if (value === "__current") {
       setReleaseMode("current");
-      update({ release: filters.source === "browser" ? FRONTEND_RELEASE : serverRelease && serverRelease !== "unknown" ? serverRelease : "" });
+      update({ release: filters.source === "browser" ? knownRelease(FRONTEND_RELEASE) ?? "" : knownRelease(serverRelease) ?? "" });
     } else if (value === "__all") {
       setReleaseMode("all");
       update({ release: "" });
