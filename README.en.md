@@ -27,11 +27,19 @@ growth curve.
 
 ## Highlights
 
+### Recent updates (Nov 2026)
+
+- **Interview answers are text-first**: 174 reviewed sets, 696 questions and 2,074 answer options are stored in the app; no YouTube player or region-dependent playback.
+- **Voice pipeline**: device voice by default; a silent online voice can recover once through a local English voice; Moonshine/Kokoro remain experimental.
+- **Operations**: registered-user list, semantic model/type labels, failure diagnostics, and recovered starts no longer counted as failures.
+- **Safety/reliability**: rate limits and security headers; incomplete ASR is kept editable instead of auto-submitted.
+
 - **Fast/slow dual-path architecture** with **streaming chat replies** — the
   conversation stays snappy while assessment runs asynchronously.
-- **Voice pipeline** — iFlytek streaming ASR and pronunciation scoring, with
-  the device voice as the default read-aloud engine. Local Moonshine/Kokoro
-  models are optional; models download only after opting in.
+- **Browser-first voice pipeline** — iFlytek streaming ASR and pronunciation
+  scoring, with the device voice as the default read-aloud engine. Local
+  Moonshine/Kokoro models are experimental opt-ins and download only after
+  selection; failures fall back to the device voice/cloud ASR.
   Call mode provides live captions and preserves the beginning of barge-in
   speech. AudioWorklet capture has a compatibility fallback. Alternatively,
   tap to record, tap again to finish, and send the transcription automatically.
@@ -43,7 +51,9 @@ growth curve.
   directly. Desktop uses an anchored card; mobile uses a bottom sheet.
 - **Take an Interview practice** — four 45-second answers covering experiences,
   reasons and opinions, with transcript-based practice scores, suggestions and
-  sample answers. Failed recognition can be recorded again.
+  written sample answers. The reviewed video answers are stored as **2,074 text
+  options across 174 sets**, switchable in the results page with no YouTube
+  player or region-dependent playback. Failed recognition can be recorded again.
 - **Quotes you can actually use** — movies / speeches·TED / literature / people /
   proverbs, each with a **verified source** (checked against Wikiquote, apocryphal
   ones removed) and a **"when to use it"** note.
@@ -58,8 +68,9 @@ growth curve.
   history charts, and a **cross-session insight** that points at your weakest
   dimension and whether each skill is climbing — all driven by real activity.
   Each post-session debrief exports to **PDF in one tap**.
-- **Resilient** — request timeouts, streaming fallback, and voice-call
-  auto-reconnect; 600+ backend tests.
+- **Resilient and observable** — request timeouts, streaming fallback, voice-call
+  auto-reconnect, and an admin telemetry dashboard with request/browser timings,
+  cost references and error diagnostics; 600+ backend / 500+ frontend tests.
 
 ## Architecture
 
@@ -70,21 +81,22 @@ asynchronous assessment path:
 
 ```
             ┌──────── fast path (low latency) ────────┐
- 🎤 mic ─VAD─► ASR (live) ──► chat LLM (streamed) ──► TTS (browser/iFlytek) ─► 🔊
+ 🎤 mic ─VAD─► ASR (live) ──► chat LLM (streamed) ──► TTS (device/Kokoro) ─► 🔊
                  │
                  └─► transcript ─┐
                                  ├─► slow path (async, non-blocking)
  end of chat ─────────────────────┴─► pronunciation + grammar + debrief ─► 📊
 ```
 
-> Current state: chat uses explicit streaming delta, completion and error events. Cloud TTS relays PCM frames for playback before the full audio is generated. Unique practice IDs make retries idempotent; long conversations retain their transcript while model context stays bounded. Full design in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+> Current state: chat uses explicit streaming delta, completion and error events. Read-aloud defaults to the device voice; choosing the experimental local model uses Kokoro and falls back to the device voice. Unique practice IDs make retries idempotent; long conversations retain their transcript while model context stays bounded. Full design in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ### Stack
 
 - **Frontend:** React 18 · TypeScript · Vite · Tailwind CSS · Zustand · ECharts.
 - **Backend:** Python 3.11 · FastAPI · WebSocket · SQLAlchemy · SQLite.
-- **ASR / pronunciation:** iFlytek (IAT + ISE). **TTS:** iFlytek streaming PCM
-  by default; device voices and local models are optional. **LLM:** DeepSeek (`deepseek-flash`, follows the latest Flash release, thinking disabled, streamed; Pro is disallowed).
+- **ASR / pronunciation:** iFlytek (IAT + ISE). **TTS:** device voices by
+  default; local Kokoro is experimental. **LLM:** DeepSeek (`deepseek-flash`,
+  follows the latest Flash release, thinking disabled, streamed; Pro is disallowed).
 
 ## Quick start
 
