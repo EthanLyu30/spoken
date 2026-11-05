@@ -5,7 +5,7 @@ vi.mock("./directAsr", () => ({ transcribeDirect: direct.transcribe, openDirectA
 import { postAsr } from "./api";
 import { openAsrStream } from "./asrStream";
 import { MAX_AUDIO_BYTES } from "./audioLimits";
-import { AsrQuotaError, resetAsrQuotaForTest } from "./asrQuota";
+import { AsrQuotaError, markAsrQuota, resetAsrQuotaForTest } from "./asrQuota";
 
 describe("cloud ASR routing", () => {
   beforeEach(() => { direct.transcribe.mockReset(); direct.open.mockReset(); resetAsrQuotaForTest(); vi.stubGlobal("fetch", vi.fn()); });
@@ -39,6 +39,30 @@ describe("cloud ASR routing", () => {
     await expect(postAsr(new ArrayBuffer(1280))).rejects.toMatchObject({ name: "AsrQuotaError" });
     expect(direct.transcribe).toHaveBeenCalledTimes(directCalls);
     expect(asrFetches()).toBe(1);
+  });
+
+  it("rechecks quota before HTTP after a concurrent quota failure", async () => {
+    let reject!: (error: Error) => void;
+    direct.transcribe.mockReturnValue(new Promise((_resolve, fail) => { reject = fail; }));
+    const opening = postAsr(new ArrayBuffer(1280));
+    await vi.waitFor(() => expect(direct.transcribe).toHaveBeenCalledOnce());
+    markAsrQuota("another request hit 11201");
+    reject(new Error("network"));
+    await expect(opening).rejects.toMatchObject({ name: "AsrQuotaError" });
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => /\/api\/asr$/.test(String(url)))).toHaveLength(0);
+  });
+
+  it("rechecks quota before opening relay after a concurrent quota failure", async () => {
+    let reject!: (error: Error) => void;
+    direct.open.mockReturnValue(new Promise((_resolve, fail) => { reject = fail; }));
+    const socket = vi.fn(function () { throw new Error("Unexpected relay socket"); });
+    vi.stubGlobal("WebSocket", socket);
+    const opening = openAsrStream({ onPartial: vi.fn() });
+    await vi.waitFor(() => expect(direct.open).toHaveBeenCalledOnce());
+    markAsrQuota("another request hit 11201");
+    reject(new Error("network"));
+    await expect(opening).rejects.toMatchObject({ name: "AsrQuotaError" });
+    expect(socket).not.toHaveBeenCalled();
   });
 
   it("does not fall back to HTTP when the direct whole-clip is quota-blocked", async () => {

@@ -41,6 +41,7 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
       let pending = new Uint8Array(0);
       let pendingFinal: { resolve: (text: string) => void; reject: (error: unknown) => void } | null = null;
       let finalTimer: ReturnType<typeof setTimeout> | undefined;
+      let terminalError: unknown;
       const segments = new Map<number, string>();
 
       const settle = (text = "", error?: unknown) => {
@@ -54,6 +55,7 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
         clearTimeout(readyTimer);
         const cancelled = signal?.aborted || generation !== getAuthGeneration();
         const reason = error ?? (cancelled ? cancelledError() : new Error("ASR connection closed"));
+        terminalError = reason;
         if (pendingFinal) settle("", reason);
         signal?.removeEventListener("abort", onAbort);
         try { ws.close(); } catch { /* already disconnected */ }
@@ -92,7 +94,11 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
         },
         finishUtterance: () => new Promise<string>((resolveFinal, rejectFinal) => {
           if (pendingFinal) { rejectFinal(new Error("ASR final is already pending")); return; }
-          if (cancelled() || retired) { rejectFinal(new Error("ASR connection closed")); return; }
+          if (cancelled()) { rejectFinal(cancelledError()); return; }
+          if (retired) {
+            rejectFinal(terminalError instanceof Error ? terminalError : new Error("ASR connection closed"));
+            return;
+          }
           pendingFinal = { resolve: resolveFinal, reject: rejectFinal };
           try {
             if (pending.length) { sendFrame(pending); pending = new Uint8Array(0); }

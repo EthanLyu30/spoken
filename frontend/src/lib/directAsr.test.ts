@@ -70,6 +70,17 @@ describe("direct cloud ASR transport", () => {
     await expect(final).resolves.toBe("");
   });
 
+  it("preserves 11201 after the last frame and before finalize", async () => {
+    const { transcribeDirect } = await import("./directAsr");
+    const closing = transcribeDirect(new ArrayBuffer(1_280));
+    await vi.waitFor(() => expect(Socket.instances).toHaveLength(1));
+    const socket = Socket.instances[0];
+    socket.onopen?.();
+    await vi.waitFor(() => expect(socket.frames.length).toBeGreaterThan(0));
+    socket.onmessage?.({ data: JSON.stringify({ code: 11201, message: "licc failed" }) });
+    await expect(closing).rejects.toMatchObject({ name: "AsrQuotaError" });
+  });
+
   it("does not lose 11201 while uploading a whole clip", async () => {
     const { transcribeDirect } = await import("./directAsr");
     const closing = transcribeDirect(new ArrayBuffer(2_560));
@@ -136,7 +147,7 @@ describe("direct cloud ASR transport", () => {
     socket.onmessage?.({ data: JSON.stringify({ code: 10005, message: "rejected" }) });
     const final = stream.finishUtterance();
     socket.result({ status: 2, result: { sn: 0, ws: [{ cw: [{ w: "tail only" }] }] } });
-    await expect(final).rejects.toThrow("ASR connection closed");
+    await expect(final).rejects.toThrow("ASR provider error");
   });
 
   it("keeps direct recognition available when an unused connection expires", async () => {

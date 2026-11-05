@@ -62,6 +62,7 @@ export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us", 
     assertAuthGeneration(generation, signal);
     signal?.throwIfAborted();
     if ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError") throw error;
+    if (isAsrQuotaCooling()) throw new AsrQuotaError();
   }
   const relayStarted = performance.now();
   try {
@@ -87,6 +88,7 @@ export function openRelayAsrStream(
   language = "en_us",
   signal?: AbortSignal,
 ): Promise<AsrStream> {
+  if (isAsrQuotaCooling()) return Promise.reject(new AsrQuotaError());
   const generation = getAuthGeneration();
   return new Promise<AsrStream>((resolve, reject) => {
     let ws: WebSocket;
@@ -103,6 +105,7 @@ export function openRelayAsrStream(
     let closeNotified = false;
     let pendingFinal: { resolve: (text: string) => void; reject: (error: unknown) => void } | null = null;
     let finalTimer: ReturnType<typeof setTimeout> | undefined;
+    let terminalError: unknown;
 
     const settlePending = (text = "", error?: unknown) => {
       clearTimeout(finalTimer);
@@ -147,6 +150,7 @@ export function openRelayAsrStream(
       finishUtterance: () => new Promise<string>((resolveFinal, rejectFinal) => {
         if (pendingFinal) { rejectFinal(new Error("ASR final is already pending")); return; }
         if (cancelled()) { rejectFinal(cancelledError()); return; }
+        if (terminalError) { rejectFinal(terminalError instanceof Error ? terminalError : new Error("ASR connection closed")); return; }
         if (ws.readyState !== WebSocket.OPEN) { rejectFinal(new Error("ASR connection closed")); return; }
         pendingFinal = { resolve: resolveFinal, reject: rejectFinal };
         try {
@@ -166,7 +170,9 @@ export function openRelayAsrStream(
       close: (error?: unknown) => {
         clearTimeout(readyTimer);
         signal?.removeEventListener("abort", onAbort);
-        settlePending("", error ?? new Error("ASR connection closed"));
+        const reason = error ?? new Error("ASR connection closed");
+        terminalError = reason;
+        settlePending("", reason);
         try { ws.send(JSON.stringify({ type: "close" })); } catch { /* already closed */ }
         try { ws.close(); } catch { /* already closed */ }
       },

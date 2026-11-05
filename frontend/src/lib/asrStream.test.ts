@@ -41,6 +41,12 @@ describe("streaming ASR final boundaries", () => {
     await expect(opening).rejects.toMatchObject({ name: "AsrQuotaError" });
   });
 
+  it("preserves 11201 after relay readiness and before finalize", async () => {
+    const { stream, socket } = await ready();
+    socket.message({ type: "error", code: 11201, message: "licc failed" });
+    await expect(stream.finishUtterance()).rejects.toMatchObject({ name: "AsrQuotaError" });
+  });
+
   it("preserves 11201 after relay readiness and rejects the pending final", async () => {
     const { stream, socket } = await ready();
     const final = stream.finishUtterance();
@@ -114,7 +120,7 @@ describe("streaming ASR final boundaries", () => {
     socket.message({ type: "error", message: "opening timed out" });
     const final = stream.finishUtterance();
     socket.message({ type: "final", text: "tail only" });
-    await expect(final).rejects.toThrow("ASR connection closed");
+    await expect(final).rejects.toThrow("opening timed out");
     expect(onClose).toHaveBeenCalledOnce();
     expect(socket.readyState).toBe(Socket.CLOSED);
   });

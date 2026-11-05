@@ -373,6 +373,7 @@ export async function postAsr(
     assertAuthGeneration(generation, signal);
     signal?.throwIfAborted();
     if ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError") throw error;
+    if (isAsrQuotaCooling()) throw new AsrQuotaError();
   }
   const bufferedStarted = performance.now();
   onTransport?.("buffered");
