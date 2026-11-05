@@ -485,6 +485,12 @@ export default function Conversation() {
             setInputMode("text");
             setError(error.message);
           } else if (isAsrQuotaError(error)) {
+            const partial = error.partialText?.trim();
+            if (partial) {
+              const typedPrefix = input.trim();
+              setInput(typedPrefix ? `${typedPrefix} ${partial}` : partial);
+              setInputMode("text");
+            }
             setError(ASR_QUOTA_MESSAGE);
           } else {
             setError("语音识别失败，请检查麦克风权限或后端，或直接打字。");

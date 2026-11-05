@@ -70,6 +70,17 @@ describe("direct cloud ASR transport", () => {
     await expect(final).resolves.toBe("");
   });
 
+  it("does not lose 11201 while uploading a whole clip", async () => {
+    const { transcribeDirect } = await import("./directAsr");
+    const closing = transcribeDirect(new ArrayBuffer(2_560));
+    await vi.waitFor(() => expect(Socket.instances).toHaveLength(1));
+    const socket = Socket.instances[0];
+    socket.onopen?.();
+    await vi.waitFor(() => expect(socket.frames.length).toBeGreaterThan(0));
+    socket.onmessage?.({ data: JSON.stringify({ code: 11201, message: "licc failed" }) });
+    await expect(closing).rejects.toMatchObject({ name: "AsrQuotaError" });
+  });
+
   it("closes an in-flight recording immediately when cancelled", async () => {
     const controller = new AbortController();
     const { stream, socket, onClose } = await ready(controller.signal);

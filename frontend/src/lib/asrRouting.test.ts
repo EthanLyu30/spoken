@@ -41,6 +41,18 @@ describe("cloud ASR routing", () => {
     expect(asrFetches()).toBe(1);
   });
 
+  it("does not fall back to HTTP when the direct whole-clip is quota-blocked", async () => {
+    direct.transcribe.mockRejectedValue(new AsrQuotaError());
+    await expect(postAsr(new ArrayBuffer(1280))).rejects.toMatchObject({ name: "AsrQuotaError" });
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => /\/api\/asr$/.test(String(url)))).toHaveLength(0);
+  });
+
+  it("does not treat HTTP 11200 as the daily quota code", async () => {
+    direct.transcribe.mockRejectedValue(new Error("network unavailable"));
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ detail: "iFlytek ASR error 11200: invalid parameter" }), { status: 503 }));
+    await expect(postAsr(new ArrayBuffer(1280))).rejects.not.toMatchObject({ name: "AsrQuotaError" });
+  });
+
   it("does not upload a cancelled utterance to either transport", async () => {
     const controller = new AbortController(); controller.abort();
     await expect(postAsr(new ArrayBuffer(1280), controller.signal)).rejects.toThrow();

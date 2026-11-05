@@ -5,7 +5,7 @@
 import { openDirectAsrStream } from "./directAsr";
 import { getInteraction, measureAsrStream, reportTiming } from "./telemetry";
 import { assertAuthGeneration, getAuthGeneration } from "./authToken";
-import { AsrQuotaError, isAsrQuotaCooling, isAsrQuotaError } from "./asrQuota";
+import { AsrQuotaError, isAsrQuotaCooling, isAsrQuotaError, markAsrQuota } from "./asrQuota";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -25,12 +25,16 @@ export interface AsrStream {
 
 export interface AsrStreamCallbacks {
   onPartial: (text: string) => void;
-  onClose?: () => void;
+  onClose?: (error?: unknown) => void;
 }
 
 const READY_TIMEOUT_MS = 5000;
 const FINAL_TIMEOUT_MS = 8000;
 const cancelledError = () => new DOMException("ASR cancelled", "AbortError");
+function relayProviderError(message: string, code?: unknown): Error {
+  const numeric = typeof code === "number" ? code : Number((message.match(/\b(\d{5})\b/) || [])[1]);
+  return numeric === 11201 ? markAsrQuota(message) : new Error(message || "ASR provider error");
+}
 
 /** Direct→relay is allowed only while opening; later failures use complete PCM. */
 export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us", signal?: AbortSignal): Promise<AsrStream> {
@@ -108,10 +112,10 @@ export function openRelayAsrStream(
       if (error) pending?.reject(error); else pending?.resolve(text);
     };
 
-    const notifyClose = () => {
+    const notifyClose = (error?: unknown) => {
       if (closeNotified) return;
       closeNotified = true;
-      cb.onClose?.();
+      cb.onClose?.(error);
     };
 
     const readyTimer = setTimeout(() => {
@@ -156,7 +160,7 @@ export function openRelayAsrStream(
           const error = new Error("ASR final timed out");
           settlePending("", error);
           try { ws.close(); } catch { /* already closed */ }
-          notifyClose();
+          notifyClose(error);
         }, FINAL_TIMEOUT_MS);
       }),
       close: (error?: unknown) => {
@@ -186,14 +190,16 @@ export function openRelayAsrStream(
           resolve(api);
         } else if (msg.type === "error") {
           clearTimeout(readyTimer);
+          reject(relayProviderError(msg.message ?? "", (msg as { code?: unknown }).code));
           try { ws.close(); } catch { /* already closed */ }
-          reject(new Error(msg.message || "asr stream unavailable"));
         }
         return;
       }
       if (msg.type === "partial") cb.onPartial(msg.text ?? "");
       else if (msg.type === "final") settlePending(msg.text ?? "");
-      else if (msg.type === "error") api.close(new Error("ASR provider error"));
+      else if (msg.type === "error") {
+        api.close(relayProviderError(msg.message ?? "", (msg as { code?: unknown }).code));
+      }
     };
 
     ws.onerror = () => {

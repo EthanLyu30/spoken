@@ -311,6 +311,23 @@ describe("voice call ASR engine boundaries", () => {
     } finally { call.end(); }
   });
 
+  it("can reopen the cloud stream for a later turn after a quota-op constraints failure", async () => {
+    const opened = { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn(async () => "second turn") };
+    mocks.openAsrStream.mockRejectedValueOnce(new AsrQuotaError()).mockResolvedValueOnce(opened);
+    const transcribe = vi.fn(async () => { throw new AsrQuotaError(); });
+    const reply = vi.fn();
+    const onError = vi.fn();
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => false, transcribe, reply, onError });
+    try {
+      pushFrame(0.1); pushFrame(0.1);
+      for (let i = 0; i < 4; i++) pushFrame(0);
+      await vi.waitFor(() => expect(onError).toHaveBeenCalledOnce());
+      pushFrame(0.1); pushFrame(0.1);
+      for (let i = 0; i < 4; i++) pushFrame(0);
+      await vi.waitFor(() => expect(mocks.openAsrStream).toHaveBeenCalledTimes(2));
+    } finally { call.end(); }
+  });
+
   it("releases a microphone which finishes reconnecting after hangup", async () => {
     const first = { onended: null as (() => void) | null, stop: vi.fn() };
     const late = { onended: null, stop: vi.fn() };

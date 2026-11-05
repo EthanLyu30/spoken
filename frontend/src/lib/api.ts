@@ -390,7 +390,7 @@ export async function postAsr(
         const body = await res.clone().json() as { detail?: unknown };
         detail = typeof body.detail === "string" ? body.detail : "";
       } catch { /* non-JSON provider error */ }
-      if (res.status === 503 && /11201|licc failed/i.test(detail)) throw markAsrQuota(detail);
+      if (res.status === 503 && /\b11201\b/.test(detail)) throw markAsrQuota(detail);
       throw new Error(`asr failed: ${res.status}`);
     }
     const data = (await res.json()) as { text: string };

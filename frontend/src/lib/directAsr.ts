@@ -57,7 +57,7 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
         if (pendingFinal) settle("", reason);
         signal?.removeEventListener("abort", onAbort);
         try { ws.close(); } catch { /* already disconnected */ }
-        if (ready) cb.onClose?.();
+        if (ready) cb.onClose?.(reason);
         else reject(reason);
       };
       const onAbort = () => close(cancelledError());
@@ -151,14 +151,14 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
 /** Upload a retained complete clip directly; a real empty final is not a transport failure. */
 export async function transcribeDirect(pcm: ArrayBuffer, signal?: AbortSignal): Promise<string> {
   const generation = getAuthGeneration();
-  let disconnected = false;
-  const stream = measureAsrStream(await openDirectAsrStream({ onPartial: () => undefined, onClose: () => { disconnected = true; } }, "en_us", signal), "direct", signal);
+  let disconnected: unknown = null;
+  const stream = measureAsrStream(await openDirectAsrStream({ onPartial: () => undefined, onClose: (error) => { disconnected = error ?? true; } }, "en_us", signal), "direct", signal);
   bindInteraction(stream, getInteraction(signal));
   try {
     assertAuthGeneration(generation, signal);
     for (let offset = 0; offset < pcm.byteLength; offset += FRAME) {
       assertAuthGeneration(generation, signal);
-      if (disconnected) throw new Error("Direct ASR disconnected");
+      if (disconnected) throw disconnected instanceof Error ? disconnected : new Error("Direct ASR disconnected");
       stream.send(pcm.slice(offset, offset + FRAME));
       await new Promise(resolve => setTimeout(resolve, 10));
     }

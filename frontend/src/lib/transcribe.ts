@@ -107,16 +107,23 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
           if (!text && latest.trim()) throw new IncompleteTranscriptionError(latest.trim());
           return text;
         } catch (error) {
-          if (isAsrQuotaError(error)) throw error;
+          const partial = latest.trim();
+          if (isAsrQuotaError(error)) {
+            if (partial) error.partialText = partial;
+            throw error;
+          }
           if (finishSignal?.aborted || control.signal.aborted ||
               (error instanceof Error && error.name === "AbortError")) throw error;
           // A deploy can close the relay mid-utterance. Prefer the complete
           // recording; an unconfirmed partial must never be auto-submitted.
-          const partial = latest.trim();
           try {
             const recovered = (await postAsr(pcm, finishSignal, onTransport)).trim();
             if (recovered) return recovered;
           } catch (recoveryError) {
+            if (isAsrQuotaError(recoveryError)) {
+              if (partial) recoveryError.partialText = partial;
+              throw recoveryError;
+            }
             if (finishSignal?.aborted || control.signal.aborted ||
                 (recoveryError instanceof Error && recoveryError.name === "AbortError")) throw recoveryError;
           }

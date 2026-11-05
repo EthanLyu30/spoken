@@ -5,6 +5,7 @@ const QUOTA_COOLDOWN_MS = 5 * 60_000;
 let quotaUntil = 0;
 
 export class AsrQuotaError extends Error {
+  partialText?: string;
   constructor(readonly providerCode = ASR_QUOTA_CODE, readonly detail = "") {
     super(ASR_QUOTA_MESSAGE);
     this.name = "AsrQuotaError";

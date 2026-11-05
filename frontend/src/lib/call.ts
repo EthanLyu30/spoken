@@ -126,10 +126,12 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
           return;
         }
         asr = opened;
-      } catch {
+      } catch (error) {
         if (generation === asrGeneration) {
           asr = null;
-          asrUnavailable = true;
+          // A quota cooling period must not disable streaming for the rest of
+          // this call; after the cooldown the next utterance may reopen it.
+          asrUnavailable = !isAsrQuotaError(error);
         }
       }
     })();
