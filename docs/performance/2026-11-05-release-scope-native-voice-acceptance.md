@@ -20,6 +20,25 @@
 - 用户运营的注册数、访客数、首练率继续使用自己的时间口径，不跟随调用版本切换。
 - 旧记录没有 `playback_started` 时，已有成功/失败播放结果继续计入，启动状态显示为暂无新版样本。
 
+### 改动文件
+
+- `backend/app/core/observability.py`：从 `RENDER_GIT_COMMIT` 读取实际后端版本。
+- `backend/app/api/admin.py`：概览返回 `server_release`；接收 `experience_server_release` / `experience_browser_release`。
+- `backend/app/services/telemetry.py`：后端模型阶段和浏览器阶段分别按各自版本过滤。
+- `frontend/src/lib/adminApi.ts`：新增版本参数与 `server_release` 类型。
+- `frontend/src/pages/Admin.tsx`：当前发布/全部保留/历史版本选择、未知/测试标记、空状态、钻取携带范围。
+- `frontend/src/components/AdminUsers.tsx`：首练数据加载/不可用文案。
+- 对应后端/前端测试与 `docs/performance/evidence/` 证据。
+
+### 复现步骤
+
+1. 切到 `pm/current-release-voice-audit`。
+2. 设置 `RENDER_GIT_COMMIT=server-current`（或运行中的实际 SHA）和 `VITE_RELEASE=browser-current`，启动后端与前端。
+3. 插入 `server-current` / `browser-current` / `development` / `unknown` 的遥测记录。
+4. 打开 `/admin`：默认应显示当前后端版本；切到浏览器来源应使用前端版本；切到全部/历史分别清空/锁定版本。
+5. 从概览进入调用诊断，检查来源、操作、时间、版本没有丢失。
+6. 运行 `pytest -q`、`npm test -- --run`、`npm run typecheck`、`npm run lint`、`npm run build`。
+
 ### 验证
 
 - 前端全量 **539 passed**；后端全量 **638 passed**；TypeScript / ESLint / 生产构建通过。
