@@ -1,0 +1,20 @@
+{
+  "environment": "Chrome 156.0.8078.75 / Windows 11 / production",
+  "fixed_audio": "Windows Zira cafe order WAV, 7.37 seconds, fake media loop",
+  "page_performance_now_ms": {
+    "asr_session_request": 7708.7,
+    "asr_session_headers": 8002.5,
+    "direct_ws_open": 8004.4,
+    "first_audio_frame": 8220.4,
+    "provider_error_11201": 8260.5,
+    "asr_http_503": 14318.8,
+    "relay_ws_open": 15128.9
+  },
+  "finalize_sent": false,
+  "final_received": false,
+  "interaction_id": null,
+  "chat_request": false,
+  "server_check": "POST /api/asr -> HTTP 503 {\"detail\":\"iFlytek ASR error 11201: licc failed\"} (3/3)",
+  "measured_conditions": [],
+  "unmeasured_conditions": ["normal", "streaming_timeout", "connection_disconnect", "incomplete_transcription"]
+}
