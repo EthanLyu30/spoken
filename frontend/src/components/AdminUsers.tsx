@@ -48,6 +48,9 @@ export function AdminUsers({ revision, onForbidden }: { revision: number; onForb
   const moveTo = (next: number) => { setLoading(true); setOffset(next); };
   const activation = summary?.activation_24h;
   const activationRate = activation?.eligible ? `${(100 * activation.completed / activation.eligible).toFixed(1)}%` : "—";
+  const maturationNote = activation?.eligible
+    ? `${activation.completed} / ${activation.eligible} 个账号`
+    : summary?.new_7d === 0 ? "近 7 天无新注册，暂无样本" : "新注册账号尚未满 24 小时";
   const items = page?.items ?? [];
   const total = page?.total ?? 0;
   const limit = page?.limit ?? 20;
@@ -55,13 +58,13 @@ export function AdminUsers({ revision, onForbidden }: { revision: number; onForb
   return <section aria-label="用户运营">
     <section className="admin-metrics admin-audience" aria-label="用户指标">
       <article><span>注册总人数</span><strong>{count(summary?.registered)}</strong><small>累计普通账号</small></article>
-      <article><span>近 7 天新增</span><strong>{count(summary?.new_7d)}</strong><small>过去 168 小时注册</small></article>
+      <article><span>近 7 天新增</span><strong>{count(summary?.new_7d ?? null)}</strong><small>过去 168 小时注册</small></article>
       <article><span>登录活跃账号</span><strong>{count(summary?.visitors?.registered_active)}</strong><small>近 7 天 · 按账号去重</small></article>
       <article><span>未登录访客</span><strong>{count(summary?.visitors?.guest_uv)}</strong><small>近 7 天 · 按浏览器去重</small></article>
     </section>
     <section className="admin-panel admin-activation" aria-label="首练转化">
       <div><h2>注册后 24 小时首练率</h2><p>近 7 天注册且已满 24 小时的普通账号。完成场景会话、跟读或面试任一项计为首练。</p></div>
-      <div className="admin-activation-value"><strong>{activationRate}</strong><small>{activation?.eligible ? `${activation.completed} / ${activation.eligible} 个账号` : "暂无成熟样本"}</small></div>
+      <div className="admin-activation-value"><strong>{activationRate}</strong><small>{maturationNote}</small></div>
     </section>
     {summary?.visitors && (!summary.visitors.enabled || summary.visitors.at_capacity) && <p className="admin-notice">
       {summary.visitors.enabled ? "访客记录达到保留上限，显示已保留的访问。" : "访客采集未启用，显示已保留的历史访问。"}
