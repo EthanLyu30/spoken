@@ -10,11 +10,9 @@ from app.core.config import get_settings
 from app.core.deps import get_current_user
 from app.db import get_db
 from app.models.user import User
-from app.models.telemetry import AdminAccount, TelemetryRecord
-from app.models.session import PracticeSession
-from app.models.practice import PracticeRecord
-from app.models.word import WordEntry
-from app.services.telemetry import conditions, is_admin, overview, serialize
+from app.models.telemetry import TelemetryRecord
+from app.services.monitoring import registered_users
+from app.services.telemetry import conditions, experience_summary, is_admin, overview, serialize
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -39,15 +37,18 @@ async def flush(request):
 
 
 @router.get("/overview", dependencies=[Depends(get_admin_user)])
-async def get_overview(request: Request, options: dict = Depends(filters), db: Session = Depends(get_db)):
+async def get_overview(request: Request, options: dict = Depends(filters), db: Session = Depends(get_db),
+                       include_experience: bool = False):
     await flush(request)
-    return await asyncio.to_thread(_overview, request, options, db)
+    return await asyncio.to_thread(_overview, request, options, db, include_experience)
 
 
-def _overview(request, options, db):
+def _overview(request, options, db, include_experience=False):
     from app.services.monitoring import visitor_summary, state_time
     data = overview(db, **options)
     data['visitors'] = visitor_summary(db, hours=options['hours'])
+    if include_experience:
+        data["experience"] = experience_summary(db, hours=options["hours"])
     sink = getattr(request.app.state, "telemetry_sink", None)
     oldest = db.scalar(select(func.min(TelemetryRecord.started_at)))
     source_count = db.scalar(select(func.count()).select_from(TelemetryRecord).where(TelemetryRecord.source == options["source"]))
@@ -69,33 +70,11 @@ def _overview(request, options, db):
 
 
 @router.get("/users", dependencies=[Depends(get_admin_user)])
-def list_users(db: Session = Depends(get_db)):
-    """Registered accounts only; anonymous guests remain device-scoped.
-
-    This is deliberately admin-only and returns no password/session content.
-    Guest identities are intentionally not recoverable from hashed visit data.
-    """
-    admin_ids = set(db.scalars(select(AdminAccount.user_id)))
-    users = [user for user in db.scalars(select(User).order_by(User.created_at.desc()).limit(100)).all() if user.id not in admin_ids]
-    items = []
-    for user in users:
-        owner = f"u:{user.id}"
-        session_count = db.scalar(select(func.count()).select_from(PracticeSession).where(PracticeSession.client_id == owner)) or 0
-        word_count = db.scalar(select(func.count()).select_from(WordEntry).where(WordEntry.client_id == owner)) or 0
-        practice_count = db.scalar(select(func.count()).select_from(PracticeRecord).where(PracticeRecord.client_id == owner)) or 0
-        last_session = db.scalar(select(func.max(PracticeSession.created_at)).where(PracticeSession.client_id == owner))
-        last_practice = db.scalar(select(func.max(PracticeRecord.created_at)).where(PracticeRecord.client_id == owner))
-        last_word = db.scalar(select(func.max(WordEntry.created_at)).where(WordEntry.client_id == owner))
-        last_active = max((value for value in (last_session, last_practice, last_word) if value is not None), default=None)
-        items.append({
-            "id": user.id, "email": user.email, "display_name": user.display_name,
-            "created_at": user.created_at.isoformat() + "Z",
-            "last_active": last_active.isoformat() + "Z" if last_active else None,
-            "sessions": session_count, "words": word_count, "practice": practice_count,
-        })
-    items.sort(key=lambda item: item["last_active"] or "", reverse=True)
-    return {"items": items, "registered": len(items), "limit": 100,
-            "note": "访客数据按设备隔离且只保留哈希计数，无法反查具体身份。"}
+def list_users(db: Session = Depends(get_db), *, limit: int = Query(100, ge=1, le=100),
+               offset: int = Query(0, ge=0, le=100000),
+               search: str = Query("", max_length=255),
+               sort: Literal["activity", "registered"] = "activity"):
+    return registered_users(db, limit=limit, offset=offset, search=search.strip(), sort=sort)
 
 
 @router.get("/traces", dependencies=[Depends(get_admin_user)])

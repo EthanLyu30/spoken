@@ -53,6 +53,7 @@ export function traceHeaders(target?: object | null): Record<string, string> {
 export function reportTiming(operation: Operation, durationMs: number, options: {
   outcome?: "ok" | "error" | "cancelled"; engine?: Engine; transport?: Transport; interactionId?: string;
   reason?: NativeDiagnostic["reason"] | NativeEndDiagnostic["reason"];
+  playback_started?: boolean;
 } & Omit<NativeDiagnostic, "reason"> & Omit<NativeEndDiagnostic, "reason"> & AsrAttemptDiagnostic & PronunciationDiagnostic = {}): void {
   const maxDuration = operation === "speech.native_end" ? 3_600_000 : 300_000;
   if (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > maxDuration) return;
@@ -61,12 +62,12 @@ export function reportTiming(operation: Operation, durationMs: number, options: 
     typeof value === "number" && Number.isInteger(value) && value >= min && value <= max ? value : undefined;
   const numeric = (value: number | undefined, min: number, max: number) =>
     typeof value === "number" && Number.isFinite(value) && value >= min && value <= max ? value : undefined;
-  if (operation === "speech.native_start" || operation === "speech.native_end") {
-    const reasons = operation === "speech.native_start"
-      ? ["started", "startup_timeout", "end_before_start", "speech_error", "speak_exception", "cancelled"]
-      : ["end", "native_error", "completion_timeout", "cancelled"];
+  if (operation === "speech.native_start" || operation === "speech.native_end" || operation === "speech.complete") {
+    const startupFailures = ["startup_timeout", "end_before_start", "speech_error"];
+    const reasons = operation === "speech.native_end" ? ["end", "native_error", "completion_timeout", "cancelled"]
+      : operation === "speech.complete" ? startupFailures : [...startupFailures, "started", "speak_exception", "cancelled"];
     if (reasons.includes(options.reason ?? "")) diagnostics.reason = options.reason;
-    if (NATIVE_ERRORS.includes(options.error_code!)) diagnostics.error_code = options.error_code;
+    if ((operation !== "speech.complete" || diagnostics.reason) && NATIVE_ERRORS.includes(options.error_code!)) diagnostics.error_code = options.error_code;
   }
   if (operation === "speech.native_start") {
     for (const key of ["state_before", "state_after"] as const) {
@@ -75,6 +76,9 @@ export function reportTiming(operation: Operation, durationMs: number, options: 
     }
     if (["enhanced", "remote", "local", "unknown"].includes(options.voice_type ?? "")) diagnostics.voice_type = options.voice_type;
     if (typeof options.voice_matched === "boolean") diagnostics.voice_matched = options.voice_matched;
+  } else if (operation === "speech.complete") {
+    if (typeof options.playback_started === "boolean") diagnostics.playback_started = options.playback_started;
+    if (diagnostics.reason && ["enhanced", "remote"].includes(options.voice_type ?? "")) diagnostics.voice_type = options.voice_type;
   } else if (operation === "speech.native_end") {
     const stateAtEvent = integer(options.state_at_event, 0, 7);
     if (stateAtEvent !== undefined) diagnostics.state_at_event = stateAtEvent;
@@ -102,15 +106,21 @@ export function reportTiming(operation: Operation, durationMs: number, options: 
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 2_000);
+  const sample = { operation, duration_ms: durationMs, outcome: options.outcome ?? "ok",
+    release: import.meta.env.VITE_RELEASE ?? "unknown",
+    engine: options.engine ?? "unknown", transport: options.transport ?? "unknown",
+    ...(options.interactionId && /^[a-f0-9]{32}$/.test(options.interactionId) ? { interaction_id: options.interactionId } : {}),
+  };
+  const send = (payload: object) => fetch(`${BASE}/api/telemetry/client`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    signal: controller.signal, keepalive: true,
+  });
   try {
-    void Promise.resolve(fetch(`${BASE}/api/telemetry/client`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ operation, duration_ms: durationMs, outcome: options.outcome ?? "ok",
-        ...diagnostics, release: import.meta.env.VITE_RELEASE ?? "unknown",
-        engine: options.engine ?? "unknown", transport: options.transport ?? "unknown",
-        ...(options.interactionId && /^[a-f0-9]{32}$/.test(options.interactionId) ? { interaction_id: options.interactionId } : {}) }),
-      signal: controller.signal, keepalive: true,
-    })).catch(() => undefined).finally(() => clearTimeout(timer));
+    void Promise.resolve(send({ ...sample, ...diagnostics })).then(response => {
+      // A legacy server rejects the new playback fields before storing anything.
+      if (response?.status === 422 && operation === "speech.complete" &&
+          Object.keys(diagnostics).length > 0 && !controller.signal.aborted) return send(sample);
+    }).catch(() => undefined).finally(() => clearTimeout(timer));
   } catch { clearTimeout(timer); /* instrumentation must not affect recording or playback */ }
 }
 

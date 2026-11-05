@@ -6,7 +6,8 @@ NATIVE_START_FIELDS = {"reason", "error_code", "state_before", "state_after", "v
 NATIVE_END_FIELDS = {"reason", "error_code", "state_at_event", "watchdog_budget_ms", "pause_count", "resume_count", "paused_duration_ms", "visibility_state"}
 ASR_ATTEMPT_FIELDS = {"stage", "attempt", "fallback_reason", "audio_bytes", "result_class"}
 PRONUNCIATION_FIELDS = {"entry", "audio_bytes"}
-SINK_DIAGNOSTIC_FIELDS = NATIVE_START_FIELDS | NATIVE_END_FIELDS | ASR_ATTEMPT_FIELDS | PRONUNCIATION_FIELDS
+PLAYBACK_FIELDS = {"playback_started", "reason", "error_code", "voice_type"}
+SINK_DIAGNOSTIC_FIELDS = NATIVE_START_FIELDS | NATIVE_END_FIELDS | ASR_ATTEMPT_FIELDS | PRONUNCIATION_FIELDS | PLAYBACK_FIELDS
 
 
 class BrowserTiming(BaseModel):
@@ -29,6 +30,7 @@ class BrowserTiming(BaseModel):
     state_after: int | None = Field(default=None, ge=0, le=7, strict=True)
     voice_type: Literal["enhanced", "remote", "local", "unknown"] | None = None
     voice_matched: bool | None = Field(default=None, strict=True)
+    playback_started: bool | None = Field(default=None, strict=True)
     state_at_event: int | None = Field(default=None, ge=0, le=7, strict=True)
     watchdog_budget_ms: float | None = Field(default=None, ge=0, le=3_600_000, strict=True)
     pause_count: int | None = Field(default=None, ge=0, le=100, strict=True)
@@ -51,7 +53,20 @@ class BrowserTiming(BaseModel):
         native_start_only = {"state_before", "state_after", "voice_type", "voice_matched"}
         native_end_only = NATIVE_END_FIELDS - {"reason", "error_code"}
         asr_only = ASR_ATTEMPT_FIELDS - {"audio_bytes"}
-        if self.operation == "speech.native_start":
+        if "playback_started" in supplied and self.operation != "speech.complete":
+            raise ValueError("playback_started belongs to speech.complete")
+        if self.operation == "speech.complete":
+            if (supplied & SINK_DIAGNOSTIC_FIELDS) - PLAYBACK_FIELDS:
+                raise ValueError("fields do not belong to speech.complete")
+            if self.reason is None and supplied.intersection({"error_code", "voice_type"}):
+                raise ValueError("recovery diagnostics require a reason")
+            if self.reason is not None and (
+                self.reason not in {"startup_timeout", "end_before_start", "speech_error"}
+                or self.engine != "browser" or self.playback_started is None
+                or self.voice_type not in {None, "remote", "enhanced"}
+            ):
+                raise ValueError("invalid playback recovery diagnostics")
+        elif self.operation == "speech.native_start":
             if supplied.intersection(native_end_only | ASR_ATTEMPT_FIELDS | {"entry"}):
                 raise ValueError("fields do not belong to speech.native_start")
             if self.reason in {"end", "native_error", "completion_timeout"}:

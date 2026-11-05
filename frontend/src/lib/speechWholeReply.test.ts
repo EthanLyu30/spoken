@@ -348,7 +348,12 @@ it.each(["end_before_start", "network", "startup_timeout"])("recovers an online 
   expect(q.status).toMatchObject({voice:"Microsoft Zira",phase:"completed",fallbackReason:"browser-voice-unavailable"});
   expect(mocks.settings.browserVoiceURI).toBe("natural");
   expect(samples.filter(s=>s.operation==="speech.first_audio")).toHaveLength(1);
-  expect(samples).toContainEqual(expect.objectContaining({operation:"speech.complete",outcome:"ok",engine:"browser"}));
+  const playbackResults = samples.filter(s=>s.operation==="speech.complete");
+  expect(playbackResults).toEqual([expect.objectContaining({
+    outcome: "ok", engine: "browser", playback_started: true,
+    reason: failure === "network" ? "speech_error" : failure,
+    ...(failure === "network" ? { error_code: "network" } : {}),
+  })]);
   expect(samples.filter(s=>s.operation==="speech.native_start" && s.outcome==="error")).toHaveLength(0);
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
 });
@@ -395,6 +400,9 @@ it("stops after one failed local recovery rather than cycling through voices", a
   utterances[1].onend?.();await done;
   expect(utterances).toHaveLength(2);
   expect(q.failed).toBe(true);
+  expect(samples.filter(s=>s.operation==="speech.complete")).toEqual([expect.objectContaining({
+    outcome: "error", playback_started: false, reason: "end_before_start",
+  })]);
 });
 
 it("does not substitute a Chinese system voice for failed English speech", async () => {

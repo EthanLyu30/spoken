@@ -20,7 +20,9 @@ const monitoring = {
 };
 const trace = { trace_id: "a".repeat(32), started_at: "2026-10-30T02:00:00Z", source: "server", operation: "POST /api/chat/stream", outcome: "ok", duration_ms: 1200, http_status: 200, ttft_ms: 250, model: "deepseek-flash", input_tokens: 20, output_tokens: 10, release: "qa", spans: [{ id: "b".repeat(16), parent_id: null, name: "deepseek.stream", offset_ms: 50, duration_ms: 1100, outcome: "ok", attributes: { provider: "deepseek" } }] };
 const fetcher = vi.fn();
-function show() { return render(<MemoryRouter><Admin /></MemoryRouter>); }
+function show(view = "diagnostics") {
+  return render(<MemoryRouter initialEntries={[`/admin?view=${view}`]}><Admin /></MemoryRouter>);
+}
 beforeEach(() => {
   setToken("test-admin-session");
   useAuth.setState({ user });
@@ -43,20 +45,79 @@ it("does not load private data for guests or ordinary accounts", () => {
   expect(fetcher).not.toHaveBeenCalled();
 });
 
-it('shows distinct visitor metrics, configured model, rates and honest cost coverage', async () => {
+it('shows the configured model, rates and honest cost coverage', async () => {
   fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes('/overview')
     ? { ...overview, ...monitoring } : { items: [], total: 0 })));
   show(); await screen.findByText(/暂无调用记录/);
-  const metrics = screen.getByRole('region', { name: '运行指标' });
-  expect(within(metrics).getByText('未登录访客 UV')).toBeVisible();
-  expect(within(metrics).getByText('12')).toBeVisible();
-  expect(within(metrics).getByText('登录活跃用户')).toBeVisible();
-  expect(within(metrics).getByText('3')).toBeVisible();
   expect(screen.getByText('deepseek-flash')).toBeVisible();
   expect(screen.getByText(/输入 ¥0.02–2/)).toBeVisible();
   expect(screen.getByText(/输出 ¥4–8/)).toBeVisible();
   expect(screen.getByText(/¥0.0020–0.0060/)).toBeVisible();
   expect(screen.getByText(/2 \/ 3/)).toBeVisible();
+});
+
+it("loads accounts independently after an overview error and refreshes the active view", async () => {
+  let registered = 105;
+  fetcher.mockImplementation(async (url: string) => url.includes("/users")
+    ? new Response(JSON.stringify({
+      items: [{ id: 1, email: "learner@example.test", display_name: "Learner",
+        created_at: "2026-10-30T00:00:00Z", last_active: null, sessions: 0, words: 0, practice: 0 }],
+      registered, total: registered, limit: 20, new_7d: 4, visitors: monitoring.visitors,
+      activation_24h: { eligible: 4, completed: 1 },
+    }))
+    : new Response("{}", { status: 500 }));
+  show("overview");
+  expect(await screen.findByText(/概览暂时无法加载/)).toBeVisible();
+  expect(fetcher.mock.calls.every(([url]) => !String(url).includes("/traces") && !String(url).includes("/users"))).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "用户运营" }));
+  expect(await screen.findByText("learner@example.test")).toBeVisible();
+  const metrics = screen.getByRole("region", { name: "用户指标" });
+  expect(within(metrics).getByText("105")).toBeVisible();
+  expect(within(metrics).getByText("12")).toBeVisible();
+  expect(within(metrics).getByText("3")).toBeVisible();
+  expect(screen.getByText("25.0%")).toBeVisible();
+  expect(screen.queryByRole("tab", { name: "浏览器体验" })).not.toBeInTheDocument();
+  registered = 106;
+  fireEvent.click(screen.getByRole("button", { name: "刷新数据" }));
+  expect(await within(metrics).findByText("106")).toBeVisible();
+  fireEvent.change(screen.getByLabelText("搜索账号"), { target: { value: "learner" } });
+  fireEvent.click(screen.getByRole("button", { name: /^搜索$/ }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).includes("search=learner"))).toBe(true));
+});
+
+it("shows per-stage samples on the overview and opens playback diagnostics", async () => {
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes("/overview")
+    ? { ...overview, experience: {
+      stages: [{ operation: "chat.first_text", samples: 3, p50: 200, p95: 300, p99: 300 }],
+      playback: { completed: 4, failed: 2, cancelled: 0, classified: 3, never_started: 1,
+        recovered: 2, recovery_failed: 1, recovery_cancelled: 0 },
+    } } : { items: [], total: 0 })));
+  show("overview");
+  const stages = await screen.findByRole("region", { name: "新对话等待" });
+  expect(within(stages).getByText("300 ms")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "查看记录" }));
+  expect(await screen.findByRole("region", { name: "调用记录" })).toBeVisible();
+  expect(screen.getByRole("tab", { name: "浏览器体验" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByLabelText("业务操作")).toHaveValue("speech.complete");
+});
+
+it("does not present a legacy capped account response as the global count", async () => {
+  fetcher.mockResolvedValue(new Response(JSON.stringify({ items: [], registered: 100, limit: 100 })));
+  show("users");
+  expect(await screen.findByRole("alert")).toHaveTextContent("账号列表加载失败");
+  expect(screen.queryByText("100")).not.toBeInTheDocument();
+});
+
+it("opens the first scoped failure from the overview shortcut", async () => {
+  const failure = { ...trace, outcome: "error", http_status: 500 };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes("/overview")
+    ? { ...overview, count: 4, errors: 1 } : url.includes(`/traces/${trace.trace_id}`)
+      ? failure : { items: [failure], total: 1 })));
+  show("overview");
+  fireEvent.click(await screen.findByRole("button", { name: "查看失败调用" }));
+  expect(await screen.findByRole("complementary", { name: "调用详情" })).toBeVisible();
+  expect(screen.getByLabelText("调用状态")).toHaveValue("error");
+  expect(fetcher.mock.calls.filter(([url]) => String(url).includes("/traces?"))).toHaveLength(1);
 });
 
 it('explains both observation sources and the periodic retention policy', async () => {

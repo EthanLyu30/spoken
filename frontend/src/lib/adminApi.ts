@@ -11,9 +11,20 @@ export interface AdminPricing {
   model_records: number; priced_records: number; unknown_usage_records: number; unpriced_records: number;
   min_cny: number | null; max_cny: number | null;
 }
+export interface AdminVisitors {
+  guest_uv: number | null; registered_active: number | null; enabled: boolean;
+  started_at: string | null; hours: number; max_records: number; at_capacity: boolean;
+}
+export interface AdminExperience {
+  stages: (Percentiles & { operation: string; samples: number })[];
+  playback: {
+    completed: number; failed: number; cancelled: number; classified: number; never_started: number;
+    recovered: number; recovery_failed: number; recovery_cancelled: number;
+  };
+}
 export interface AdminOverview {
-  visitors?: { guest_uv: number | null; registered_active: number | null; enabled: boolean;
-    started_at: string | null; hours: number; max_records: number; at_capacity: boolean };
+  visitors?: AdminVisitors;
+  experience?: AdminExperience;
   pricing?: AdminPricing;
   source: "server" | "browser"; count: number; success_rate: number | null;
   errors: number; timeouts: number; cancelled: number;
@@ -27,6 +38,12 @@ export interface AdminUser {
   id: number; email: string; display_name: string; created_at: string; last_active: string | null;
   sessions: number; words: number; practice: number;
 }
+export interface AdminUsersPage {
+  items: AdminUser[]; registered: number; total: number; limit: number; new_7d: number;
+  activation_24h: { eligible: number; completed: number };
+  visitors: AdminVisitors;
+}
+export type AdminUserSort = "activity" | "registered";
 export interface AdminTrace {
   interaction_id?: string | null; related?: AdminTrace[];
   trace_id: string; started_at: string; operation: string; source: string; outcome: string;
@@ -56,10 +73,18 @@ export function query(filters: AdminFilters): URLSearchParams {
   for (const key of ["operation", "model", "release", "outcome"] as const) if (filters[key]) params.set(key, filters[key]);
   return params;
 }
-export const getAdminOverview = (filters: AdminFilters, signal?: AbortSignal) => read<AdminOverview>(`/overview?${query(filters)}`, signal);
+export function getAdminOverview(filters: AdminFilters, signal?: AbortSignal, includeExperience = false) {
+  const params = query(filters);
+  if (includeExperience) params.set("include_experience", "true");
+  return read<AdminOverview>(`/overview?${params}`, signal);
+}
 export const getAdminTraces = (filters: AdminFilters, offset: number, slow: boolean, signal?: AbortSignal) => {
   const params = query(filters); params.set("offset", String(offset)); params.set("slow_first", String(slow));
   return read<{ items: AdminTrace[]; total: number }>(`/traces?${params}`, signal);
 };
 export const getAdminTrace = (id: string, signal?: AbortSignal) => read<AdminTrace>(`/traces/${encodeURIComponent(id)}`, signal);
-export const getAdminUsers = (signal?: AbortSignal) => read<{ items: AdminUser[]; registered: number; note: string }>(`/users`, signal);
+export function getAdminUsers(options: { offset: number; search: string; sort: AdminUserSort }, signal?: AbortSignal) {
+  const params = new URLSearchParams({ limit: "20", offset: String(options.offset), sort: options.sort });
+  if (options.search) params.set("search", options.search);
+  return read<AdminUsersPage>(`/users?${params}`, signal);
+}

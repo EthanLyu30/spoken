@@ -220,6 +220,55 @@ def conditions(hours=24, source="server", operation=None, model=None, release=No
     return filters
 
 
+def _read_spans(raw):
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def experience_summary(db, *, hours):
+    stages = {key: [] for key in (
+        "model.first_text", "chat.first_text", "chat.complete", "speech.request_to_audio",
+    )}
+    stages["model.first_text"] = list(db.scalars(select(TelemetryRecord.ttft_ms).where(
+        *conditions(hours=hours, operation="POST /api/chat/stream", outcome="ok"),
+        TelemetryRecord.ttft_ms.is_not(None),
+    )))
+    playback = dict(completed=0, failed=0, cancelled=0, classified=0, never_started=0,
+                    recovered=0, recovery_failed=0, recovery_cancelled=0)
+    timings = ("chat.first_text", "chat.complete", "speech.request_to_audio")
+    for row in db.execute(select(TelemetryRecord.operation, TelemetryRecord.duration_ms,
+        TelemetryRecord.outcome, TelemetryRecord.spans_json).where(
+        *conditions(hours=hours, source="browser"),
+        TelemetryRecord.operation.in_((*timings, "speech.complete")),
+    )):
+        if row.operation != "speech.complete":
+            if row.outcome == "ok":
+                stages[row.operation].append(row.duration_ms)
+            continue
+        result = {"ok": "completed", "error": "failed", "cancelled": "cancelled"}.get(row.outcome)
+        if result is None:
+            continue
+        playback[result] += 1
+        attributes = next((span["attributes"] for span in _read_spans(row.spans_json)
+                           if isinstance(span, dict) and span.get("name") == "speech.complete"
+                           and isinstance(span.get("attributes"), dict)), {})
+        started = attributes.get("playback_started")
+        if isinstance(started, bool) and result != "cancelled":
+            playback["classified"] += 1
+            if not started and result == "failed":
+                playback["never_started"] += 1
+        if attributes.get("reason") in ("startup_timeout", "end_before_start", "speech_error"):
+            playback[{"completed": "recovered", "failed": "recovery_failed", "cancelled": "recovery_cancelled"}[result]] += 1
+    return {
+        "stages": [{"operation": operation, "samples": len(values), **percentiles(values)}
+                   for operation, values in stages.items()],
+        "playback": playback,
+    }
+
+
 def serialize(record, *, detail=False):
     from app.services.model_pricing import record_reference_cost
     out = {key: getattr(record, key) for key in ("trace_id", "interaction_id", "operation", "source", "outcome", "duration_ms",
@@ -228,11 +277,7 @@ def serialize(record, *, detail=False):
     out["started_at"] = record.started_at.isoformat(timespec="milliseconds") + "Z"
     spans = None
     if detail or not out["model"]:
-        try:
-            parsed = json.loads(record.spans_json)
-        except (TypeError, ValueError):
-            parsed = []
-        spans = parsed if isinstance(parsed, list) else []
+        spans = _read_spans(record.spans_json)
         if not out["model"]:
             out["model"] = next((
                 attributes["model"]

@@ -95,6 +95,76 @@ def test_admin_user_list_returns_accounts_but_not_admin_identity(client):
     assert client.get('/api/admin/users', headers=ordinary).status_code == 403
 
 
+def test_user_page_counts_all_accounts_and_sorts_by_durable_activity(client):
+    from sqlalchemy import create_engine, event
+    from sqlalchemy.orm import Session
+    from app.api.admin import list_users
+    from app.db import Base
+    from app.models.progress import LearningEvent
+    from app.models.telemetry import AdminAccount
+    from app.models.user import User
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    now = utcnow()
+    with Session(engine) as db:
+        db.add_all([
+            User(id=i, email=f"u{i}@example.test", password_hash="unused", created_at=now - timedelta(days=2, minutes=110-i))
+            for i in range(1, 107)
+        ])
+        db.flush()
+        db.add(AdminAccount(user_id=106))
+        db.add_all([
+            LearningEvent(event_key="latest", client_id="u:1", event_type="word_reviewed", occurred_at=now),
+            LearningEvent(event_key="activated", client_id="u:2", event_type="practice", occurred_at=now - timedelta(days=2)),
+            LearningEvent(event_key="before-register", client_id="u:3", event_type="practice", occurred_at=now - timedelta(days=3)),
+            LearningEvent(event_key="late", client_id="u:4", event_type="practice",
+                          occurred_at=now - timedelta(days=1, minutes=106) + timedelta(microseconds=1)),
+            LearningEvent(event_key="exactly-24h", client_id="u:5", event_type="practice",
+                          occurred_at=now - timedelta(days=1, minutes=105)),
+        ])
+        db.commit()
+        queries = []
+        event.listen(engine, "before_cursor_execute", lambda *args: queries.append(args[2]))
+        result = list_users(db, limit=20, offset=0, search="", sort="activity")
+        assert result["registered"] == result["total"] == 105
+        assert len(result["items"]) == 20
+        assert result["items"][0]["id"] == 1
+        assert result["activation_24h"] == {"eligible": 105, "completed": 2}
+        assert len(queries) <= 5
+        filtered = list_users(db, limit=20, offset=0, search="u105@", sort="registered")
+        assert filtered["registered"] == 105
+        assert filtered["total"] == 1
+        assert [user["id"] for user in filtered["items"]] == [105]
+    engine.dispose()
+
+
+def test_overview_counts_playback_once_and_keeps_recovery_diagnostics(client):
+    owner = account(client, admin=True)
+    url = "/api/admin/overview?include_experience=true"
+    baseline = client.get(url, headers=owner).json()["experience"]
+    complete = {"operation": "speech.complete", "duration_ms": 210, "engine": "browser"}
+    payloads = [
+        complete | {"outcome": "ok", "reason": "speech_error", "error_code": "network",
+                    "voice_type": "enhanced", "playback_started": True},
+        complete | {"outcome": "error", "reason": "startup_timeout", "playback_started": False},
+        complete | {"outcome": "error"},  # Retained records predate the startup flag.
+        {"operation": "chat.first_text", "duration_ms": 120, "outcome": "ok"},
+        {"operation": "chat.first_text", "duration_ms": 450, "outcome": "error"},
+    ]
+    for body in payloads:
+        assert client.post("/api/telemetry/client", json=body).status_code == 202
+    assert client.post("/api/telemetry/client", json=complete | {"reason": "started", "playback_started": True}).status_code == 422
+    assert client.post("/api/telemetry/client", json=payloads[3] | {"playback_started": True}).status_code == 422
+    data = client.get(url, headers=owner).json()["experience"]
+    for key, increment in {"completed": 1, "failed": 2, "classified": 2, "never_started": 1,
+                           "recovered": 1, "recovery_failed": 1}.items():
+        assert data["playback"][key] == baseline["playback"][key] + increment
+    stages = {stage["operation"]: stage for stage in data["stages"]}
+    old_stages = {stage["operation"]: stage for stage in baseline["stages"]}
+    assert stages["chat.first_text"]["samples"] == old_stages["chat.first_text"]["samples"] + 1
+
+
 def test_guest_visits_deduplicate_without_exposing_identity(client):
     from app.models.monitoring import SiteVisit
     reset_visits()

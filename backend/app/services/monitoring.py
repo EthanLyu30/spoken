@@ -4,14 +4,18 @@ import hmac
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import case, delete, select, func
+from sqlalchemy import String, case, cast, delete, literal, select, func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.config import get_settings
 from app.models.monitoring import MonitoringState, SiteVisit
+from app.models.practice import PracticeRecord
+from app.models.progress import LearningEvent
+from app.models.session import PracticeSession
 from app.models.telemetry import AdminAccount
 from app.models.user import User
+from app.models.word import WordEntry
 
 
 def utcnow():
@@ -86,3 +90,64 @@ def visitor_summary(db, *, hours=24):
         'enabled': bool(settings.telemetry_enabled and settings.jwt_secret), 'started_at': started,
         'hours': hours, 'max_records': settings.visitor_max_records,
         'at_capacity': retained >= settings.visitor_max_records}
+
+
+def registered_users(db, *, limit, offset, search, sort):
+    now = utcnow()
+    week_ago = now - timedelta(days=7)
+    day = timedelta(hours=24)
+    ordinary = ~select(AdminAccount.user_id).where(AdminAccount.user_id == User.id).exists()
+    owner = literal("u:") + cast(User.id, String)
+    # Count only accounts with a full observation window. Guest history
+    # claimed at registration can predate the account and cannot activate it.
+    eligible = User.created_at.between(week_ago, now - day)
+    if db.get_bind().dialect.name == "sqlite":
+        # SQLite stores these timestamps as ISO text. Advance the UTC date
+        # without dropping fractional seconds from the time.
+        window_end = cast(func.date(User.created_at, "+1 day"), String) + func.substr(User.created_at, 11)
+    else:
+        window_end = User.created_at + day
+    completed = select(LearningEvent.event_key).where(
+        LearningEvent.client_id == owner,
+        LearningEvent.event_type.in_(("session", "practice")),
+        LearningEvent.occurred_at.between(User.created_at, window_end),
+    ).correlate(User).exists()
+    registered, new, mature, activated = db.execute(select(
+        func.count(User.id),
+        func.count(case((User.created_at >= week_ago, 1))),
+        func.count(case((eligible, 1))),
+        func.count(case((eligible, case((completed, 1))))),
+    ).where(ordinary)).one()
+
+    matched = [ordinary]
+    if search:
+        matched.append(User.email.icontains(search, autoescape=True) | User.display_name.icontains(search, autoescape=True))
+    total = db.scalar(select(func.count(User.id)).where(*matched)) if search else registered
+    latest = select(func.max(LearningEvent.occurred_at)).where(
+        LearningEvent.client_id == owner, LearningEvent.event_type.in_(("session", "practice", "word_reviewed")),
+    ).correlate(User).scalar_subquery().label("last_active")
+    order = [User.created_at.desc(), User.id.desc()]
+    if sort == "activity":
+        order.insert(0, latest.desc().nulls_last())
+    page = select(User.id, User.email, User.display_name, User.created_at, latest, owner.label("owner")) \
+        .where(*matched).order_by(*order).limit(limit).offset(offset).subquery()
+
+    def count_for(model):
+        return select(func.count()).select_from(model).where(model.client_id == page.c.owner).correlate(page).scalar_subquery()
+
+    page_order = [page.c.created_at.desc(), page.c.id.desc()]
+    if sort == "activity":
+        page_order.insert(0, page.c.last_active.desc().nulls_last())
+    rows = db.execute(select(page.c.id, page.c.email, page.c.display_name, page.c.created_at, page.c.last_active,
+        count_for(PracticeSession).label("sessions"), count_for(WordEntry).label("words"),
+        count_for(PracticeRecord).label("practice")).order_by(*page_order)).mappings()
+    items = [dict(row) | {
+        "created_at": row["created_at"].isoformat() + "Z",
+        "last_active": row["last_active"].isoformat() + "Z" if row["last_active"] else None,
+    } for row in rows]
+    return {
+        "items": items, "registered": registered, "total": total, "limit": limit, "new_7d": new,
+        "activation_24h": {"eligible": mature, "completed": activated},
+        "visitors": visitor_summary(db, hours=168),
+        "note": "访客数据按设备隔离且只保留哈希计数，无法反查具体身份。",
+    }

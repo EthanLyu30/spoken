@@ -23,6 +23,20 @@ it("telemetry network failures never change a successful ASR result", async () =
   expect(await wrapped.finishUtterance()).toBe("a private transcript");
 });
 
+it("retries a rejected playback diagnostic once in the legacy format", async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, { status: 422 }))
+    .mockResolvedValueOnce(new Response(null, { status: 202 }));
+  vi.stubGlobal("fetch", fetcher);
+  const interactionId = "a".repeat(32);
+  reportTiming("speech.complete", 200, { engine: "browser", interactionId, playback_started: true, reason: "end_before_start" });
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  const [first, second] = fetcher.mock.calls.map(([, options]) => JSON.parse(options.body));
+  expect(first).toMatchObject({ playback_started: true, reason: "end_before_start" });
+  expect(second).toMatchObject({ operation: "speech.complete", duration_ms: 200, outcome: "ok", interaction_id: interactionId });
+  expect(second).not.toHaveProperty("playback_started");
+  expect(second).not.toHaveProperty("reason");
+});
+
 it("records a failed finalization while preserving the original exception", async () => {
   const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
   vi.stubGlobal("fetch", fetcher);

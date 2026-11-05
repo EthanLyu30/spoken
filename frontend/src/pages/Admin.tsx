@@ -1,13 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { Activity, ArrowLeft, ArrowRight, Clock3, Database, RefreshCw, Search, ShieldCheck, TriangleAlert, Users, UserRound, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Activity, ArrowLeft, ArrowRight, Clock3, Database, RefreshCw, Search, ShieldCheck, TriangleAlert, Users, X } from "lucide-react";
 import { useAuth } from "../store/auth";
 import { EChart } from "../components/EChart";
+import { AdminUsers } from "../components/AdminUsers";
 import { modelLabel, referenceCost } from '../lib/adminFormatting';
-import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, getAdminUsers, type AdminFilters, type AdminOverview, type AdminTrace, type AdminUser } from "../lib/adminApi";
+import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, type AdminExperience, type AdminFilters, type AdminOverview, type AdminTrace } from "../lib/adminApi";
 import "../admin.css";
 
 const defaults: AdminFilters = { hours: 24, source: "server", operation: "", model: "", release: "", outcome: "" };
+const views = [
+  { id: "overview", label: "运行概览", icon: Activity },
+  { id: "diagnostics", label: "调用诊断", icon: Search },
+  { id: "users", label: "用户运营", icon: Users },
+] as const;
 const labels: Record<string, string> = { ok: "成功", error: "失败", timeout: "超时", cancelled: "已取消" };
 const spanLabels: Record<string, string> = { ...labels, incomplete: "未完成" };
 const measurementLabels: Record<string, string> = {
@@ -42,23 +48,22 @@ const date = (s: string) => new Date(s).toLocaleString("zh-CN", { timeZone: "Asi
 const forbidden = (err: unknown) => err instanceof AdminApiError && (err.status === 401 || err.status === 403);
 export default function Admin() {
   const user = useAuth(s => s.user);
-  const [filters, setFilters] = useState<AdminFilters>(defaults);
+  const [params, setParams] = useSearchParams();
+  const view = views.find(item => item.id === params.get("view"))?.id ?? "overview";
+  const setView = (next: (typeof views)[number]["id"]) => {
+    if (next === view) return;
+    const updated = new URLSearchParams(params);
+    if (next === "overview") updated.delete("view");
+    else updated.set("view", next);
+    setParams(updated);
+  };
+  const [diagnosticFilters, setFilters] = useState<AdminFilters>(defaults);
+  const diagnostics = view === "diagnostics";
+  const filters = useMemo(() => diagnostics ? diagnosticFilters : { ...defaults, hours: diagnosticFilters.hours },
+    [diagnostics, diagnosticFilters]);
   const [data, setData] = useState<AdminOverview | null>(null);
   const [rows, setRows] = useState<AdminTrace[]>([]);
   const [total, setTotal] = useState(0);
-  const [users, setUsers] = useState<AdminUser[]>([]);
-  const [usersLoaded, setUsersLoaded] = useState(false);
-  const [usersError, setUsersError] = useState(false);
-  const [usersRevision, setUsersRevision] = useState(0);
-  const hasOverviewData = data !== null;
-  useEffect(() => {
-    if (!user?.is_admin || !hasOverviewData) return;
-    const ctrl = new AbortController();
-    void getAdminUsers(ctrl.signal)
-      .then(data => { if (!ctrl.signal.aborted) { setUsers(Array.isArray(data.items) ? data.items : []); setUsersError(false); setUsersLoaded(true); } })
-      .catch(() => { if (!ctrl.signal.aborted) { setUsersError(true); setUsersLoaded(true); } });
-    return () => ctrl.abort();
-  }, [user?.is_admin, hasOverviewData, usersRevision]);
   const [offset, setOffset] = useState(0);
   const [slow, setSlow] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -69,11 +74,12 @@ export default function Admin() {
   const [error, setError] = useState("");
   const [overviewError, setOverviewError] = useState("");
   const [listError, setListError] = useState("");
-  const [denied, setDenied] = useState(false);
+  const [deniedAccount, setDeniedAccount] = useState<number | null>(null);
   const [detail, setDetail] = useState<AdminTrace | null>(null);
   const [traceLookup, setTraceLookup] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
   const detailController = useRef<AbortController | null>(null);
+  const openFirstFailure = useRef(false);
   const scopeController = useRef<AbortController | null>(null);
   const previousScope = useRef("");
   const previousList = useRef("");
@@ -82,14 +88,36 @@ export default function Admin() {
   const hasList = useRef(false);
   const canRead = Boolean(user?.is_admin);
   const userId = user?.id;
-  const loading = overviewLoading || listLoading;
+  const denied = deniedAccount !== null && deniedAccount === userId;
+  const loading = view !== "users" && (overviewLoading || listLoading);
+  const rejectAccess = useCallback(() => {
+    scopeController.current?.abort();
+    detailController.current?.abort();
+    setDeniedAccount(userId ?? null);
+    setData(null); setUpdatedAt(null); setRows([]); setTotal(0); setDetail(null);
+    hasOverview.current = false; hasList.current = false;
+  }, [userId]);
+  const inspect = useCallback(async (id: string) => {
+    detailController.current?.abort();
+    const controller = new AbortController(); detailController.current = controller;
+    setDetail(null); setDetailLoading(true); setError("");
+    try {
+      const next = await getAdminTrace(id, controller.signal);
+      if (!controller.signal.aborted) setDetail(next);
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      if (forbidden(err)) rejectAccess();
+      else setError(err instanceof AdminApiError && err.status === 404 ? "未找到该调用，可能已超过保留期。" : "调用详情无法加载，请稍后重试。");
+    } finally { if (!controller.signal.aborted) setDetailLoading(false); }
+  }, [rejectAccess]);
 
   useEffect(() => {
     const controller = new AbortController();
     scopeController.current = controller;
     let live = true;
-    let blocked = false;
-    const scope = JSON.stringify([userId, filters.hours, filters.source, filters.operation, filters.model, filters.release]);
+    const inspectFirst = openFirstFailure.current;
+    openFirstFailure.current = false;
+    const scope = JSON.stringify([userId, view, filters.hours, filters.source, filters.operation, filters.model, filters.release]);
     const listScope = JSON.stringify([scope, filters.outcome, offset, slow]);
     const keepOverview = previousScope.current === scope && hasOverview.current;
     const keepList = previousList.current === listScope && hasList.current;
@@ -97,18 +125,13 @@ export default function Admin() {
     previousScope.current = scope; previousList.current = listScope;
     if (!keepOverview || !canRead) { setData(null); setUpdatedAt(null); setOverviewError(""); hasOverview.current = false; }
     if (!keepList || !canRead) { setRows([]); setTotal(0); setListError(""); hasList.current = false; }
-    setDetail(null); setDetailLoading(false); setError(""); setDenied(false);
+    setDetail(null); setDetailLoading(false); setError("");
     detailController.current?.abort();
-    const rejectAccess = () => {
-      blocked = true; controller.abort(); detailController.current?.abort();
-      setDenied(true); setData(null); setUpdatedAt(null); setRows([]); setTotal(0); setDetail(null);
-      hasOverview.current = false; hasList.current = false;
-    };
-    if (canRead) {
-      setOverviewLoading(readOverview); setListLoading(true);
-      if (readOverview) void getAdminOverview({ ...filters, outcome: "" }, controller.signal)
+    if (canRead && !denied && view !== "users") {
+      setOverviewLoading(readOverview); setListLoading(diagnostics);
+      if (readOverview) void getAdminOverview({ ...filters, outcome: "" }, controller.signal, !diagnostics)
         .then(overview => {
-          if (!live || blocked || controller.signal.aborted) return;
+          if (!live || controller.signal.aborted) return;
           // A table action may abort this effect. Keep its refresh pending until
           // success so the next effect cannot silently keep stale metrics.
           previousRevision.current = revision;
@@ -116,35 +139,34 @@ export default function Admin() {
         }).catch((err: unknown) => {
           if (!live || controller.signal.aborted) return;
           if (forbidden(err)) rejectAccess();
-          else if (!blocked) setOverviewError(keepOverview ? "概览刷新失败，当前显示上次成功加载的数据。" : "概览暂时无法加载，请重试。下方调用列表仍可单独查看。");
+          else setOverviewError(keepOverview ? "概览刷新失败，当前显示上次成功加载的数据。" : "概览暂时无法加载，请重试。调用列表仍可单独查看。");
         }).finally(() => { if (live) setOverviewLoading(false); });
-      void getAdminTraces(filters, offset, slow, controller.signal)
+      if (diagnostics) void getAdminTraces(filters, offset, slow, controller.signal)
         .then(list => {
-          if (!live || blocked || controller.signal.aborted) return;
+          if (!live || controller.signal.aborted) return;
           setRows(list.items); setTotal(list.total); setListError(""); hasList.current = true;
+          if (inspectFirst && list.items[0]) void inspect(list.items[0].trace_id);
         }).catch((err: unknown) => {
           if (!live || controller.signal.aborted) return;
           if (forbidden(err)) rejectAccess();
-          else if (!blocked) setListError(keepList ? "调用列表刷新失败，当前显示上次成功加载的结果。" : "调用列表暂时无法加载，请重试。上方概览不受影响。");
+          else setListError(keepList ? "调用列表刷新失败，当前显示上次成功加载的结果。" : "调用列表暂时无法加载，请重试。上方概览不受影响。");
         }).finally(() => { if (live) setListLoading(false); });
     } else { setOverviewLoading(false); setListLoading(false); }
     return () => { live = false; controller.abort(); detailController.current?.abort(); };
-  }, [canRead, userId, filters, offset, slow, revision]);
+  }, [canRead, denied, diagnostics, userId, view, filters, offset, slow, revision, rejectAccess, inspect]);
 
   const operationOptions = [...new Set([filters.operation, ...(data?.facets?.operations ?? data?.operations ?? [])])].filter(Boolean);
   const update = (patch: Partial<AdminFilters>) => { setOffset(0); setFilters(old => ({ ...old, ...patch })); };
-  const showFailures = async () => {
-    if (!data) return;
-    const outcome = data.errors > 0 ? "error" : "timeout";
-    update({ outcome });
-    window.requestAnimationFrame(() => document.querySelector(".admin-traces")?.scrollIntoView({ behavior: "smooth", block: "start" }));
-    try {
-      const list = await getAdminTraces({ ...filters, outcome }, 0, false);
-      if (list.items[0]) await inspect(list.items[0].trace_id);
-    } catch {
-      // The filtered list remains available even if the direct detail lookup fails.
-    }
+  const filterOutcome = (outcome: "error" | "timeout", inspectFirst = false) => {
+    openFirstFailure.current = inspectFirst;
+    update({ ...filters, outcome });
+    setView("diagnostics");
+    window.requestAnimationFrame(() => document.querySelector(".admin-traces")?.scrollIntoView?.({ block: "start" }));
   };
+  const timeRange = <label className="admin-period">时间范围<select value={filters.hours}
+    onChange={event => update({ hours: Number(event.target.value) })}>
+    <option value={24}>近 24 小时</option><option value={168}>近 7 天</option><option value={336}>近 14 天</option>
+  </select></label>;
   const chart = useMemo(() => {
     const points = data?.trend ?? [];
     const operations = [...new Set(points.map(p => p.operation))];
@@ -158,28 +180,18 @@ export default function Admin() {
         data: points.filter(p => p.operation === op).map(p => [p.time, p.p95]) })) };
   }, [data]);
 
-  async function inspect(id: string) {
-    detailController.current?.abort();
-    const controller = new AbortController(); detailController.current = controller;
-    setDetail(null); setDetailLoading(true); setError("");
-    try {
-      const next = await getAdminTrace(id, controller.signal);
-      if (!controller.signal.aborted) setDetail(next);
-    } catch (err) {
-      if (controller.signal.aborted) return;
-      if (forbidden(err)) {
-        scopeController.current?.abort();
-        setDenied(true); setData(null); setUpdatedAt(null); setRows([]); setTotal(0); hasOverview.current = false; hasList.current = false;
-      } else setError(err instanceof AdminApiError && err.status === 404 ? "未找到该调用，可能已超过保留期。" : "调用详情无法加载，请稍后重试。");
-    } finally { if (!controller.signal.aborted) setDetailLoading(false); }
-  }
-
   if (!canRead || denied) return <main className="admin-page admin-locked">
     <ShieldCheck size={34} /><h1>{denied ? "后台访问权限已失效" : "仅管理员可访问运行看板"}</h1>
     <p>{denied ? "请刷新账号权限并确认服务器管理员授权。" : "请使用已授权的管理员账号登录。"}</p>
     {user && <button className="admin-refresh" disabled={refreshingAccount} onClick={async () => {
       setRefreshingAccount(true);
-      try { await useAuth.getState().refresh(); if (canRead) setRevision(value => value + 1); }
+      try {
+        await useAuth.getState().refresh();
+        if (useAuth.getState().user?.is_admin) {
+          setDeniedAccount(null);
+          setRevision(value => value + 1);
+        }
+      }
       finally { setRefreshingAccount(false); }
     }}><RefreshCw size={16} />{refreshingAccount ? "核对中…" : "刷新账号权限"}</button>}
     <Link to="/me">前往个人中心</Link>
@@ -187,23 +199,31 @@ export default function Admin() {
 
   return <main className="admin-page">
     <header className="admin-heading"><div><span className="admin-eyebrow"><ShieldCheck size={14} /> SPOKEN · 仅管理员可见</span>
-      <h1>运行看板<span>请求、耗时与模型用量</span></h1></div>
+      <h1>运行看板<span>服务表现与使用情况</span></h1></div>
       <div className="admin-heading-actions">{data && <span className={`admin-collection-state ${!data.collection.active ? "" : data.collection.dropped_since_restart || data.collection.write_errors_since_restart ? "degraded" : "enabled"}`}><i />{!data.collection.active ? "采集未启用" : data.collection.dropped_since_restart || data.collection.write_errors_since_restart ? "采集有缺口" : "采集已启用"}</span>}
         <button className="admin-refresh" disabled={loading} onClick={() => setRevision(v => v + 1)}><RefreshCw size={15} className={loading ? "admin-spinning" : undefined} />{loading ? "加载中…" : "刷新数据"}</button>
       </div>
     </header>
-    <div className="admin-toolbar">
+    <div className="admin-view-bar">
+      <nav className="admin-view-nav" aria-label="运行看板分区">
+        {views.map(({ id, label, icon: Icon }) => <button key={id} type="button"
+          aria-current={view === id ? "page" : undefined} onClick={() => setView(id)}><Icon size={16} />{label}</button>)}
+      </nav>
+      {view === "overview" && timeRange}
+    </div>
+    {view === "users" ? <AdminUsers key={userId} revision={revision} onForbidden={rejectAccess} /> : <>
+    {diagnostics && <div className="admin-toolbar">
       <div role="tablist" aria-label="采集来源" className="admin-tabs">{(["server", "browser"] as const).map(source =>
         <button key={source} role="tab" aria-selected={filters.source === source} onClick={() => update({ source, operation: "", model: "", release: "", outcome: "" })}>{source === "server" ? "后端调用" : "浏览器体验"}</button>)}</div>
-      <label>时间范围<select value={filters.hours} onChange={e => update({ hours: Number(e.target.value) })}><option value={24}>近 24 小时</option><option value={168}>近 7 天</option><option value={336}>近 14 天</option></select></label>
+      {timeRange}
       <label className="admin-operation">业务操作<select value={filters.operation} onChange={e => update({ operation: e.target.value })}><option value="">所有操作（混合样本）</option>{operationOptions.map(op => <option key={op} value={op}>{names[op] ?? op}</option>)}</select></label>
       {filters.source === "server" && <label>模型<select aria-label="模型" value={filters.model} onChange={e => update({ model: e.target.value })}><option value="">全部</option>{(data?.facets?.models ?? []).map(m => <option key={m}>{m}</option>)}</select></label>}
       <label>发布版本<select value={filters.release} onChange={e => update({ release: e.target.value })}><option value="">全部</option>{(data?.facets?.releases ?? []).map(r => <option key={r} value={r}>{r === "unknown" ? "未提供版本" : r.slice(0, 10)}</option>)}</select></label>
-    </div>
-    <div className="admin-scope-caption"><span>{filters.operation ? names[filters.operation] ?? filters.operation : "全部业务概览"}{!filters.operation && " · 性能比较请先选同一种操作"}</span><span>{updatedAt ? `概览更新于 ${date(updatedAt)}` : "仅展示已采集的真实记录"}</span></div>
-    <p className="admin-perspective">{filters.source === 'server'
+    </div>}
+    <div className="admin-scope-caption"><span>{filters.operation ? names[filters.operation] ?? filters.operation : "全部业务概览"}{diagnostics && !filters.operation && " · 性能比较请先选同一种操作"}</span><span>{updatedAt ? `概览更新于 ${date(updatedAt)}` : "仅展示已采集的真实记录"}</span></div>
+    {diagnostics && <p className="admin-perspective">{filters.source === 'server'
       ? '服务端视角：接口收到请求至响应结束，看业务处理、模型调用和错误。「模型 / 类型」只在大模型调用时显示具体模型；读取、语音、写入和删除分别标为对应类型，只有 AI 调用缺失模型时才显示「AI 调用未记录」。'
-      : '用户端视角：记录识别收尾、说完至首声、播放完成，包含网络、队列与播放等待。浏览器样本不提供后端模型或 Token，因此隐藏模型与费用区。'}</p>
+      : '用户端视角：记录识别收尾、说完至首声、播放完成，包含网络、队列与播放等待。浏览器样本不提供后端模型或 Token，因此隐藏模型与费用区。'}</p>}
     {error && <p className="admin-notice" role="alert">{error}</p>}
     {overviewError && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{overviewError}</span><button onClick={() => setRevision(v => v + 1)}>重试</button></p>}
     {overviewLoading && !data && <p className="admin-loading" role="status">正在读取运行概览…</p>}
@@ -211,16 +231,26 @@ export default function Admin() {
       {filters.source === "browser" && <p className="admin-notice">浏览器上报可能缺失或被修改，独立于后端成功率与 Token 计量。朗读任务首声含等待文字与音频准备，不含之前的识别；整轮首声从检测到说话结束起计。</p>}
       {(!data.collection.active || data.collection.dropped_since_restart > 0 || data.collection.write_errors_since_restart > 0) && <p className="admin-notice" role="status">采集存在缺口：本进程启动后丢弃 {data.collection.dropped_since_restart} 条，写入失败 {data.collection.write_errors_since_restart} 次。{!data.collection.active && "采集未启用。"}</p>}
       {data.collection.at_capacity && <p className="admin-notice">此来源已达到 {data.collection.source_budget?.toLocaleString()} 条保留上限，时间窗可能不完整。以下统计基于当前保留记录。</p>}
-      {data.visitors?.at_capacity && <p className="admin-notice">访客记录达到 {data.visitors.max_records.toLocaleString()} 条独立保留上限，UV 可能低于实际。</p>}
-      {data.visitors && !data.visitors.enabled && <p className="admin-notice">访客采集未启用，已有计数仅代表保留的历史访问。</p>}
       <section className="admin-metrics" aria-label="运行指标">
-        <article title="公开页面未登录浏览器去重；仅受时间范围影响。换浏览器或清除站点数据可能重复计数。"><span><Users size={16} />未登录访客 UV</span><strong>{number(data.visitors?.guest_uv ?? null)}</strong><small>按浏览器 · 排除管理员</small></article>
-        <article title="公开页面活跃账号去重；同账号多设备合并。登录前后可与游客 UV 重叠，不相加为总人数。"><span><UserRound size={16} />登录活跃用户</span><strong>{number(data.visitors?.registered_active ?? null)}</strong><small>按账号 · 排除管理员</small></article>
         <article><span><Activity size={16} />{filters.source === "server" ? "保留请求数" : "上报样本"}</span><strong>{number(data.count)}</strong><small>保留 {data.collection.retention_days} 天 · {data.collection.cleanup?.active ? '自动清理' : '写入时清理'}</small></article>
         <article><span><ShieldCheck size={16} />{filters.source === "server" ? "请求成功率" : "正常上报样本"}</span><strong>{filters.source === "browser" ? number(data.count - data.errors - data.timeouts - data.cancelled) : data.success_rate == null ? "—" : `${(data.success_rate * 100).toFixed(1)}%`}</strong><small>{filters.source === "server" ? `取消 ${data.cancelled} 次排除` : "端侧自报，独立于后端成功数"}</small></article>
         <article><span><Clock3 size={16} />P95 总耗时</span><strong>{ms(data.latency.p95)}</strong><small>P50 {ms(data.latency.p50)} · P99 {ms(data.latency.p99)}</small></article>
-        <article className={`${data.errors + data.timeouts ? "admin-metric-alert" : ""}${data.errors + data.timeouts ? " admin-failure-card" : ""}`} onClick={data.errors + data.timeouts ? showFailures : undefined} onKeyDown={event => { if ((data.errors + data.timeouts) && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); showFailures(); } }} role={data.errors + data.timeouts ? "button" : undefined} tabIndex={data.errors + data.timeouts ? 0 : undefined} title={data.errors + data.timeouts ? "查看失败调用及具体错误" : undefined}><span><TriangleAlert size={16} />失败 / 超时</span><strong>{number(data.errors + data.timeouts)}</strong><div className="admin-issue-actions"><button aria-pressed={filters.outcome === "error"} onClick={event => { event.stopPropagation(); update({ outcome: "error" }); }}>失败 {data.errors}</button><button aria-pressed={filters.outcome === "timeout"} onClick={event => { event.stopPropagation(); update({ outcome: "timeout" }); }}>超时 {data.timeouts}</button>{data.errors + data.timeouts > 0 && <button type="button" className="admin-failure-arrow" aria-label="查看失败调用" onClick={event => { event.stopPropagation(); showFailures(); }}><ArrowRight size={14} /></button>}</div></article>
+        <article className={data.errors + data.timeouts ? "admin-metric-alert" : undefined}>
+          <span><TriangleAlert size={16} />{filters.source === "server" ? "失败 / 超时" : "异常样本"}</span>
+          <strong>{number(data.errors + data.timeouts)}</strong>
+          <div className="admin-issue-actions">
+            <button aria-pressed={filters.outcome === "error"} onClick={() => filterOutcome("error")}>失败 {data.errors}</button>
+            <button aria-pressed={filters.outcome === "timeout"} onClick={() => filterOutcome("timeout")}>超时 {data.timeouts}</button>
+            {data.errors + data.timeouts > 0 && <button type="button" className="admin-failure-shortcut" aria-label="查看失败调用"
+              onClick={() => filterOutcome(data.errors > 0 ? "error" : "timeout", true)}><ArrowRight size={14} /></button>}
+          </div>
+        </article>
       </section>
+      {!diagnostics && data.experience && <ExperienceOverview experience={data.experience}
+        onPlaybackDetails={() => {
+          update({ source: "browser", operation: "speech.complete", model: "", release: "", outcome: "" });
+          setView("diagnostics");
+        }} />}
       <section className={`admin-panels${filters.source === "browser" ? " admin-panels-single" : ""}`}>
         <article className="admin-panel admin-trend"><div className="admin-panel-heading"><h2>耗时趋势</h2><span>每小时 P95 · 按业务分别统计</span></div>
           {data.trend.length ? <EChart height={176} option={chart} /> : <div className="admin-chart-empty"><Clock3 size={23} /><strong>当前筛选还没有耗时样本</strong><span>可调整业务或时间范围；采集到真实请求后展示趋势。</span></div>}
@@ -238,16 +268,7 @@ export default function Admin() {
         </article>}
       </section>
     </>}
-    <section className="admin-panel admin-users" aria-label="注册用户">
-      <div className="admin-panel-heading"><h2><Users size={16} />注册用户</h2><code className="admin-model-name">{users.length}</code></div>
-      <p className="admin-panel-note">只列出注册账号；游客按设备隔离且只保留哈希计数，无法反查身份。</p>
-      {!usersLoaded ? <p className="admin-loading" role="status">正在读取用户…</p> : usersError ? <p className="admin-empty">用户列表加载失败，请重试。<button type="button" onClick={() => { setUsersLoaded(false); setUsersRevision(value => value + 1); }}>重试</button></p> : users.length === 0 ? <p className="admin-empty">暂无注册用户。</p> : (
-        <div className="admin-table-wrap"><table><thead><tr><th>账号</th><th>最近活动 · 北京</th><th>练习</th><th>生词</th><th>跟读/问答</th></tr></thead><tbody>
-          {users.map(item => <tr key={item.id}><td><strong>{item.display_name || "未命名"}</strong><small>{item.email}</small></td><td>{item.last_active ? date(item.last_active) : "未活动"}</td><td>{item.sessions}</td><td>{item.words}</td><td>{item.practice}</td></tr>)}
-        </tbody></table></div>
-      )}
-    </section>
-    <section className="admin-panel admin-traces" aria-label="调用记录">
+    {diagnostics && <section className="admin-panel admin-traces" aria-label="调用记录">
       <div className="admin-panel-heading"><h2>调用记录 <span>{total} 条</span></h2><form className="admin-trace-lookup" onSubmit={event => {
         event.preventDefault(); const id = traceLookup.trim().toLowerCase();
         if (!/^[a-f0-9]{32}$/.test(id)) { setError("请输入 32 位十六进制 Trace ID。"); return; }
@@ -262,12 +283,49 @@ export default function Admin() {
         {!rows.length && <tr><td colSpan={filters.source === "server" ? 7 : 5} className="admin-empty">{listLoading ? "正在读取调用记录…" : listError ? "列表读取失败，可点击上方重试。" : "暂无调用记录。可切换业务操作、状态或时间范围；这里不会生成演示数据。"}</td></tr>}
       </tbody></table></div>
       <div className="admin-pagination"><span>{listLoading ? "列表更新中 · " : ""}第 {total ? offset + 1 : 0}–{Math.min(offset + rows.length, total)} 条 / {total} · 状态筛选仅影响列表</span><div><button aria-label="上一页" disabled={listLoading || offset === 0} onClick={() => setOffset(v => Math.max(0, v - 50))}><ArrowLeft size={15} /></button><button aria-label="下一页" disabled={listLoading || offset + 50 >= total} onClick={() => setOffset(v => v + 50)}><ArrowRight size={15} /></button></div></div>
-    </section>
+    </section>}
     {data && <footer className="admin-footnote"><ShieldCheck size={13} /><div>UTC 记录 · 北京时间展示 · 保留策略 {data.collection.retention_days} 天 / {data.collection.max_records.toLocaleString()} 条 · {data.collection.oldest_at ? `最早保留 ${date(data.collection.oldest_at)}` : "暂无保留数据"}
       {data.collection.cleanup?.active && <p>启动、每 {data.collection.cleanup.interval_seconds / 3600} 小时及写入时自动清理；实例休眠后在下次启动补清理。上次成功 {data.collection.cleanup.last_success_at ? date(data.collection.cleanup.last_success_at) : '尚未完成'}。{data.collection.cleanup.failures_since_restart > 0 && `本进程清理失败 ${data.collection.cleanup.failures_since_restart} 次。`}</p>}
-      <p>访客仅受时间范围影响，{data.visitors?.started_at ? `自 ${date(data.visitors.started_at)} 开始采集` : '尚未开始采集'}；浏览器与账号口径可重叠，未采集历史无法补算。分位数基于保留样本，历史失败保留供追踪。</p></div></footer>}
+      <p>分位数基于保留样本，历史失败保留供追踪。</p></div></footer>}
     {detail && <TraceDetail detail={detail} onInspect={id => void inspect(id)} onClose={() => { detailController.current?.abort(); setDetail(null); }} />}
+    </>}
   </main>;
+}
+
+const stageNames: Record<string, string> = {
+  "model.first_text": "模型请求至首段文本",
+  "chat.first_text": "浏览器请求至首段文本",
+  "chat.complete": "浏览器请求至全文返回",
+  "speech.request_to_audio": "提交至播放开始回调",
+};
+
+function ExperienceOverview({ experience, onPlaybackDetails }: { experience: AdminExperience; onPlaybackDetails: () => void }) {
+  const { stages, playback } = experience;
+  const samples = playback.completed + playback.failed + playback.cancelled;
+  const recoveryResults = playback.recovered + playback.recovery_failed + playback.recovery_cancelled;
+  return <div className="admin-experience-grid">
+    <section className="admin-panel" aria-label="新对话等待">
+      <div className="admin-panel-heading"><h2><Clock3 size={16} />新对话等待</h2><span>流式场景对话</span></div>
+      <div className="admin-table-wrap"><table><thead><tr><th scope="col">计时区间</th><th scope="col">P50</th><th scope="col">P95</th><th scope="col">样本</th></tr></thead>
+        <tbody>{stages.map(stage => <tr key={stage.operation}>
+          <td>{stageNames[stage.operation] ?? stage.operation}</td><td>{ms(stage.p50)}</td><td>{ms(stage.p95)}</td><td>{number(stage.samples)}</td>
+        </tr>)}</tbody>
+      </table></div>
+      <p className="admin-panel-caption">各行按成功采集的样本分别计算，起点和覆盖范围不同。播放开始取浏览器回调，各段分位数不累加。</p>
+    </section>
+    <section className="admin-panel" aria-label="语音播放结果">
+      <div className="admin-panel-heading"><h2>语音播放结果</h2><button className="admin-inline-link" onClick={onPlaybackDetails}>查看记录 <ArrowRight size={14} /></button></div>
+      <dl className="admin-voice-summary">
+        <div><dt>播放完成</dt><dd>{samples ? number(playback.completed) : "—"}</dd></div>
+        <div><dt>播放失败</dt><dd>{samples ? number(playback.failed) : "—"}</dd></div>
+        <div><dt>回退后完成</dt><dd>{recoveryResults ? number(playback.recovered) : "—"}</dd></div>
+        <div><dt>回退后失败</dt><dd>{recoveryResults ? number(playback.recovery_failed) : "—"}</dd></div>
+      </dl>
+      <p className="admin-panel-caption">{samples
+        ? `${number(samples)} 条播放结果，取消 ${number(playback.cancelled)} 条。${playback.classified ? `有启动状态的 ${number(playback.classified)} 条中，${number(playback.never_started)} 条失败且未启动。` : "尚无新版启动状态样本。"}`
+        : "暂无播放结果样本。"}{recoveryResults > 0 && `回退后取消 ${number(playback.recovery_cancelled)} 条。`} 回退属于播放结果的子集。</p>
+    </section>
+  </div>;
 }
 
 function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onInspect: (id: string) => void; onClose: () => void }) {
@@ -298,7 +356,7 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
     <h3 className="admin-waterfall-title">阶段耗时</h3><p className="admin-waterfall-note">以下阶段共享该端的单调时钟，重叠阶段不累加为总耗时。</p>
     <div className="admin-waterfall">{detail.spans?.length ? detail.spans.map(span => <article key={span.id}><div><strong>{span.name}</strong><span>{ms(span.duration_ms)} · {spanLabels[span.outcome] ?? span.outcome}</span></div>
       <div className="admin-span-track"><i className={span.outcome} style={{ marginLeft: `${Math.min(99, span.offset_ms / Math.max(1, detail.duration_ms) * 100)}%`, width: `${Math.max(0.5, Math.min(100, span.duration_ms / Math.max(1, detail.duration_ms) * 100))}%` }} /></div>
-      <dl>{Object.entries(span.attributes).map(([key, value]) => <div key={key}><dt>{measurementLabels[key] ?? key}</dt><dd>{String(value)}</dd></div>)}</dl>
+      <dl>{Object.entries(span.attributes).map(([key, value]) => <div key={key}><dt>{span.name === "speech.complete" && key === "reason" ? "原音色启动失败原因" : measurementLabels[key] ?? key}</dt><dd>{String(value)}</dd></div>)}</dl>
     </article>) : <p className="admin-empty-spans">此请求没有已采集的子阶段，不据此推测等待位置。</p>}</div>
     <p className="admin-detail-note"><ShieldCheck size={13} />仅保留耗时、状态和白名单元数据，不保存用户问答、音频或凭据。</p>
   </aside>;
