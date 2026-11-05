@@ -248,12 +248,15 @@ it("keeps browser source and operation when filtering failures inside diagnostic
       && url.searchParams.get("operation") === "speech.complete"
       && url.searchParams.get("outcome") === "error")).toBe(true);
   });
+  expect(screen.getByRole("tab", { name: "浏览器体验" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByLabelText("业务操作")).toHaveValue("speech.complete");
+  expect(screen.getByRole("button", { name: /^失败 1$/ })).toHaveAttribute("aria-pressed", "true");
 });
 
 it("resets the diagnostics page when drilling in from overview", async () => {
   const large = { ...overview, count: 100, errors: 1, facets: { ...overview.facets, operations: ["speech.complete"] } };
   fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(
-    String(url).includes("/overview") ? large : { items: [], total: 100 })));
+    String(url).includes("/overview") ? large : { items: [trace], total: 100 })));
   show("diagnostics");
   await waitFor(() => expect(screen.getByRole("button", { name: "下一页" })).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: "下一页" }));
@@ -266,6 +269,29 @@ it("resets the diagnostics page when drilling in from overview", async () => {
     const later = fetcher.mock.calls.slice(before).map(([url]) => new URL(String(url), "http://localhost"));
     expect(later.some(url => url.pathname.endsWith("/admin/traces") && url.searchParams.get("offset") === "0")).toBe(true);
   });
+  expect(await screen.findByText(/第 1–1 条 \/ 100/)).toBeVisible();
+});
+
+it("resets the page for playback drilldown from overview", async () => {
+  const large = { ...overview, count: 100, errors: 1,
+    experience: { stages: [], playback: { completed: 1, failed: 0, cancelled: 0, classified: 0, never_started: 0, recovered: 0, recovery_failed: 0, recovery_cancelled: 0 } },
+    facets: { ...overview.facets, operations: ["speech.complete"] } };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(
+    String(url).includes("/overview") ? large : { items: [trace], total: 100 })));
+  show("diagnostics");
+  await waitFor(() => expect(screen.getByRole("button", { name: "下一页" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => new URL(String(url), "http://localhost").searchParams.get("offset") === "50")).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "运行概览" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "查看记录" })).toBeVisible());
+  const before = fetcher.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "查看记录" }));
+  await waitFor(() => {
+    const later = fetcher.mock.calls.slice(before).map(([url]) => new URL(String(url), "http://localhost"));
+    expect(later.some(url => url.pathname.endsWith("/admin/traces") && url.searchParams.get("offset") === "0"
+      && url.searchParams.get("operation") === "speech.complete")).toBe(true);
+  });
+  expect(await screen.findByText(/第 1–1 条 \/ 100/)).toBeVisible();
 });
 
 it("clears the old release query when a known release refreshes to unknown", async () => {
