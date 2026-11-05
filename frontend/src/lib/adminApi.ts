@@ -23,6 +23,10 @@ export interface AdminOverview {
   collection: { active: boolean; retention_days: number; max_records: number; source_budget?: number; at_capacity?: boolean; oldest_at: string | null; dropped_since_restart: number; write_errors_since_restart: number;
     cleanup?: { active: boolean; interval_seconds: number; last_success_at: string | null; failures_since_restart: number } };
 }
+export interface AdminUser {
+  id: number; email: string; display_name: string; created_at: string; last_active: string | null;
+  sessions: number; words: number; practice: number;
+}
 export interface AdminTrace {
   interaction_id?: string | null; related?: AdminTrace[];
   trace_id: string; started_at: string; operation: string; source: string; outcome: string;
@@ -58,3 +62,4 @@ export const getAdminTraces = (filters: AdminFilters, offset: number, slow: bool
   return read<{ items: AdminTrace[]; total: number }>(`/traces?${params}`, signal);
 };
 export const getAdminTrace = (id: string, signal?: AbortSignal) => read<AdminTrace>(`/traces/${encodeURIComponent(id)}`, signal);
+export const getAdminUsers = (signal?: AbortSignal) => read<{ items: AdminUser[]; registered: number; note: string }>(`/users`, signal);

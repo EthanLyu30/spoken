@@ -80,6 +80,21 @@ def test_out_of_order_visit_updates_preserve_first_and_last_seen(client):
         assert row.first_seen_at == now - timedelta(seconds=5)
 
 
+def test_admin_user_list_returns_accounts_but_not_admin_identity(client):
+    owner = account(client, admin=True)
+    ordinary = account(client)
+    ordinary_user = client.get('/api/auth/me', headers=ordinary).json()
+    response = client.get('/api/admin/users', headers=owner)
+    assert response.status_code == 200
+    body = response.json()
+    emails = {item['email'] for item in body['items']}
+    assert ordinary_user['email'] in emails
+    assert not ordinary_user.get('is_admin')
+    assert body['registered'] == len(body['items'])
+    assert '访客' in body['note']
+    assert client.get('/api/admin/users', headers=ordinary).status_code == 403
+
+
 def test_guest_visits_deduplicate_without_exposing_identity(client):
     from app.models.monitoring import SiteVisit
     reset_visits()

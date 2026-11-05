@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useAuth } from "../store/auth";
 import Admin from "./Admin";
+import { modelLabel } from "../lib/adminFormatting";
 import { setToken, clearToken } from "../lib/authToken";
 
 vi.mock("../components/EChart", () => ({ EChart: () => null }));
@@ -17,7 +18,7 @@ const monitoring = {
   pricing: { configured_model: 'deepseek-flash', official_version: 'DeepSeek-V4.1-Flash-1017', checked_at: '2026-10-31', source_url: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing/', currency: 'CNY', per_tokens: 1000000,
     rates: { input_hit: [.02, .04], input_miss: [1, 2], output: [4, 8] }, model_records: 3, priced_records: 2, unknown_usage_records: 1, unpriced_records: 0, min_cny: .002, max_cny: .006 },
 };
-const trace = { trace_id: "a".repeat(32), started_at: "2026-10-30T02:00:00Z", source: "server", operation: "POST /api/chat/stream", outcome: "ok", duration_ms: 1200, ttft_ms: 250, model: "deepseek-flash", input_tokens: 20, output_tokens: 10, release: "qa", spans: [{ id: "b".repeat(16), parent_id: null, name: "deepseek.stream", offset_ms: 50, duration_ms: 1100, outcome: "ok", attributes: { provider: "deepseek" } }] };
+const trace = { trace_id: "a".repeat(32), started_at: "2026-10-30T02:00:00Z", source: "server", operation: "POST /api/chat/stream", outcome: "ok", duration_ms: 1200, http_status: 200, ttft_ms: 250, model: "deepseek-flash", input_tokens: 20, output_tokens: 10, release: "qa", spans: [{ id: "b".repeat(16), parent_id: null, name: "deepseek.stream", offset_ms: 50, duration_ms: 1100, outcome: "ok", attributes: { provider: "deepseek" } }] };
 const fetcher = vi.fn();
 function show() { return render(<MemoryRouter><Admin /></MemoryRouter>); }
 beforeEach(() => {
@@ -27,6 +28,13 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetcher);
 });
 afterEach(() => { vi.unstubAllGlobals(); fetcher.mockReset(); clearToken(); useAuth.setState({ user: null }); });
+
+it("labels non-model operations by type instead of claiming a missing model", () => {
+  expect(modelLabel({ ...trace, operation: "DELETE /api/words/{word_id}", model: null })).toBe("数据删除");
+  expect(modelLabel({ ...trace, operation: "POST /api/telemetry/visit", model: null })).toBe("非模型调用");
+  expect(modelLabel({ ...trace, operation: "POST /api/hint", model: null })).toBe("AI 调用未记录");
+  expect(modelLabel({ ...trace, operation: "POST /api/chat/stream", model: "deepseek-flash" })).toBe("deepseek-flash");
+});
 
 it("does not load private data for guests or ordinary accounts", () => {
   useAuth.setState({ user: { ...user, is_admin: false } });

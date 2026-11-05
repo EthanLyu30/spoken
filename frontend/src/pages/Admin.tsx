@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 import { Activity, ArrowLeft, ArrowRight, Clock3, Database, RefreshCw, Search, ShieldCheck, TriangleAlert, Users, UserRound, X } from "lucide-react";
 import { useAuth } from "../store/auth";
 import { EChart } from "../components/EChart";
-import { referenceCost } from '../lib/adminFormatting';
-import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, type AdminFilters, type AdminOverview, type AdminTrace } from "../lib/adminApi";
+import { modelLabel, referenceCost } from '../lib/adminFormatting';
+import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, getAdminUsers, type AdminFilters, type AdminOverview, type AdminTrace, type AdminUser } from "../lib/adminApi";
 import "../admin.css";
 
 const defaults: AdminFilters = { hours: 24, source: "server", operation: "", model: "", release: "", outcome: "" };
@@ -40,24 +40,25 @@ const ms = (n: number | null | undefined) => n == null ? "—" : n >= 1000 ? `${
 const number = (n: number | null) => n == null ? "—" : n.toLocaleString("zh-CN");
 const date = (s: string) => new Date(s).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const forbidden = (err: unknown) => err instanceof AdminApiError && (err.status === 401 || err.status === 403);
-const dataOperations = new Set(['GET /api/stats', 'GET /api/words', 'GET /api/sessions', 'GET /api/practice', 'GET /api/interview/sets', 'GET /api/progress/sessions', 'GET /api/sessions/{session_id}']);
-const voiceOperation = /(^|\/)(asr|pronunciation|tts)(\/|$)/i;
-const modelLabel = (trace: AdminTrace) => {
-  if (trace.model && !trace.model.startsWith('unknown')) return trace.model;
-  if (trace.source === 'browser') return '浏览器端';
-  if (trace.operation === 'GET /api/scenario-suggestion') return 'AI 场景生成';
-  if (dataOperations.has(trace.operation) || trace.operation.startsWith('GET /api/')) return '数据读取';
-  if (voiceOperation.test(trace.operation)) return '语音引擎';
-  if (trace.operation === 'POST /api/sessions' || trace.operation === 'POST /api/practice') return '数据写入';
-  return '模型未记录';
-};
-
 export default function Admin() {
   const user = useAuth(s => s.user);
   const [filters, setFilters] = useState<AdminFilters>(defaults);
   const [data, setData] = useState<AdminOverview | null>(null);
   const [rows, setRows] = useState<AdminTrace[]>([]);
   const [total, setTotal] = useState(0);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [usersLoaded, setUsersLoaded] = useState(false);
+  const [usersError, setUsersError] = useState(false);
+  const [usersRevision, setUsersRevision] = useState(0);
+  const hasOverviewData = data !== null;
+  useEffect(() => {
+    if (!user?.is_admin || !hasOverviewData) return;
+    const ctrl = new AbortController();
+    void getAdminUsers(ctrl.signal)
+      .then(data => { if (!ctrl.signal.aborted) { setUsers(Array.isArray(data.items) ? data.items : []); setUsersError(false); setUsersLoaded(true); } })
+      .catch(() => { if (!ctrl.signal.aborted) { setUsersError(true); setUsersLoaded(true); } });
+    return () => ctrl.abort();
+  }, [user?.is_admin, hasOverviewData, usersRevision]);
   const [offset, setOffset] = useState(0);
   const [slow, setSlow] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -201,7 +202,7 @@ export default function Admin() {
     </div>
     <div className="admin-scope-caption"><span>{filters.operation ? names[filters.operation] ?? filters.operation : "全部业务概览"}{!filters.operation && " · 性能比较请先选同一种操作"}</span><span>{updatedAt ? `概览更新于 ${date(updatedAt)}` : "仅展示已采集的真实记录"}</span></div>
     <p className="admin-perspective">{filters.source === 'server'
-      ? '服务端视角：接口收到请求至响应结束，看业务处理、模型调用和错误。模型列只对实际调用大模型的请求显示；读取和语音接口分别标为数据读取 / 语音引擎。'
+      ? '服务端视角：接口收到请求至响应结束，看业务处理、模型调用和错误。「模型 / 类型」只在大模型调用时显示具体模型；读取、语音、写入和删除分别标为对应类型，只有 AI 调用缺失模型时才显示「AI 调用未记录」。'
       : '用户端视角：记录识别收尾、说完至首声、播放完成，包含网络、队列与播放等待。浏览器样本不提供后端模型或 Token，因此隐藏模型与费用区。'}</p>
     {error && <p className="admin-notice" role="alert">{error}</p>}
     {overviewError && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{overviewError}</span><button onClick={() => setRevision(v => v + 1)}>重试</button></p>}
@@ -237,6 +238,15 @@ export default function Admin() {
         </article>}
       </section>
     </>}
+    <section className="admin-panel admin-users" aria-label="注册用户">
+      <div className="admin-panel-heading"><h2><Users size={16} />注册用户</h2><code className="admin-model-name">{users.length}</code></div>
+      <p className="admin-panel-note">只列出注册账号；游客按设备隔离且只保留哈希计数，无法反查身份。</p>
+      {!usersLoaded ? <p className="admin-loading" role="status">正在读取用户…</p> : usersError ? <p className="admin-empty">用户列表加载失败，请重试。<button type="button" onClick={() => { setUsersLoaded(false); setUsersRevision(value => value + 1); }}>重试</button></p> : users.length === 0 ? <p className="admin-empty">暂无注册用户。</p> : (
+        <div className="admin-table-wrap"><table><thead><tr><th>账号</th><th>最近活动 · 北京</th><th>练习</th><th>生词</th><th>跟读/问答</th></tr></thead><tbody>
+          {users.map(item => <tr key={item.id}><td><strong>{item.display_name || "未命名"}</strong><small>{item.email}</small></td><td>{item.last_active ? date(item.last_active) : "未活动"}</td><td>{item.sessions}</td><td>{item.words}</td><td>{item.practice}</td></tr>)}
+        </tbody></table></div>
+      )}
+    </section>
     <section className="admin-panel admin-traces" aria-label="调用记录">
       <div className="admin-panel-heading"><h2>调用记录 <span>{total} 条</span></h2><form className="admin-trace-lookup" onSubmit={event => {
         event.preventDefault(); const id = traceLookup.trim().toLowerCase();
@@ -247,7 +257,7 @@ export default function Admin() {
         <select aria-label="调用状态" value={filters.outcome} onChange={e => update({ outcome: e.target.value })}><option value="">全部状态</option>{Object.entries(labels).map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select>
       </div></div>
       {listError && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{listError}</span><button onClick={() => setRevision(v => v + 1)}>重试</button></p>}
-      <div className="admin-table-wrap" aria-busy={listLoading}><table><thead><tr><th>时间 · 北京</th><th>业务操作</th><th>状态</th><th>耗时</th>{filters.source === "server" && <><th>模型</th><th>费用参考</th></>}<th>Trace</th></tr></thead><tbody>
+      <div className="admin-table-wrap" aria-busy={listLoading}><table><thead><tr><th>时间 · 北京</th><th>业务操作</th><th>状态</th><th>耗时</th>{filters.source === "server" && <><th>模型 / 类型</th><th>费用参考</th></>}<th>Trace</th></tr></thead><tbody>
         {rows.map(row => <tr key={row.trace_id} data-outcome={row.outcome}><td><time dateTime={row.started_at}>{date(row.started_at)}</time></td><td className="admin-operation-cell"><strong>{names[row.operation] ?? row.operation}</strong><small>版本 {row.release === "unknown" ? "未提供" : row.release.slice(0, 10)}</small></td><td><span className={`admin-badge ${row.outcome}`}>{labels[row.outcome] ?? row.outcome}</span></td><td className="admin-duration">{ms(row.duration_ms)}</td>{filters.source === "server" && <><td>{modelLabel(row)}</td><td className="admin-row-cost" title="按已采集用量与公开单价参考；未计价不代表零费用">{referenceCost(row.cost_min_cny, row.cost_max_cny)}</td></>}<td><button aria-label={`查看调用 ${row.trace_id.slice(0, 8)}`} onClick={() => void inspect(row.trace_id)}>{row.trace_id.slice(0, 8)} <ArrowRight size={14} /></button></td></tr>)}
         {!rows.length && <tr><td colSpan={filters.source === "server" ? 7 : 5} className="admin-empty">{listLoading ? "正在读取调用记录…" : listError ? "列表读取失败，可点击上方重试。" : "暂无调用记录。可切换业务操作、状态或时间范围；这里不会生成演示数据。"}</td></tr>}
       </tbody></table></div>
@@ -273,7 +283,7 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
   return <aside className="admin-detail" aria-label="调用详情"><header><div><span className="admin-eyebrow">调用详情</span><h2>{names[detail.operation] ?? detail.operation}</h2></div><button aria-label="关闭调用详情" onClick={onClose}><X size={20} /></button></header>
     <div className="admin-detail-status"><span className={`admin-badge ${detail.outcome}`}>{labels[detail.outcome] ?? detail.outcome}</span><time dateTime={detail.started_at}>{date(detail.started_at)}</time></div>
     <code className="admin-trace-id">{detail.trace_id}</code>
-    <div className="admin-trace-root"><div><span>总耗时</span><strong>{ms(detail.duration_ms)}</strong></div>{detail.source === "server" && <div><span>模型</span><b>{modelLabel(detail)}</b></div>}</div>
+    <div className="admin-trace-root"><div><span>总耗时</span><strong>{ms(detail.duration_ms)}</strong></div>{detail.source === "server" && <div><span>模型 / 类型</span><b>{modelLabel(detail)}</b></div>}</div>
     {detail.source === "server" && <p className="admin-detail-cost">费用参考：{referenceCost(detail.cost_min_cny, detail.cost_max_cny)}<small>依据当前公开价与已知用量区间，未计价不代表零费用。</small></p>}
     <dl className="admin-detail-meta"><div><dt>采集来源</dt><dd>{detail.source === "browser" ? "浏览器上报" : "后端请求"}</dd></div><div><dt>响应</dt><dd>{detail.source === "browser" ? "不适用 HTTP 状态" : detail.http_status == null ? "HTTP 状态未采集" : `HTTP ${detail.http_status}`}</dd></div><div><dt>发布版本</dt><dd>{detail.release === "unknown" ? "未提供版本" : detail.release.slice(0, 12)}</dd></div>{detail.source === "server" && <div><dt>模型首文本</dt><dd>{ms(detail.ttft_ms)}</dd></div>}</dl>
     {failed && <section className="admin-failure-context"><h3><TriangleAlert size={16} />失败线索</h3>
