@@ -41,7 +41,7 @@
 
 ### 验证
 
-- 前端全量 **547 passed**；后端全量 **638 passed**；TypeScript / ESLint / 生产构建通过。
+- 前端全量 **549 passed**；后端全量 **638 passed**；TypeScript / ESLint / 生产构建通过。
 - 前端 `Admin.test.tsx` 覆盖：当前后端版本默认、全部保留、历史测试版本、未知版本、当前发布空状态、钻取时版本保留。
 - 后端 `test_experience_uses_server_and_browser_releases_independently` 覆盖：后端版本和前端版本不同，模型阶段只取后端版本，浏览器阶段只取前端版本。
 - 现有鉴权、14 天保留策略不变。
@@ -143,11 +143,14 @@ Edge：
 
 - [Chrome #2 与 #5 的 asr/chat/native 事件](evidence/2026-11-05-chrome-asr-traces.json)
 
-对账结果：
+先更正上一版的口径：这些 Trace 的 `started_at` 是**后端收到上报的时间**，不是浏览器单调时钟。不能据此计算流式收尾、整段重试之间的真实间隔，也不能用“相差 3ms”证明重叠。
 
-- **Chrome #2**：`asr.transcribe` 为 `transport=direct`，总耗时 **6327.9ms**；`asr.finalize` **132.8ms** 与其几乎同时开始（相差 3ms），是其内部收尾，不是 6.3s 之外再串行 0.13s。聊天首段在 6.33s 后才开始。
-- **Chrome #5**：`asr.finalize` 先失败，耗时 **5010.8ms**；约 0.96s 后启动 `transport=buffered` 的整段识别，耗时 **5987.1ms**；两段是**串行**，合计约 **11.0s**，聊天首段才在之后出现。
-- 结论：长尾主要是“先等流式 finalize，失败后再整段重试”。下一轮应先拆流式收尾、整段重试和 HTTP 回退，判断是否可以更早切换或并行准备；本轮不改识别逻辑。
+可以确认的是：
+
+- **Chrome #2**：`asr.transcribe` 的 `transport=direct`，持续时间 **6327.9ms**；`asr.finalize` 持续时间 **132.8ms**。两段的先后/嵌套关系仍需浏览器单调时钟对账。
+- **Chrome #5**：`asr.finalize` 结果为 error，持续时间 **5010.8ms**；同轮另有 `transport=buffered` 的 `asr.transcribe`，持续时间 **5987.1ms**。两段耗时合计约 **11.0s**；代码路径是先等流式收尾失败再走整段识别，但真实间隔不能由后端接收时间证明。
+- 下一轮必须在**同一 interaction ID** 下用浏览器单调时钟记录三段：流式收尾、整段重试、HTTP 回退；再做同条件优化前后对照。
+- 验收还要确认：转写完整、不重复发送、不完整识别仍需用户确认。
 
 ### Edge 通话第 5 条证据
 
