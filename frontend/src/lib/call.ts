@@ -12,6 +12,7 @@ import { createCaptureProcessor, type CaptureProcessor } from "./audioCapture";
 import { bindInteraction, newInteractionId, reportTiming } from "./telemetry";
 import { assertAuthGeneration, getAuthGeneration, subscribeAuthGeneration } from "./authToken";
 import { asrTurnBudgetMs } from "./transcribe";
+import { ASR_QUOTA_MESSAGE, isAsrQuotaError } from "./asrQuota";
 
 export type CallPhase = "listening" | "thinking" | "speaking";
 
@@ -196,7 +197,8 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
         streamAttempted = true;
         try {
           text = (await asr.finishUtterance()).trim();
-        } catch {
+        } catch (error) {
+          if (isAsrQuotaError(error)) throw error;
           streamFailed = true;
         }
       }
@@ -223,9 +225,9 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
           cb.onPhase("speaking");
         }, signal);
       } else outcome = signal.aborted || ended ? "cancelled" : "error";
-    } catch {
+    } catch (error) {
       outcome = signal.aborted || ended ? "cancelled" : "error";
-      if (!ended && !signal.aborted) cb.onError("这一句没接上，继续说就好～");
+      if (!ended && !signal.aborted) cb.onError(isAsrQuotaError(error) ? ASR_QUOTA_MESSAGE : "这一句没接上，继续说就好～");
     } finally {
       clearTimeout(asrTimer);
       reportTiming("voice.complete", performance.now() - startedAt, { interactionId, outcome: signal.aborted ? "cancelled" : outcome });

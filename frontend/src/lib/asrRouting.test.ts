@@ -5,10 +5,11 @@ vi.mock("./directAsr", () => ({ transcribeDirect: direct.transcribe, openDirectA
 import { postAsr } from "./api";
 import { openAsrStream } from "./asrStream";
 import { MAX_AUDIO_BYTES } from "./audioLimits";
+import { AsrQuotaError, resetAsrQuotaForTest } from "./asrQuota";
 
 describe("cloud ASR routing", () => {
-  beforeEach(() => { direct.transcribe.mockReset(); direct.open.mockReset(); vi.stubGlobal("fetch", vi.fn()); });
-  afterEach(() => vi.unstubAllGlobals());
+  beforeEach(() => { direct.transcribe.mockReset(); direct.open.mockReset(); resetAsrQuotaForTest(); vi.stubGlobal("fetch", vi.fn()); });
+  afterEach(() => { resetAsrQuotaForTest(); vi.unstubAllGlobals(); });
 
   it("uses a successful direct transcript without uploading the recording to the relay", async () => {
     direct.transcribe.mockResolvedValue("complete direct transcript");
@@ -26,6 +27,18 @@ describe("cloud ASR routing", () => {
     expect(await postAsr(pcm, undefined, onTransport)).toBe("complete relay transcript");
     expect(onTransport).toHaveBeenLastCalledWith("buffered");
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/asr"), expect.objectContaining({ body: pcm }));
+  });
+
+  it("stops after an HTTP 11201 quota failure and does not upload again", async () => {
+    direct.transcribe.mockRejectedValue(new Error("network unavailable"));
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ detail: "iFlytek ASR error 11201: licc failed" }), { status: 503 }));
+    const asrFetches = () => vi.mocked(fetch).mock.calls.filter(([url]) => /\/api\/asr$/.test(String(url))).length;
+    await expect(postAsr(new ArrayBuffer(1280))).rejects.toMatchObject({ name: "AsrQuotaError" });
+    expect(asrFetches()).toBe(1);
+    const directCalls = direct.transcribe.mock.calls.length;
+    await expect(postAsr(new ArrayBuffer(1280))).rejects.toMatchObject({ name: "AsrQuotaError" });
+    expect(direct.transcribe).toHaveBeenCalledTimes(directCalls);
+    expect(asrFetches()).toBe(1);
   });
 
   it("does not upload a cancelled utterance to either transport", async () => {
@@ -97,6 +110,14 @@ it("does not treat direct cancellation as a reason to try the relay", async () =
   expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/api/asr"))).toHaveLength(0);
   vi.unstubAllGlobals();
 });
+it("does not open a relay socket after a direct quota failure", async () => {
+  direct.open.mockRejectedValue(new AsrQuotaError());
+  const socket = vi.fn(function () { throw new Error("Unexpected relay socket"); });
+  vi.stubGlobal("WebSocket", socket);
+  await expect(openAsrStream({ onPartial: vi.fn() })).rejects.toMatchObject({ name: "AsrQuotaError" });
+  expect(socket).not.toHaveBeenCalled();
+});
+
 it("keeps same-owner streaming relay fallback available after a direct failure", async () => {
   direct.open.mockRejectedValue(new Error("direct unavailable"));
   const frames: unknown[] = [];

@@ -5,6 +5,7 @@
 import { openDirectAsrStream } from "./directAsr";
 import { getInteraction, measureAsrStream, reportTiming } from "./telemetry";
 import { assertAuthGeneration, getAuthGeneration } from "./authToken";
+import { AsrQuotaError, isAsrQuotaCooling, isAsrQuotaError } from "./asrQuota";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -35,6 +36,7 @@ const cancelledError = () => new DOMException("ASR cancelled", "AbortError");
 export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us", signal?: AbortSignal): Promise<AsrStream> {
   const generation = getAuthGeneration();
   assertAuthGeneration(generation, signal);
+  if (isAsrQuotaCooling()) throw new AsrQuotaError();
   const interactionId = getInteraction(signal);
   const directStarted = performance.now();
   try {
@@ -46,6 +48,7 @@ export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us", 
     });
     return measureAsrStream(stream, "direct", signal);
   } catch (error) {
+    if (isAsrQuotaError(error)) throw error;
     const cancelled = signal?.aborted || generation !== getAuthGeneration() ||
       ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError");
     reportTiming("asr.attempt", performance.now() - directStarted, {

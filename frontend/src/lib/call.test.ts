@@ -10,6 +10,7 @@ vi.mock("./asrStream", () => ({
 
 import { startVoiceCall } from "./call";
 import { getInteraction } from "./telemetry";
+import { ASR_QUOTA_MESSAGE, AsrQuotaError } from "./asrQuota";
 
 interface FakeProcessor {
   onaudioprocess: ((event: AudioProcessingEvent) => void) | null;
@@ -294,6 +295,22 @@ describe("voice call ASR engine boundaries", () => {
     } finally { call.end(); finishFirst(); finishSecond(""); }
   });
 
+  it("does not send a late transcription result after hangup", async () => {
+    let finish: (text: string) => void = () => {};
+    const transcribe = vi.fn(() => new Promise<string>(resolve => { finish = resolve; }));
+    const reply = vi.fn();
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => true, transcribe, reply, onError: vi.fn() });
+    try {
+      pushFrame(0.1); pushFrame(0.1);
+      for (let i = 0; i < 4; i++) pushFrame(0);
+      await vi.waitFor(() => expect(transcribe).toHaveBeenCalledOnce());
+      call.end();
+      finish("late result");
+      await Promise.resolve();
+      expect(reply).not.toHaveBeenCalled();
+    } finally { call.end(); }
+  });
+
   it("releases a microphone which finishes reconnecting after hangup", async () => {
     const first = { onended: null as (() => void) | null, stop: vi.fn() };
     const late = { onended: null, stop: vi.fn() };
@@ -341,6 +358,23 @@ describe("voice call ASR engine boundaries", () => {
       for (let i = 0; i < 4; i++) pushFrame(0);
       await vi.waitFor(() => expect(onError).toHaveBeenCalledOnce());
       expect(transcribe).toHaveBeenCalledOnce();
+    } finally { call.end(); }
+  });
+
+  it("shows the daily quota message without starting another ASR recovery", async () => {
+    const opened = { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn(async () => { throw new AsrQuotaError(); }) };
+    mocks.openAsrStream.mockResolvedValue(opened);
+    const transcribe = vi.fn();
+    const onError = vi.fn();
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => false, transcribe, reply: vi.fn(), onError });
+    try {
+      pushFrame(0.1); pushFrame(0.1);
+      await Promise.resolve();
+      pushFrame(0.1);
+      await vi.waitFor(() => expect(opened.send).toHaveBeenCalled());
+      for (let i = 0; i < 4; i++) pushFrame(0);
+      await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(ASR_QUOTA_MESSAGE));
+      expect(transcribe).not.toHaveBeenCalled();
     } finally { call.end(); }
   });
 

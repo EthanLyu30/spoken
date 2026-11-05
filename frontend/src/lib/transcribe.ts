@@ -3,6 +3,7 @@ import { openAsrStream, type AsrStream } from "./asrStream";
 import { isLocalSpeechModelReady, localSpeechCoordinator } from "./localSpeech/runtime";
 import { useVoice } from "../store/voice";
 import { getInteraction, bindInteraction, reportTiming, type Transport } from "./telemetry";
+import { isAsrQuotaError } from "./asrQuota";
 import { withTimeout } from "./requestTimeout";
 import { assertAuthGeneration, getAuthGeneration } from "./authToken";
 
@@ -106,6 +107,7 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
           if (!text && latest.trim()) throw new IncompleteTranscriptionError(latest.trim());
           return text;
         } catch (error) {
+          if (isAsrQuotaError(error)) throw error;
           if (finishSignal?.aborted || control.signal.aborted ||
               (error instanceof Error && error.name === "AbortError")) throw error;
           // A deploy can close the relay mid-utterance. Prefer the complete

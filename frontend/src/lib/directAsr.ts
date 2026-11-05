@@ -3,6 +3,7 @@ import { getToken, getAuthGeneration, assertAuthGeneration } from "./authToken";
 import { getClientId } from "./clientId";
 import { withTimeout } from "./requestTimeout";
 import { bindInteraction, getInteraction, measureAsrStream, traceHeaders } from "./telemetry";
+import { AsrQuotaError, isAsrQuotaCooling, markAsrQuota } from "./asrQuota";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const FRAME = 1280;
@@ -14,6 +15,7 @@ const cancelledError = () => new DOMException("ASR cancelled", "AbortError");
 export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en_us", signal?: AbortSignal): Promise<AsrStream> {
   const generation = getAuthGeneration();
   assertAuthGeneration(generation, signal);
+  if (isAsrQuotaCooling()) throw new AsrQuotaError();
   if (Date.now() < unavailableUntil) throw new Error("Direct ASR is cooling down");
   try {
     const token = getToken();
@@ -106,7 +108,13 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
         if (cancelled() || retired) return;
         try {
           const message = JSON.parse(String(event.data));
-          if (message.code !== 0) { fail("ASR provider error"); return; }
+          if (message.code !== 0) {
+            if (message.code === 11201) {
+              close(markAsrQuota(typeof message.message === "string" ? message.message : "iFlytek 11201"));
+              return;
+            }
+            fail("ASR provider error"); return;
+          }
           const data = message.data ?? {};
           const result = data.result;
           if (result?.ws?.length) {

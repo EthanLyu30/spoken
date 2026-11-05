@@ -15,6 +15,7 @@ import Conversation from "./Conversation";
 import { bindInteraction, getInteraction } from "../lib/telemetry";
 import type { CallCallbacks } from "../lib/call";
 import { MAX_AUDIO_BYTES } from "../lib/audioLimits";
+import { ASR_QUOTA_MESSAGE, AsrQuotaError } from "../lib/asrQuota";
 afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
   vi.clearAllMocks();
@@ -158,6 +159,19 @@ it("streams push-to-talk audio into ASR instead of replaying the clip after stop
   expect(liveStream.send).toHaveBeenCalled();
   expect(liveStream.finishUtterance).toHaveBeenCalledOnce();
   expect(mocks.postAsr).not.toHaveBeenCalled();
+});
+
+it("shows the daily quota message when recovery cannot recognize", async () => {
+  mocks.openAsrStream.mockRejectedValue(new AsrQuotaError());
+  mocks.postAsr.mockRejectedValue(new AsrQuotaError());
+  mocks.startRecording.mockResolvedValue({ stop: vi.fn().mockResolvedValue(new ArrayBuffer(1280)) });
+  const user = userEvent.setup();
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", { name: "开始录音" }));
+  await user.click(await screen.findByRole("button", { name: "结束录音" }));
+  expect(await screen.findByText(ASR_QUOTA_MESSAGE)).toBeVisible();
+  expect(mocks.streamChat).not.toHaveBeenCalled();
 });
 
 it("keeps incomplete speech editable and never sends it until the learner confirms", async () => {

@@ -14,6 +14,7 @@ import { invalidateProgress, progressGeneration, subscribeProgress } from "./pro
 import { ReadResource } from "./readResource";
 import { traceHeaders, getInteraction, reportTiming } from "./telemetry";
 import { assertAudioWithinLimit } from "./audioLimits";
+import { AsrQuotaError, isAsrQuotaCooling, isAsrQuotaError, markAsrQuota } from "./asrQuota";
 export { withTimeout } from "./requestTimeout";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -346,6 +347,7 @@ export async function postAsr(
   const generation = getAuthGeneration();
   assertAudioWithinLimit(pcm);
   assertAuthGeneration(generation, signal);
+  if (isAsrQuotaCooling()) throw new AsrQuotaError();
   const interactionId = getInteraction(signal);
   let fallbackReason: AsrFallbackReason = "unknown";
   const directStarted = performance.now();
@@ -360,6 +362,7 @@ export async function postAsr(
     });
     return text;
   } catch (error) {
+    if (isAsrQuotaError(error)) throw error;
     fallbackReason = asrFallbackReason(error);
     const cancelled = signal?.aborted || generation !== getAuthGeneration() ||
       ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError");
@@ -381,7 +384,15 @@ export async function postAsr(
       signal: withTimeout(signal, 45_000),
     });
     assertAuthGeneration(generation, signal);
-    if (!res.ok) throw new Error(`asr failed: ${res.status}`);
+    if (!res.ok) {
+      let detail = "";
+      try {
+        const body = await res.clone().json() as { detail?: unknown };
+        detail = typeof body.detail === "string" ? body.detail : "";
+      } catch { /* non-JSON provider error */ }
+      if (res.status === 503 && /11201|licc failed/i.test(detail)) throw markAsrQuota(detail);
+      throw new Error(`asr failed: ${res.status}`);
+    }
     const data = (await res.json()) as { text: string };
     assertAuthGeneration(generation, signal);
     reportTiming("asr.attempt", performance.now() - bufferedStarted, {

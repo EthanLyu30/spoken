@@ -55,6 +55,7 @@ import {
   transcribeSpeech,
   type LiveTranscription,
 } from "../lib/transcribe";
+import { ASR_QUOTA_MESSAGE, isAsrQuotaError } from "../lib/asrQuota";
 import { Buddy, type BuddyMood } from "../components/Buddy";
 import { ChatBubble } from "../components/ChatBubble";
 import { PlayfulBackground } from "../components/PlayfulBackground";
@@ -483,6 +484,8 @@ export default function Conversation() {
             setInput(typedPrefix ? `${typedPrefix} ${error.partialText}` : error.partialText);
             setInputMode("text");
             setError(error.message);
+          } else if (isAsrQuotaError(error)) {
+            setError(ASR_QUOTA_MESSAGE);
           } else {
             setError("语音识别失败，请检查麦克风权限或后端，或直接打字。");
           }

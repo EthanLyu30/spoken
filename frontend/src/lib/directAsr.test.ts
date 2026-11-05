@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetAsrQuotaForTest } from "./asrQuota";
 
 class Socket {
   static OPEN = 1;
@@ -18,11 +19,12 @@ class Socket {
 
 describe("direct cloud ASR transport", () => {
   beforeEach(() => {
+    resetAsrQuotaForTest();
     vi.resetModules(); Socket.instances = [];
     vi.stubGlobal("WebSocket", Socket);
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ url: "wss://iat-api.xfyun.cn/v2/iat?authorization=test", app_id: "public-app" }), { status: 200 })));
   });
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+  afterEach(() => { resetAsrQuotaForTest(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
   async function ready(signal?: AbortSignal, language = "en_us") {
     const { openDirectAsrStream } = await import("./directAsr");
@@ -48,6 +50,15 @@ describe("direct cloud ASR transport", () => {
     socket.result({ status: 1, result: { sn: 1, ws: [{ cw: [{ w: "coffee please" }] }] } });
     socket.result({ status: 2 });
     expect(await final).toBe("coffee please");
+    expect(socket.readyState).toBe(Socket.CLOSED);
+  });
+
+  it("classifies provider code 11201 as a quota failure", async () => {
+    const { stream, socket } = await ready();
+    stream.send(new Uint8Array(1280).fill(1).buffer);
+    const final = stream.finishUtterance();
+    socket.onmessage?.({ data: JSON.stringify({ code: 11201, message: "licc failed" }) });
+    await expect(final).rejects.toMatchObject({ name: "AsrQuotaError" });
     expect(socket.readyState).toBe(Socket.CLOSED);
   });
 
