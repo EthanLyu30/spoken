@@ -48,9 +48,12 @@ export function AdminUsers({ revision, onForbidden }: { revision: number; onForb
   const moveTo = (next: number) => { setLoading(true); setOffset(next); };
   const activation = summary?.activation_24h;
   const activationRate = activation?.eligible ? `${(100 * activation.completed / activation.eligible).toFixed(1)}%` : "—";
-  const maturationNote = activation?.eligible
-    ? `${activation.completed} / ${activation.eligible} 个账号`
-    : summary?.new_7d === 0 ? "近 7 天无新注册，暂无样本" : "新注册账号尚未满 24 小时";
+  let maturationNote = loading ? "正在读取首练数据…" : "首练数据暂不可用";
+  if (activation?.eligible) {
+    maturationNote = `${activation.completed} / ${activation.eligible} 个账号`;
+  } else if (activation && summary) {
+    maturationNote = summary.new_7d === 0 ? "近 7 天无新注册，暂无样本" : "新注册账号尚未满 24 小时";
+  }
   const items = page?.items ?? [];
   const total = page?.total ?? 0;
   const limit = page?.limit ?? 20;

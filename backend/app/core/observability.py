@@ -17,6 +17,11 @@ from starlette.requests import ClientDisconnect
 from app.core.config import get_settings
 from app.core.performance import numeric, server_timing, elapsed
 
+def current_release() -> str:
+    """The commit actually running in this process, never a telemetry guess."""
+    return (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or "unknown")[:80]
+
+
 _current: ContextVar[TraceContext | None] = ContextVar("spoken_trace", default=None)
 _parent: ContextVar[str | None] = ContextVar("spoken_span", default=None)
 _span_data: ContextVar[dict | None] = ContextVar("spoken_span_data", default=None)
@@ -108,7 +113,7 @@ class TraceContext:
                 "input_tokens": sum(m["input_tokens"] for m in models) if complete else None,
                 "output_tokens": sum(m["output_tokens"] for m in models) if complete else None,
                 "model": models[0].get("model") if models else None,
-                "release": os.environ.get("RENDER_GIT_COMMIT", "unknown")[:80],
+                "release": current_release(),
                 "spans_json": json.dumps(snapshots, ensure_ascii=True)}
 
 

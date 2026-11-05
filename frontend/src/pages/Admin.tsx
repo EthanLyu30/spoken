@@ -9,6 +9,10 @@ import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, type Ad
 import "../admin.css";
 
 const defaults: AdminFilters = { hours: 24, source: "server", operation: "", model: "", release: "", outcome: "" };
+const FRONTEND_RELEASE = import.meta.env.VITE_RELEASE ?? "unknown";
+type ReleaseMode = "current" | "all" | "history";
+const isTestRelease = (release: string) => /^(development|test|qa)([-_]|$)/i.test(release);
+const releaseLabel = (release: string) => release === "unknown" ? "未知版本" : isTestRelease(release) ? `测试 · ${release}` : release.slice(0, 10);
 const views = [
   { id: "overview", label: "运行概览", icon: Activity },
   { id: "diagnostics", label: "调用诊断", icon: Search },
@@ -57,10 +61,10 @@ export default function Admin() {
     else updated.set("view", next);
     setParams(updated);
   };
-  const [diagnosticFilters, setFilters] = useState<AdminFilters>(defaults);
+  const [filters, setFilters] = useState<AdminFilters>(defaults);
+  const [releaseMode, setReleaseMode] = useState<ReleaseMode>("current");
+  const [serverRelease, setServerRelease] = useState<string | null>(null);
   const diagnostics = view === "diagnostics";
-  const filters = useMemo(() => diagnostics ? diagnosticFilters : { ...defaults, hours: diagnosticFilters.hours },
-    [diagnostics, diagnosticFilters]);
   const [data, setData] = useState<AdminOverview | null>(null);
   const [rows, setRows] = useState<AdminTrace[]>([]);
   const [total, setTotal] = useState(0);
@@ -111,13 +115,15 @@ export default function Admin() {
     } finally { if (!controller.signal.aborted) setDetailLoading(false); }
   }, [rejectAccess]);
 
+  const currentServerRelease = releaseMode === "current" ? serverRelease ?? undefined : releaseMode === "all" ? undefined : filters.release || undefined;
+  const currentBrowserRelease = releaseMode === "current" ? FRONTEND_RELEASE : releaseMode === "all" ? undefined : filters.release || undefined;
   useEffect(() => {
     const controller = new AbortController();
     scopeController.current = controller;
     let live = true;
     const inspectFirst = openFirstFailure.current;
     openFirstFailure.current = false;
-    const scope = JSON.stringify([userId, view, filters.hours, filters.source, filters.operation, filters.model, filters.release]);
+    const scope = JSON.stringify([userId, view, releaseMode, filters.hours, filters.source, filters.operation, filters.model, filters.release]);
     const listScope = JSON.stringify([scope, filters.outcome, offset, slow]);
     const keepOverview = previousScope.current === scope && hasOverview.current;
     const keepList = previousList.current === listScope && hasList.current;
@@ -129,13 +135,20 @@ export default function Admin() {
     detailController.current?.abort();
     if (canRead && !denied && view !== "users") {
       setOverviewLoading(readOverview); setListLoading(diagnostics);
-      if (readOverview) void getAdminOverview({ ...filters, outcome: "" }, controller.signal, !diagnostics)
+      if (readOverview) void getAdminOverview({ ...filters, outcome: "" }, controller.signal, !diagnostics, currentServerRelease, currentBrowserRelease)
         .then(overview => {
           if (!live || controller.signal.aborted) return;
           // A table action may abort this effect. Keep its refresh pending until
           // success so the next effect cannot silently keep stale metrics.
           previousRevision.current = revision;
           setData(overview); setOverviewError(""); hasOverview.current = true; setUpdatedAt(new Date().toISOString());
+          if (overview.server_release || !serverRelease) {
+            const resolved = overview.server_release ?? "unknown";
+            setServerRelease(resolved);
+            if (releaseMode === "current" && filters.source === "server" && resolved !== "unknown" && filters.release !== resolved) {
+              setFilters(old => old.release === resolved ? old : { ...old, release: resolved });
+            }
+          }
         }).catch((err: unknown) => {
           if (!live || controller.signal.aborted) return;
           if (forbidden(err)) rejectAccess();
@@ -153,7 +166,7 @@ export default function Admin() {
         }).finally(() => { if (live) setListLoading(false); });
     } else { setOverviewLoading(false); setListLoading(false); }
     return () => { live = false; controller.abort(); detailController.current?.abort(); };
-  }, [canRead, denied, diagnostics, userId, view, filters, offset, slow, revision, rejectAccess, inspect]);
+  }, [canRead, denied, diagnostics, userId, view, releaseMode, filters, offset, slow, revision, rejectAccess, inspect, currentServerRelease, currentBrowserRelease, serverRelease]);
 
   const operationOptions = [...new Set([filters.operation, ...(data?.facets?.operations ?? data?.operations ?? [])])].filter(Boolean);
   const update = (patch: Partial<AdminFilters>) => { setOffset(0); setFilters(old => ({ ...old, ...patch })); };
@@ -163,10 +176,34 @@ export default function Admin() {
     setView("diagnostics");
     window.requestAnimationFrame(() => document.querySelector(".admin-traces")?.scrollIntoView?.({ block: "start" }));
   };
+  const changeSource = (source: "server" | "browser") => {
+    const release = releaseMode === "current"
+      ? source === "browser" ? FRONTEND_RELEASE : serverRelease && serverRelease !== "unknown" ? serverRelease : ""
+      : releaseMode === "all" ? "" : filters.release;
+    update({ source, operation: "", model: "", release, outcome: "" });
+  };
+  const changeRelease = (value: string) => {
+    if (value === "__current") {
+      setReleaseMode("current");
+      update({ release: filters.source === "browser" ? FRONTEND_RELEASE : serverRelease && serverRelease !== "unknown" ? serverRelease : "" });
+    } else if (value === "__all") {
+      setReleaseMode("all");
+      update({ release: "" });
+    } else {
+      setReleaseMode("history");
+      update({ release: value });
+    }
+  };
+  const versionValue = releaseMode === "current" ? "__current" : releaseMode === "all" ? "__all" : filters.release;
+  const versionLabel = releaseMode === "current"
+    ? `当前发布（${filters.source === "browser" ? releaseLabel(FRONTEND_RELEASE) : serverRelease ? releaseLabel(serverRelease) : "读取中"}）`
+    : releaseMode === "all" ? "全部保留" : releaseLabel(filters.release);
+
   const timeRange = <label className="admin-period">时间范围<select value={filters.hours}
     onChange={event => update({ hours: Number(event.target.value) })}>
     <option value={24}>近 24 小时</option><option value={168}>近 7 天</option><option value={336}>近 14 天</option>
   </select></label>;
+  const versionSelect = <label>发布版本<select aria-label="发布版本" value={versionValue} onChange={e => changeRelease(e.target.value)}><option value="__current">当前发布</option><option value="__all">全部保留</option>{(data?.facets?.releases ?? []).map(r => <option key={r} value={r}>{releaseLabel(r)}</option>)}</select></label>;
   const chart = useMemo(() => {
     const points = data?.trend ?? [];
     const operations = [...new Set(points.map(p => p.operation))];
@@ -209,18 +246,19 @@ export default function Admin() {
         {views.map(({ id, label, icon: Icon }) => <button key={id} type="button"
           aria-current={view === id ? "page" : undefined} onClick={() => setView(id)}><Icon size={16} />{label}</button>)}
       </nav>
-      {view === "overview" && timeRange}
+      {view === "overview" && <>{timeRange}{versionSelect}</>}
     </div>
     {view === "users" ? <AdminUsers key={userId} revision={revision} onForbidden={rejectAccess} /> : <>
     {diagnostics && <div className="admin-toolbar">
       <div role="tablist" aria-label="采集来源" className="admin-tabs">{(["server", "browser"] as const).map(source =>
-        <button key={source} role="tab" aria-selected={filters.source === source} onClick={() => update({ source, operation: "", model: "", release: "", outcome: "" })}>{source === "server" ? "后端调用" : "浏览器体验"}</button>)}</div>
-      {timeRange}
+        <button key={source} role="tab" aria-selected={filters.source === source} onClick={() => changeSource(source)}>{source === "server" ? "后端调用" : "浏览器体验"}</button>)}</div>
+      {timeRange}{versionSelect}
       <label className="admin-operation">业务操作<select value={filters.operation} onChange={e => update({ operation: e.target.value })}><option value="">所有操作（混合样本）</option>{operationOptions.map(op => <option key={op} value={op}>{names[op] ?? op}</option>)}</select></label>
       {filters.source === "server" && <label>模型<select aria-label="模型" value={filters.model} onChange={e => update({ model: e.target.value })}><option value="">全部</option>{(data?.facets?.models ?? []).map(m => <option key={m}>{m}</option>)}</select></label>}
-      <label>发布版本<select value={filters.release} onChange={e => update({ release: e.target.value })}><option value="">全部</option>{(data?.facets?.releases ?? []).map(r => <option key={r} value={r}>{r === "unknown" ? "未提供版本" : r.slice(0, 10)}</option>)}</select></label>
+      <span className={`admin-release-state ${releaseMode}`}>{versionLabel}</span>
     </div>}
-    <div className="admin-scope-caption"><span>{filters.operation ? names[filters.operation] ?? filters.operation : "全部业务概览"}{diagnostics && !filters.operation && " · 性能比较请先选同一种操作"}</span><span>{updatedAt ? `概览更新于 ${date(updatedAt)}` : "仅展示已采集的真实记录"}</span></div>
+    <div className="admin-scope-caption"><span>{filters.operation ? names[filters.operation] ?? filters.operation : "全部业务概览"}{diagnostics && !filters.operation && " · 性能比较请先选同一种操作"} · {versionLabel}</span><span>{updatedAt ? `概览更新于 ${date(updatedAt)}` : "仅展示已采集的真实记录"}</span></div>
+    {!diagnostics && data?.count === 0 && releaseMode === "current" && <p className="admin-notice admin-empty-current" role="status">当前发布暂无可比较样本。可切换到「全部保留」或单个历史版本排障。</p>}
     {diagnostics && <p className="admin-perspective">{filters.source === 'server'
       ? '服务端视角：接口收到请求至响应结束，看业务处理、模型调用和错误。「模型 / 类型」只在大模型调用时显示具体模型；读取、语音、写入和删除分别标为对应类型，只有 AI 调用缺失模型时才显示「AI 调用未记录」。'
       : '用户端视角：记录识别收尾、说完至首声、播放完成，包含网络、队列与播放等待。浏览器样本不提供后端模型或 Token，因此隐藏模型与费用区。'}</p>}
@@ -248,7 +286,7 @@ export default function Admin() {
       </section>
       {!diagnostics && data.experience && <ExperienceOverview experience={data.experience}
         onPlaybackDetails={() => {
-          update({ source: "browser", operation: "speech.complete", model: "", release: "", outcome: "" });
+          update({ source: "browser", operation: "speech.complete", model: "", release: releaseMode === "current" ? FRONTEND_RELEASE : filters.release, outcome: "" });
           setView("diagnostics");
         }} />}
       <section className={`admin-panels${filters.source === "browser" ? " admin-panels-single" : ""}`}>
@@ -279,7 +317,7 @@ export default function Admin() {
       </div></div>
       {listError && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{listError}</span><button onClick={() => setRevision(v => v + 1)}>重试</button></p>}
       <div className="admin-table-wrap" aria-busy={listLoading}><table><thead><tr><th>时间 · 北京</th><th>业务操作</th><th>状态</th><th>耗时</th>{filters.source === "server" && <><th>模型 / 类型</th><th>费用参考</th></>}<th>Trace</th></tr></thead><tbody>
-        {rows.map(row => <tr key={row.trace_id} data-outcome={row.outcome}><td><time dateTime={row.started_at}>{date(row.started_at)}</time></td><td className="admin-operation-cell"><strong>{names[row.operation] ?? row.operation}</strong><small>版本 {row.release === "unknown" ? "未提供" : row.release.slice(0, 10)}</small></td><td><span className={`admin-badge ${row.outcome}`}>{labels[row.outcome] ?? row.outcome}</span></td><td className="admin-duration">{ms(row.duration_ms)}</td>{filters.source === "server" && <><td>{modelLabel(row)}</td><td className="admin-row-cost" title="按已采集用量与公开单价参考；未计价不代表零费用">{referenceCost(row.cost_min_cny, row.cost_max_cny)}</td></>}<td><button aria-label={`查看调用 ${row.trace_id.slice(0, 8)}`} onClick={() => void inspect(row.trace_id)}>{row.trace_id.slice(0, 8)} <ArrowRight size={14} /></button></td></tr>)}
+        {rows.map(row => <tr key={row.trace_id} data-outcome={row.outcome}><td><time dateTime={row.started_at}>{date(row.started_at)}</time></td><td className="admin-operation-cell"><strong>{names[row.operation] ?? row.operation}</strong><small>版本 {releaseLabel(row.release)}</small></td><td><span className={`admin-badge ${row.outcome}`}>{labels[row.outcome] ?? row.outcome}</span></td><td className="admin-duration">{ms(row.duration_ms)}</td>{filters.source === "server" && <><td>{modelLabel(row)}</td><td className="admin-row-cost" title="按已采集用量与公开单价参考；未计价不代表零费用">{referenceCost(row.cost_min_cny, row.cost_max_cny)}</td></>}<td><button aria-label={`查看调用 ${row.trace_id.slice(0, 8)}`} onClick={() => void inspect(row.trace_id)}>{row.trace_id.slice(0, 8)} <ArrowRight size={14} /></button></td></tr>)}
         {!rows.length && <tr><td colSpan={filters.source === "server" ? 7 : 5} className="admin-empty">{listLoading ? "正在读取调用记录…" : listError ? "列表读取失败，可点击上方重试。" : "暂无调用记录。可切换业务操作、状态或时间范围；这里不会生成演示数据。"}</td></tr>}
       </tbody></table></div>
       <div className="admin-pagination"><span>{listLoading ? "列表更新中 · " : ""}第 {total ? offset + 1 : 0}–{Math.min(offset + rows.length, total)} 条 / {total} · 状态筛选仅影响列表</span><div><button aria-label="上一页" disabled={listLoading || offset === 0} onClick={() => setOffset(v => Math.max(0, v - 50))}><ArrowLeft size={15} /></button><button aria-label="下一页" disabled={listLoading || offset + 50 >= total} onClick={() => setOffset(v => v + 50)}><ArrowRight size={15} /></button></div></div>
@@ -343,7 +381,7 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
     <code className="admin-trace-id">{detail.trace_id}</code>
     <div className="admin-trace-root"><div><span>总耗时</span><strong>{ms(detail.duration_ms)}</strong></div>{detail.source === "server" && <div><span>模型 / 类型</span><b>{modelLabel(detail)}</b></div>}</div>
     {detail.source === "server" && <p className="admin-detail-cost">费用参考：{referenceCost(detail.cost_min_cny, detail.cost_max_cny)}<small>依据当前公开价与已知用量区间，未计价不代表零费用。</small></p>}
-    <dl className="admin-detail-meta"><div><dt>采集来源</dt><dd>{detail.source === "browser" ? "浏览器上报" : "后端请求"}</dd></div><div><dt>响应</dt><dd>{detail.source === "browser" ? "不适用 HTTP 状态" : detail.http_status == null ? "HTTP 状态未采集" : `HTTP ${detail.http_status}`}</dd></div><div><dt>发布版本</dt><dd>{detail.release === "unknown" ? "未提供版本" : detail.release.slice(0, 12)}</dd></div>{detail.source === "server" && <div><dt>模型首文本</dt><dd>{ms(detail.ttft_ms)}</dd></div>}</dl>
+    <dl className="admin-detail-meta"><div><dt>采集来源</dt><dd>{detail.source === "browser" ? "浏览器上报" : "后端请求"}</dd></div><div><dt>响应</dt><dd>{detail.source === "browser" ? "不适用 HTTP 状态" : detail.http_status == null ? "HTTP 状态未采集" : `HTTP ${detail.http_status}`}</dd></div><div><dt>发布版本</dt><dd>{releaseLabel(detail.release)}{isTestRelease(detail.release) && "（测试样本）"}</dd></div>{detail.source === "server" && <div><dt>模型首文本</dt><dd>{ms(detail.ttft_ms)}</dd></div>}</dl>
     {failed && <section className="admin-failure-context"><h3><TriangleAlert size={16} />失败线索</h3>
       {detail.source === "browser" ? <p>此失败由浏览器上报，请结合关联的后端调用排查；上报可能缺失或被修改。</p>
         : detail.error_type ? <><div className="admin-error-types"><code>{detail.error_type}</code>{detail.error_cause_type && <><ArrowRight size={13} /><code>{detail.error_cause_type}</code></>}</div><p>已采集异常类名；可按调用时间和编号核对服务端日志。</p></>

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.deps import get_current_user
+from app.core.observability import current_release
 from app.db import get_db
 from app.models.user import User
 from app.models.telemetry import TelemetryRecord
@@ -38,17 +39,26 @@ async def flush(request):
 
 @router.get("/overview", dependencies=[Depends(get_admin_user)])
 async def get_overview(request: Request, options: dict = Depends(filters), db: Session = Depends(get_db),
-                       include_experience: bool = False):
+                       include_experience: bool = False,
+                       experience_server_release: str | None = Query(None, max_length=80),
+                       experience_browser_release: str | None = Query(None, max_length=80)):
     await flush(request)
-    return await asyncio.to_thread(_overview, request, options, db, include_experience)
+    return await asyncio.to_thread(_overview, request, options, db, include_experience,
+                                   experience_server_release, experience_browser_release)
 
 
-def _overview(request, options, db, include_experience=False):
+def _overview(request, options, db, include_experience=False,
+              experience_server_release=None, experience_browser_release=None):
     from app.services.monitoring import visitor_summary, state_time
     data = overview(db, **options)
+    data["server_release"] = current_release()
     data['visitors'] = visitor_summary(db, hours=options['hours'])
     if include_experience:
-        data["experience"] = experience_summary(db, hours=options["hours"])
+        data["experience"] = experience_summary(
+            db, hours=options["hours"], release=options["release"],
+            server_release=experience_server_release,
+            browser_release=experience_browser_release,
+        )
     sink = getattr(request.app.state, "telemetry_sink", None)
     oldest = db.scalar(select(func.min(TelemetryRecord.started_at)))
     source_count = db.scalar(select(func.count()).select_from(TelemetryRecord).where(TelemetryRecord.source == options["source"]))

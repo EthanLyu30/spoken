@@ -165,6 +165,43 @@ def test_overview_counts_playback_once_and_keeps_recovery_diagnostics(client):
     assert stages["chat.first_text"]["samples"] == old_stages["chat.first_text"]["samples"] + 1
 
 
+def test_experience_uses_server_and_browser_releases_independently(client):
+    from app.db import SessionLocal
+    from app.models.telemetry import TelemetryRecord
+    import secrets
+
+    owner = account(client, admin=True)
+    releases = ("server-current-test", "server-old-test", "browser-current-test", "browser-old-test")
+    now = utcnow()
+    with SessionLocal() as db:
+        rows = [
+            TelemetryRecord(trace_id=secrets.token_hex(16), started_at=now, operation="POST /api/chat/stream",
+                source="server", outcome="ok", duration_ms=100, ttft_ms=111, model="deepseek-flash",
+                release="server-current-test", spans_json="[]"),
+            TelemetryRecord(trace_id=secrets.token_hex(16), started_at=now, operation="POST /api/chat/stream",
+                source="server", outcome="ok", duration_ms=100, ttft_ms=999, model="deepseek-flash",
+                release="server-old-test", spans_json="[]"),
+            TelemetryRecord(trace_id=secrets.token_hex(16), started_at=now, operation="chat.first_text",
+                source="browser", outcome="ok", duration_ms=222, release="browser-current-test", spans_json="[]"),
+            TelemetryRecord(trace_id=secrets.token_hex(16), started_at=now, operation="chat.first_text",
+                source="browser", outcome="ok", duration_ms=999, release="browser-old-test", spans_json="[]"),
+        ]
+        db.add_all(rows); db.commit()
+    try:
+        url = ("/api/admin/overview?source=browser&release=browser-current-test&include_experience=true"
+               "&experience_server_release=server-current-test&experience_browser_release=browser-current-test")
+        experience = client.get(url, headers=owner).json()["experience"]
+        stages = {stage["operation"]: stage for stage in experience["stages"]}
+        assert stages["model.first_text"]["samples"] == 1
+        assert stages["model.first_text"]["p50"] == 111
+        assert stages["chat.first_text"]["samples"] == 1
+        assert stages["chat.first_text"]["p50"] == 222
+    finally:
+        with SessionLocal() as db:
+            db.query(TelemetryRecord).filter(TelemetryRecord.release.in_(releases)).delete(synchronize_session=False)
+            db.commit()
+
+
 def test_guest_visits_deduplicate_without_exposing_identity(client):
     from app.models.monitoring import SiteVisit
     reset_visits()

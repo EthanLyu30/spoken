@@ -26,7 +26,7 @@ export interface AdminOverview {
   visitors?: AdminVisitors;
   experience?: AdminExperience;
   pricing?: AdminPricing;
-  source: "server" | "browser"; count: number; success_rate: number | null;
+  source: "server" | "browser"; server_release?: string; count: number; success_rate: number | null;
   errors: number; timeouts: number; cancelled: number;
   latency: Percentiles; ttft: Percentiles; ttft_known?: number; input_tokens: number | null; output_tokens: number | null; usage_known: number;
   operations: string[]; facets?: { operations: string[]; models: string[]; releases: string[] };
@@ -73,9 +73,12 @@ export function query(filters: AdminFilters): URLSearchParams {
   for (const key of ["operation", "model", "release", "outcome"] as const) if (filters[key]) params.set(key, filters[key]);
   return params;
 }
-export function getAdminOverview(filters: AdminFilters, signal?: AbortSignal, includeExperience = false) {
+export function getAdminOverview(filters: AdminFilters, signal?: AbortSignal, includeExperience = false,
+  experienceServerRelease?: string, experienceBrowserRelease?: string) {
   const params = query(filters);
   if (includeExperience) params.set("include_experience", "true");
+  if (experienceServerRelease) params.set("experience_server_release", experienceServerRelease);
+  if (experienceBrowserRelease) params.set("experience_browser_release", experienceBrowserRelease);
   return read<AdminOverview>(`/overview?${params}`, signal);
 }
 export const getAdminTraces = (filters: AdminFilters, offset: number, slow: boolean, signal?: AbortSignal) => {
