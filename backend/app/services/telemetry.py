@@ -228,12 +228,19 @@ def _read_spans(raw):
     return parsed if isinstance(parsed, list) else []
 
 
-def experience_summary(db, *, hours):
+def experience_summary(db, *, hours, release=None, server_release=None, browser_release=None):
+    # A current-release view can span two independently deployed versions:
+    # server-side model timing and browser-side playback timing. "__all" means
+    # the caller knows that side's current version is unknown; it must not
+    # inherit the other side's main release filter.
+    server_release = None if server_release == "__all" else server_release or release
+    browser_release = None if browser_release == "__all" else browser_release or release
     stages = {key: [] for key in (
         "model.first_text", "chat.first_text", "chat.complete", "speech.request_to_audio",
     )}
     stages["model.first_text"] = list(db.scalars(select(TelemetryRecord.ttft_ms).where(
-        *conditions(hours=hours, operation="POST /api/chat/stream", outcome="ok"),
+        *conditions(hours=hours, source="server", release=server_release,
+                    operation="POST /api/chat/stream", outcome="ok"),
         TelemetryRecord.ttft_ms.is_not(None),
     )))
     playback = dict(completed=0, failed=0, cancelled=0, classified=0, never_started=0,
@@ -241,7 +248,7 @@ def experience_summary(db, *, hours):
     timings = ("chat.first_text", "chat.complete", "speech.request_to_audio")
     for row in db.execute(select(TelemetryRecord.operation, TelemetryRecord.duration_ms,
         TelemetryRecord.outcome, TelemetryRecord.spans_json).where(
-        *conditions(hours=hours, source="browser"),
+        *conditions(hours=hours, source="browser", release=browser_release),
         TelemetryRecord.operation.in_((*timings, "speech.complete")),
     )):
         if row.operation != "speech.complete":
