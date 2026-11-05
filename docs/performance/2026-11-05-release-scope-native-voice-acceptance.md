@@ -33,7 +33,7 @@
 ### 复现步骤
 
 1. 切到 `pm/current-release-voice-audit`。
-2. 设置 `RENDER_GIT_COMMIT=server-current`（或运行中的实际 SHA）和 `VITE_RELEASE=browser-current`，启动后端与前端。
+2. 设置后端运行时 `RENDER_GIT_COMMIT=server-current`；前端构建时设置 `VERCEL_GIT_COMMIT_SHA=browser-current`（Vite 实际读取这个变量生成 `VITE_RELEASE`），启动后端与前端。
 3. 插入 `server-current` / `browser-current` / `development` / `unknown` 的遥测记录。
 4. 打开 `/admin`：默认应显示当前后端版本；切到浏览器来源应使用前端版本；切到全部/历史分别清空/锁定版本。
 5. 从概览进入调用诊断，检查来源、操作、时间、版本没有丢失。
@@ -41,7 +41,7 @@
 
 ### 验证
 
-- 前端全量 **539 passed**；后端全量 **638 passed**；TypeScript / ESLint / 生产构建通过。
+- 前端全量 **543 passed**；后端全量 **638 passed**；TypeScript / ESLint / 生产构建通过。
 - 前端 `Admin.test.tsx` 覆盖：当前后端版本默认、全部保留、历史测试版本、未知版本、当前发布空状态、钻取时版本保留。
 - 后端 `test_experience_uses_server_and_browser_releases_independently` 覆盖：后端版本和前端版本不同，模型阶段只取后端版本，浏览器阶段只取前端版本。
 - 现有鉴权、14 天保留策略不变。
@@ -119,6 +119,30 @@ Edge：
 | 未完整识别确认发送 | 仅单元测试覆盖，本轮没有真实不完整识别设备样本 |
 | `$3.50` | 已发送含 `$3.50` 的打字样本，未出现提前按句号朗读；需要继续保留回归 |
 
+### 逐轮补录与缺失值
+
+逐轮 ID 和阶段值在 evidence JSON 中；以下是本轮被点名补齐的缺失项：
+
+| 轮次 | interaction ID | 识别 | 模型首字 | 浏览器首段 | 全文 | 音色启动 | 实际输出 |
+|---|---|---|---|---:|---:|---|---|
+| Edge 通话 #5 | `4f52be9e4eda5826bf63e48931319bdc` | finalize 174.1ms | 741.8ms | 742.2ms | 947.7ms | Ava，1906.7ms | 未采集 |
+| Edge 打字 #4（最慢） | `89e87e12396bd88f62d79869392f4172` | 不适用 | 934.1ms | 934.1ms | 1809.9ms | 原轮未采集；同文案补验 `d475b68f1f945f86c7ab71f806e18efb` 为 Ava，1261.0ms | 原轮未采集 |
+| Edge 打字补验 | `d475b68f1f945f86c7ab71f806e18efb` | 不适用 | 1486.8ms | 1486.8ms | 1711.2ms | Ava，1261.0ms | 未采集 |
+
+- 原 Edge 打字 #4 的 `speech` probe 对象没有记录 `utterance.voice`，因此原轮音色标为「未采集」；用**同一设备、同一入口、同一文案**补验一次，确认实际选择的是 `Microsoft Ava Multilingual Online (Natural)`，启动 1261ms。
+- 两条 loopback 是**额外的独立验证轮次**，消息均为 “Hello, I would like a latte, please.”，不属于上面 5 条主表的任何 interaction ID；对应关系：
+  - Chrome loopback：额外轮，最大 RMS 0.370；interaction ID **未采集**
+  - Edge loopback：额外轮，最大 RMS 0.375；interaction ID **未采集**
+- Edge 通话 #5 的启动 1906.7ms、音色 Ava 有 Trace/回调证据，但该轮没有同时进行 loopback，实际输出标为「未采集」。
+- 真实麦克风通话：尝试过系统麦克风 + 扬声器回放合成 WAV；页面没有产生用户转写，因此标为「未采集」。本轮 5 条通话仍全部是 fake media WAV，不能冒充物理麦克风。
+- 回退后的系统输出：未采集。Edge 通话第 4 条有 Ava `synthesis-failed` → Mark 252.5ms 的回调证据，但没有同时录音；下一次验证应只针对这条回退路径单独录音。
+
+### Chrome 识别回退初步对账
+
+- Chrome 通话 #5：`asr.finalize` 5010.8ms 失败，随后缓冲识别 5987.1ms；从 Trace 时间看是**先后串行**，总 ASR 约 11s，不是并发。
+- Chrome 通话 #2：缓冲识别 6327.9ms，finalize 132.8ms；两者是外层总耗时与内层收尾的关系，仍需下一轮用更完整 span 对账，不能宣称完全串行。
+- 下一步按 interaction ID 对齐 Chrome 识别超时和缓冲回退，确认每段耗时和是否串行。
+
 ### 慢样本判断
 
 - Chrome：模型首段 0.37–1.39s，朗读启动 0.17–0.60s，未发现明显应用侧等待。
@@ -140,6 +164,7 @@ Edge：
 - [打字 Edge](evidence/2026-11-05-typing-edge.json)
 - [通话 Chrome](evidence/2026-11-05-call-chrome.json)
 - [通话 Edge](evidence/2026-11-05-call-edge.json)
+- [Edge 最慢打字音色补验](evidence/2026-11-05-edge-slow-voice-followup.json)
 
 ## 备注
 

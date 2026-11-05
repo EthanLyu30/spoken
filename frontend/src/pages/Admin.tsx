@@ -61,10 +61,18 @@ export default function Admin() {
     else updated.set("view", next);
     setParams(updated);
   };
-  const [filters, setFilters] = useState<AdminFilters>(defaults);
-  const [releaseMode, setReleaseMode] = useState<ReleaseMode>("current");
+  const [overviewFilters, setOverviewFilters] = useState<AdminFilters>(defaults);
+  const [diagnosticFilters, setDiagnosticFilters] = useState<AdminFilters>(defaults);
+  const [overviewReleaseMode, setOverviewReleaseMode] = useState<ReleaseMode>("current");
+  const [diagnosticReleaseMode, setDiagnosticReleaseMode] = useState<ReleaseMode>("current");
   const [serverRelease, setServerRelease] = useState<string | null>(null);
   const diagnostics = view === "diagnostics";
+  // Overview always keeps its own scope (server source, no business filters).
+  // Diagnostics owns its source/operation/model/outcome and its own version.
+  const filters = diagnostics ? diagnosticFilters : overviewFilters;
+  const releaseMode = diagnostics ? diagnosticReleaseMode : overviewReleaseMode;
+  const setFilters = diagnostics ? setDiagnosticFilters : setOverviewFilters;
+  const setReleaseMode = diagnostics ? setDiagnosticReleaseMode : setOverviewReleaseMode;
   const [data, setData] = useState<AdminOverview | null>(null);
   const [rows, setRows] = useState<AdminTrace[]>([]);
   const [total, setTotal] = useState(0);
@@ -166,13 +174,26 @@ export default function Admin() {
         }).finally(() => { if (live) setListLoading(false); });
     } else { setOverviewLoading(false); setListLoading(false); }
     return () => { live = false; controller.abort(); detailController.current?.abort(); };
-  }, [canRead, denied, diagnostics, userId, view, releaseMode, filters, offset, slow, revision, rejectAccess, inspect, currentServerRelease, currentBrowserRelease, serverRelease]);
+  }, [canRead, denied, diagnostics, userId, view, releaseMode, filters, offset, slow, revision, rejectAccess, inspect, currentServerRelease, currentBrowserRelease, serverRelease, setFilters]);
 
   const operationOptions = [...new Set([filters.operation, ...(data?.facets?.operations ?? data?.operations ?? [])])].filter(Boolean);
   const update = (patch: Partial<AdminFilters>) => { setOffset(0); setFilters(old => ({ ...old, ...patch })); };
   const filterOutcome = (outcome: "error" | "timeout", inspectFirst = false) => {
     openFirstFailure.current = inspectFirst;
-    update({ ...filters, outcome });
+    const release = overviewReleaseMode === "current"
+      ? serverRelease && serverRelease !== "unknown" ? serverRelease : ""
+      : overviewReleaseMode === "all" ? "" : overviewFilters.release;
+    setDiagnosticReleaseMode(overviewReleaseMode);
+    setDiagnosticFilters({ ...overviewFilters, source: "server", operation: "", model: "", release, outcome });
+    setView("diagnostics");
+    window.requestAnimationFrame(() => document.querySelector(".admin-traces")?.scrollIntoView?.({ block: "start" }));
+  };
+  const openPlaybackDiagnostics = () => {
+    const release = overviewReleaseMode === "current"
+      ? FRONTEND_RELEASE
+      : overviewReleaseMode === "all" ? "" : overviewFilters.release;
+    setDiagnosticReleaseMode(overviewReleaseMode);
+    setDiagnosticFilters({ ...overviewFilters, source: "browser", operation: "speech.complete", model: "", release, outcome: "" });
     setView("diagnostics");
     window.requestAnimationFrame(() => document.querySelector(".admin-traces")?.scrollIntoView?.({ block: "start" }));
   };
@@ -203,7 +224,8 @@ export default function Admin() {
     onChange={event => update({ hours: Number(event.target.value) })}>
     <option value={24}>近 24 小时</option><option value={168}>近 7 天</option><option value={336}>近 14 天</option>
   </select></label>;
-  const versionSelect = <label>发布版本<select aria-label="发布版本" value={versionValue} onChange={e => changeRelease(e.target.value)}><option value="__current">当前发布</option><option value="__all">全部保留</option>{(data?.facets?.releases ?? []).map(r => <option key={r} value={r}>{releaseLabel(r)}</option>)}</select></label>;
+  const releaseOptions = [...new Set([...(data?.facets?.releases ?? []), ...(filters.release ? [filters.release] : [])])];
+  const versionSelect = <label>发布版本<select aria-label="发布版本" value={versionValue} onChange={e => changeRelease(e.target.value)}><option value="__current">当前发布</option><option value="__all">全部保留</option>{releaseOptions.map(r => <option key={r} value={r}>{releaseLabel(r)}</option>)}</select></label>;
   const chart = useMemo(() => {
     const points = data?.trend ?? [];
     const operations = [...new Set(points.map(p => p.operation))];
@@ -259,6 +281,7 @@ export default function Admin() {
     </div>}
     <div className="admin-scope-caption"><span>{filters.operation ? names[filters.operation] ?? filters.operation : "全部业务概览"}{diagnostics && !filters.operation && " · 性能比较请先选同一种操作"} · {versionLabel}</span><span>{updatedAt ? `概览更新于 ${date(updatedAt)}` : "仅展示已采集的真实记录"}</span></div>
     {!diagnostics && data?.count === 0 && releaseMode === "current" && <p className="admin-notice admin-empty-current" role="status">当前发布暂无可比较样本。可切换到「全部保留」或单个历史版本排障。</p>}
+    {releaseMode === "current" && filters.source === "server" && serverRelease === "unknown" && <p className="admin-notice" role="status">后端当前版本未知，无法按「当前发布」比较；当前显示全部保留样本。</p>}
     {diagnostics && <p className="admin-perspective">{filters.source === 'server'
       ? '服务端视角：接口收到请求至响应结束，看业务处理、模型调用和错误。「模型 / 类型」只在大模型调用时显示具体模型；读取、语音、写入和删除分别标为对应类型，只有 AI 调用缺失模型时才显示「AI 调用未记录」。'
       : '用户端视角：记录识别收尾、说完至首声、播放完成，包含网络、队列与播放等待。浏览器样本不提供后端模型或 Token，因此隐藏模型与费用区。'}</p>}
@@ -285,10 +308,7 @@ export default function Admin() {
         </article>
       </section>
       {!diagnostics && data.experience && <ExperienceOverview experience={data.experience}
-        onPlaybackDetails={() => {
-          update({ source: "browser", operation: "speech.complete", model: "", release: releaseMode === "current" ? FRONTEND_RELEASE : filters.release, outcome: "" });
-          setView("diagnostics");
-        }} />}
+        onPlaybackDetails={openPlaybackDiagnostics} />}
       <section className={`admin-panels${filters.source === "browser" ? " admin-panels-single" : ""}`}>
         <article className="admin-panel admin-trend"><div className="admin-panel-heading"><h2>耗时趋势</h2><span>每小时 P95 · 按业务分别统计</span></div>
           {data.trend.length ? <EChart height={176} option={chart} /> : <div className="admin-chart-empty"><Clock3 size={23} /><strong>当前筛选还没有耗时样本</strong><span>可调整业务或时间范围；采集到真实请求后展示趋势。</span></div>}

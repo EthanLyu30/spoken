@@ -1,0 +1,13 @@
+{
+  "note": "Same device/entry/text follow-up because the original slow typing round did not record utterance.voice",
+  "original_interaction_id": "89e87e12396bd88f62d79869392f4172",
+  "original_native_start_ms": 3851.6,
+  "original_native_start_delay_ms": 3851.6,
+  "original_voice": null,
+  "followup_interaction_id": "d475b68f1f945f86c7ab71f806e18efb",
+  "followup_first_text_ms": 1486.8,
+  "followup_complete_ms": 1711.2,
+  "followup_voice": "Microsoft Ava Multilingual Online (Natural) - English (United States)",
+  "followup_native_start_delay_ms": 1261.0,
+  "actual_output": "未采集"
+}
