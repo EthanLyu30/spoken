@@ -1,0 +1,404 @@
+{
+  "chrome-2": {
+    "root": "4f61a84051fe1ac4519032d0bd2760ed",
+    "traces": [
+      {
+        "trace_id": "4f61a84051fe1ac4519032d0bd2760ed",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "asr.transcribe",
+        "started_at": "2026-11-05T13:19:24.850Z",
+        "duration_ms": 6327.9000000003725,
+        "outcome": "ok",
+        "model": "xfyun/direct",
+        "spans": [
+          {
+            "name": "asr.transcribe",
+            "offset_ms": 0,
+            "duration_ms": 6327.9000000003725,
+            "outcome": "ok",
+            "attributes": {
+              "engine": "xfyun",
+              "transport": "direct"
+            }
+          }
+        ]
+      },
+      {
+        "trace_id": "9c19512064ce6da2ccb8b0fe62504309",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "POST /api/asr/session",
+        "started_at": "2026-11-05T13:19:18.266Z",
+        "duration_ms": 1.6154170007212088,
+        "outcome": "ok",
+        "model": null,
+        "spans": []
+      },
+      {
+        "trace_id": "786f2ac0200adb96bba71cb82ec21cbf",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "asr.attempt",
+        "started_at": "2026-11-05T13:19:24.852Z",
+        "duration_ms": 6327.5,
+        "outcome": "ok",
+        "model": "xfyun/direct",
+        "spans": []
+      },
+      {
+        "trace_id": "f43f3174d0e704b8dfae031aa374b2c8",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "asr.finalize",
+        "started_at": "2026-11-05T13:19:24.853Z",
+        "duration_ms": 132.7999999988824,
+        "outcome": "ok",
+        "model": "xfyun/direct",
+        "spans": []
+      },
+      {
+        "trace_id": "8ba3659a47b340f7169f92d1e08a2b4b",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "chat.first_text",
+        "started_at": "2026-11-05T13:19:25.938Z",
+        "duration_ms": 1390.300000000745,
+        "outcome": "ok",
+        "model": "unknown/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "56493f10e1b81cbc6c353b8fb71af531",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "POST /api/chat/stream",
+        "started_at": "2026-11-05T13:19:24.858Z",
+        "duration_ms": 1168.6754930015013,
+        "outcome": "ok",
+        "model": "deepseek-flash",
+        "spans": []
+      },
+      {
+        "trace_id": "0cde69d42736caf9ee19fbf27c12b211",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "speech.voice_resolution",
+        "started_at": "2026-11-05T13:19:26.089Z",
+        "duration_ms": 0.19999999925494194,
+        "outcome": "ok",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "db008281d13491b5e4907217dc603d51",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "chat.tail",
+        "started_at": "2026-11-05T13:19:26.152Z",
+        "duration_ms": 0.10000000149011612,
+        "outcome": "ok",
+        "model": "unknown/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "c866c23d45b20c7a897833ff34c1e331",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "chat.complete",
+        "started_at": "2026-11-05T13:19:26.157Z",
+        "duration_ms": 1637.2000000011176,
+        "outcome": "ok",
+        "model": "unknown/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "0949db401d2fcd40f2ddb470b6e22dbd",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "speech.first_audio",
+        "started_at": "2026-11-05T13:19:26.312Z",
+        "duration_ms": 1804.199999999255,
+        "outcome": "ok",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "b84c9c3b0e166ede3d02d97c1a731b4e",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "voice.first_audio",
+        "started_at": "2026-11-05T13:19:26.326Z",
+        "duration_ms": 8133.800000000745,
+        "outcome": "ok",
+        "model": "unknown/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "ad49fd07b5a824c80f83251fb1bd1fd7",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "speech.native_start",
+        "started_at": "2026-11-05T13:19:26.328Z",
+        "duration_ms": 211.0,
+        "outcome": "ok",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "5846f91a5941d3feb47132e945d3b26c",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "speech.final_text_to_audio",
+        "started_at": "2026-11-05T13:19:26.335Z",
+        "duration_ms": 166.2999999988824,
+        "outcome": "ok",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "2b6e172912fbffb3cf2241df7bb37570",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "speech.complete",
+        "started_at": "2026-11-05T13:19:26.966Z",
+        "duration_ms": 2449.4000000003725,
+        "outcome": "cancelled",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "506132af6c390789424535d5f31f949d",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "speech.playback",
+        "started_at": "2026-11-05T13:19:26.985Z",
+        "duration_ms": 645.2000000011176,
+        "outcome": "cancelled",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "a1f284789d710290b243d5c3ae398dc8",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "speech.native_end",
+        "started_at": "2026-11-05T13:19:27.052Z",
+        "duration_ms": 855.7000000011176,
+        "outcome": "cancelled",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "d06fe43d5899428c5c37b3b309fb0174",
+        "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+        "operation": "voice.complete",
+        "started_at": "2026-11-05T13:19:27.052Z",
+        "duration_ms": 8779.699999999255,
+        "outcome": "cancelled",
+        "model": "unknown/unknown",
+        "spans": []
+      }
+    ]
+  },
+  "chrome-5": {
+    "root": "9b06b1ed0c9bd38342c8cc6e0b086495",
+    "traces": [
+      {
+        "trace_id": "9b06b1ed0c9bd38342c8cc6e0b086495",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "asr.transcribe",
+        "started_at": "2026-11-05T13:20:51.183Z",
+        "duration_ms": 5987.0999999996275,
+        "outcome": "ok",
+        "model": "xfyun/buffered",
+        "spans": [
+          {
+            "name": "asr.transcribe",
+            "offset_ms": 0,
+            "duration_ms": 5987.0999999996275,
+            "outcome": "ok",
+            "attributes": {
+              "engine": "xfyun",
+              "transport": "buffered"
+            }
+          }
+        ]
+      },
+      {
+        "trace_id": "4dc9977abc216a6c0c223063b4dea6a1",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "asr.finalize",
+        "started_at": "2026-11-05T13:20:45.211Z",
+        "duration_ms": 5010.799999998882,
+        "outcome": "error",
+        "model": "xfyun/direct",
+        "spans": []
+      },
+      {
+        "trace_id": "1f9271ab32cd388c58eaf3bb678a147a",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "asr.attempt",
+        "started_at": "2026-11-05T13:20:45.213Z",
+        "duration_ms": 0.2000000011175871,
+        "outcome": "error",
+        "model": "xfyun/direct",
+        "spans": []
+      },
+      {
+        "trace_id": "1e2c180e2d6ee6b6cffdb759c054c4ee",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "POST /api/asr",
+        "started_at": "2026-11-05T13:20:46.342Z",
+        "duration_ms": 4748.561044998496,
+        "outcome": "ok",
+        "model": null,
+        "spans": []
+      },
+      {
+        "trace_id": "5c86466d85af9b892ef4da1e57751363",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "asr.attempt",
+        "started_at": "2026-11-05T13:20:51.181Z",
+        "duration_ms": 5985.9000000003725,
+        "outcome": "ok",
+        "model": "xfyun/buffered",
+        "spans": []
+      },
+      {
+        "trace_id": "05b64f332d9fccb8b73bc522acf3aee4",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "chat.first_text",
+        "started_at": "2026-11-05T13:20:51.590Z",
+        "duration_ms": 367.80000000074506,
+        "outcome": "ok",
+        "model": "unknown/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "d69965e9d1784e3a2346caefc31fd297",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "POST /api/chat/stream",
+        "started_at": "2026-11-05T13:20:51.184Z",
+        "duration_ms": 465.1377740010503,
+        "outcome": "ok",
+        "model": "deepseek-flash",
+        "spans": []
+      },
+      {
+        "trace_id": "6b64a0276b410a6ecfcb027452b2fcc6",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "speech.voice_resolution",
+        "started_at": "2026-11-05T13:20:51.687Z",
+        "duration_ms": 0.5,
+        "outcome": "ok",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "bf1c9c0acbd5d904f6be3fe810f4150b",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "chat.complete",
+        "started_at": "2026-11-05T13:20:51.751Z",
+        "duration_ms": 560.7000000011176,
+        "outcome": "ok",
+        "model": "unknown/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "ea13ac271eb3446d24ba2b68b39073cb",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "chat.tail",
+        "started_at": "2026-11-05T13:20:51.751Z",
+        "duration_ms": 8.400000000372529,
+        "outcome": "ok",
+        "model": "unknown/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "a6a3ccd043bd366bf46c2883caf7db6f",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "speech.first_audio",
+        "started_at": "2026-11-05T13:20:51.862Z",
+        "duration_ms": 677.6999999992549,
+        "outcome": "ok",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "bcf28eed4f42665f5add644205723c06",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "speech.final_text_to_audio",
+        "started_at": "2026-11-05T13:20:51.869Z",
+        "duration_ms": 116.0,
+        "outcome": "ok",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "bb55f7db134df458bdb35d5a3b62b4cc",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "voice.first_audio",
+        "started_at": "2026-11-05T13:20:51.871Z",
+        "duration_ms": 11677.799999998882,
+        "outcome": "ok",
+        "model": "unknown/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "9a7871455ab14f88f0ac1697dd6c34de",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "speech.native_start",
+        "started_at": "2026-11-05T13:20:51.873Z",
+        "duration_ms": 171.5,
+        "outcome": "ok",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "ed3cc3adfc636098472c7dfc28f4e70d",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "speech.native_end",
+        "started_at": "2026-11-05T13:20:53.026Z",
+        "duration_ms": 1336.2000000011176,
+        "outcome": "ok",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "daa1abf02bd12881f30060c053545074",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "speech.native_start",
+        "started_at": "2026-11-05T13:20:53.193Z",
+        "duration_ms": 166.90000000037253,
+        "outcome": "ok",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "405b34432e400ec86e695b6ae97c07c4",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "speech.native_end",
+        "started_at": "2026-11-05T13:20:53.354Z",
+        "duration_ms": 325.59999999962747,
+        "outcome": "cancelled",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "1d064e28548bc3c78c9dda8716f9de61",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "speech.playback",
+        "started_at": "2026-11-05T13:20:53.358Z",
+        "duration_ms": 1493.9000000003725,
+        "outcome": "cancelled",
+        "model": "browser/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "8dec10bf641b93e124be6302781b6259",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "voice.complete",
+        "started_at": "2026-11-05T13:20:53.360Z",
+        "duration_ms": 13172.5,
+        "outcome": "cancelled",
+        "model": "unknown/unknown",
+        "spans": []
+      },
+      {
+        "trace_id": "4abd969d3878312ddfd7848651d14c1b",
+        "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+        "operation": "speech.complete",
+        "started_at": "2026-11-05T13:20:53.367Z",
+        "duration_ms": 2171.5999999996275,
+        "outcome": "cancelled",
+        "model": "browser/unknown",
+        "spans": []
+      }
+    ]
+  }
+}

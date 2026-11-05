@@ -41,7 +41,7 @@
 
 ### 验证
 
-- 前端全量 **543 passed**；后端全量 **638 passed**；TypeScript / ESLint / 生产构建通过。
+- 前端全量 **546 passed**；后端全量 **638 passed**；TypeScript / ESLint / 生产构建通过。
 - 前端 `Admin.test.tsx` 覆盖：当前后端版本默认、全部保留、历史测试版本、未知版本、当前发布空状态、钻取时版本保留。
 - 后端 `test_experience_uses_server_and_browser_releases_independently` 覆盖：后端版本和前端版本不同，模型阶段只取后端版本，浏览器阶段只取前端版本。
 - 现有鉴权、14 天保留策略不变。
@@ -137,11 +137,23 @@ Edge：
 - 真实麦克风通话：尝试过系统麦克风 + 扬声器回放合成 WAV；页面没有产生用户转写，因此标为「未采集」。本轮 5 条通话仍全部是 fake media WAV，不能冒充物理麦克风。
 - 回退后的系统输出：未采集。Edge 通话第 4 条有 Ava `synthesis-failed` → Mark 252.5ms 的回调证据，但没有同时录音；下一次验证应只针对这条回退路径单独录音。
 
-### Chrome 识别回退初步对账
+### Chrome 识别回退对账
 
-- Chrome 通话 #5：`asr.finalize` 5010.8ms 失败，随后缓冲识别 5987.1ms；从 Trace 时间看是**先后串行**，总 ASR 约 11s，不是并发。
-- Chrome 通话 #2：缓冲识别 6327.9ms，finalize 132.8ms；两者是外层总耗时与内层收尾的关系，仍需下一轮用更完整 span 对账，不能宣称完全串行。
-- 下一步按 interaction ID 对齐 Chrome 识别超时和缓冲回退，确认每段耗时和是否串行。
+已补脱敏 Trace：
+
+- [Chrome #2 与 #5 的 asr/chat/native 事件](evidence/2026-11-05-chrome-asr-traces.json)
+
+对账结果：
+
+- **Chrome #2**：`asr.transcribe` 为 `transport=direct`，总耗时 **6327.9ms**；`asr.finalize` **132.8ms** 与其几乎同时开始（相差 3ms），是其内部收尾，不是 6.3s 之外再串行 0.13s。聊天首段在 6.33s 后才开始。
+- **Chrome #5**：`asr.finalize` 先失败，耗时 **5010.8ms**；约 0.96s 后启动 `transport=buffered` 的整段识别，耗时 **5987.1ms**；两段是**串行**，合计约 **11.0s**，聊天首段才在之后出现。
+- 结论：长尾主要是“先等流式 finalize，失败后再整段重试”。下一轮应先拆流式收尾、整段重试和 HTTP 回退，判断是否可以更早切换或并行准备；本轮不改识别逻辑。
+
+### Edge 通话第 5 条证据
+
+- [Edge 通话 #5 脱敏 Trace](evidence/2026-11-05-edge-call-5-trace.json)
+- Trace 中 `speech.native_start` 为 **1906.7ms**，`voice_type=enhanced`，`transport=unknown`，`reason=started`。
+- 原始浏览器 JSON 的 `start_ms` 仍为空，因此这只能证明**启动回调**为 1.91s，不能证明实际声学输出；实际输出仍标「未采集」。
 
 ### 慢样本判断
 
@@ -165,6 +177,8 @@ Edge：
 - [通话 Chrome](evidence/2026-11-05-call-chrome.json)
 - [通话 Edge](evidence/2026-11-05-call-edge.json)
 - [Edge 最慢打字音色补验](evidence/2026-11-05-edge-slow-voice-followup.json)
+- [Chrome ASR 脱敏 Trace](evidence/2026-11-05-chrome-asr-traces.json)
+- [Edge 通话 #5 脱敏 Trace](evidence/2026-11-05-edge-call-5-trace.json)
 
 ## 备注
 
