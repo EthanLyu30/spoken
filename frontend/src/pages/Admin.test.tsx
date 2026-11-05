@@ -228,6 +228,68 @@ it("uses the frontend release for playback drilldown while keeping the backend s
   })).toBe(true));
 });
 
+it("keeps browser source and operation when filtering failures inside diagnostics", async () => {
+  const browserOverview = { ...overview, source: "browser", count: 2, errors: 1, failure: 0,
+    facets: { ...overview.facets, operations: ["speech.complete"] } };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(
+    String(url).includes("/overview") ? browserOverview : { items: [], total: 0 })));
+  show("diagnostics");
+  await waitFor(() => expect(screen.getByRole("tab", { name: "浏览器体验" })).toBeVisible());
+  fireEvent.click(screen.getByRole("tab", { name: "浏览器体验" }));
+  await waitFor(() => expect(screen.getByLabelText("业务操作")).toHaveValue(""));
+  fireEvent.change(screen.getByLabelText("业务操作"), { target: { value: "speech.complete" } });
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).includes("source=browser") && String(url).includes("operation=speech.complete"))).toBe(true));
+  const before = fetcher.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: /^失败 1$/ }));
+  await waitFor(() => {
+    const later = fetcher.mock.calls.slice(before).map(([url]) => new URL(String(url), "http://localhost"));
+    expect(later.some(url => url.pathname.endsWith("/admin/traces")
+      && url.searchParams.get("source") === "browser"
+      && url.searchParams.get("operation") === "speech.complete"
+      && url.searchParams.get("outcome") === "error")).toBe(true);
+  });
+});
+
+it("resets the diagnostics page when drilling in from overview", async () => {
+  const large = { ...overview, count: 100, errors: 1, facets: { ...overview.facets, operations: ["speech.complete"] } };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(
+    String(url).includes("/overview") ? large : { items: [], total: 100 })));
+  show("diagnostics");
+  await waitFor(() => expect(screen.getByRole("button", { name: "下一页" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => new URL(String(url), "http://localhost").searchParams.get("offset") === "50")).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "运行概览" }));
+  await waitFor(() => expect(screen.getByRole("region", { name: "运行指标" })).toBeVisible());
+  const before = fetcher.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: /^失败 1$/ }));
+  await waitFor(() => {
+    const later = fetcher.mock.calls.slice(before).map(([url]) => new URL(String(url), "http://localhost"));
+    expect(later.some(url => url.pathname.endsWith("/admin/traces") && url.searchParams.get("offset") === "0")).toBe(true);
+  });
+});
+
+it("clears the old release query when a known release refreshes to unknown", async () => {
+  let overviewCalls = 0;
+  fetcher.mockImplementation(async (url: string) => {
+    if (String(url).includes("/overview")) {
+      overviewCalls += 1;
+      const current = overviewCalls <= 2;
+      return new Response(JSON.stringify({ ...overview, count: 1,
+        server_release: current ? "server-current" : "unknown" }));
+    }
+    return new Response(JSON.stringify({ items: [], total: 0 }));
+  });
+  show("overview");
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => releaseParam(String(url)) === "server-current")).toBe(true));
+  const before = fetcher.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "刷新数据" }));
+  expect(await screen.findByText(/后端当前版本未知/)).toBeVisible();
+  const overviewAfter = fetcher.mock.calls.slice(before)
+    .map(([url]) => new URL(String(url), "http://localhost"))
+    .filter(url => url.pathname.endsWith("/admin/overview"));
+  expect(overviewAfter.at(-1)?.searchParams.get("release")).toBeNull();
+});
+
 it("opens the first scoped failure from the overview shortcut", async () => {
   const failure = { ...trace, outcome: "error", http_status: 500 };
   fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes("/overview")

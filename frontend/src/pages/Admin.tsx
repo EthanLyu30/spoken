@@ -150,11 +150,15 @@ export default function Admin() {
           // success so the next effect cannot silently keep stale metrics.
           previousRevision.current = revision;
           setData(overview); setOverviewError(""); hasOverview.current = true; setUpdatedAt(new Date().toISOString());
-          if (overview.server_release || !serverRelease) {
-            const resolved = overview.server_release ?? "unknown";
-            setServerRelease(resolved);
-            if (releaseMode === "current" && filters.source === "server" && resolved !== "unknown" && filters.release !== resolved) {
-              setFilters(old => old.release === resolved ? old : { ...old, release: resolved });
+          const resolved = overview.server_release ?? "unknown";
+          setServerRelease(resolved);
+          if (releaseMode === "current" && filters.source === "server") {
+            // An unknown runtime release must clear a previously known
+            // filter; otherwise the notice says "all retained" while the
+            // request still filters the old version.
+            const nextRelease = resolved === "unknown" ? "" : resolved;
+            if (filters.release !== nextRelease) {
+              setFilters(old => old.release === nextRelease ? old : { ...old, release: nextRelease });
             }
           }
         }).catch((err: unknown) => {
@@ -180,11 +184,19 @@ export default function Admin() {
   const update = (patch: Partial<AdminFilters>) => { setOffset(0); setFilters(old => ({ ...old, ...patch })); };
   const filterOutcome = (outcome: "error" | "timeout", inspectFirst = false) => {
     openFirstFailure.current = inspectFirst;
+    if (diagnostics) {
+      // Inside diagnostics keep the current source and business operation; only
+      // change the status filter and return to the first page.
+      setOffset(0);
+      setDiagnosticFilters(old => ({ ...old, outcome }));
+      return;
+    }
     const release = overviewReleaseMode === "current"
       ? serverRelease && serverRelease !== "unknown" ? serverRelease : ""
       : overviewReleaseMode === "all" ? "" : overviewFilters.release;
     setDiagnosticReleaseMode(overviewReleaseMode);
     setDiagnosticFilters({ ...overviewFilters, source: "server", operation: "", model: "", release, outcome });
+    setOffset(0);
     setView("diagnostics");
     window.requestAnimationFrame(() => document.querySelector(".admin-traces")?.scrollIntoView?.({ block: "start" }));
   };
@@ -194,6 +206,7 @@ export default function Admin() {
       : overviewReleaseMode === "all" ? "" : overviewFilters.release;
     setDiagnosticReleaseMode(overviewReleaseMode);
     setDiagnosticFilters({ ...overviewFilters, source: "browser", operation: "speech.complete", model: "", release, outcome: "" });
+    setOffset(0);
     setView("diagnostics");
     window.requestAnimationFrame(() => document.querySelector(".admin-traces")?.scrollIntoView?.({ block: "start" }));
   };
