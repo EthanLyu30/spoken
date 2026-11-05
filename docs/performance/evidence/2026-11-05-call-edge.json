@@ -1,0 +1,97 @@
+{
+  "probes": [
+    {
+      "index": 1,
+      "interaction_id": "6cc4c0c4b3f98396a2fcb3a9cc299872",
+      "request_ms": 201484.8,
+      "first_text_ms": 953.9,
+      "complete_ms": 1202.9
+    },
+    {
+      "index": 2,
+      "interaction_id": "40e838f705e1522353b029037f366968",
+      "request_ms": 209313.2,
+      "first_text_ms": 883.0,
+      "complete_ms": 1125.9
+    },
+    {
+      "index": 3,
+      "interaction_id": "db91e4e3906d12c74916bfbb05a7c9a4",
+      "request_ms": 216278.6,
+      "first_text_ms": 629.7,
+      "complete_ms": 880.3
+    },
+    {
+      "index": 4,
+      "interaction_id": "393d93c3495b198e0a5a70f780ef7d97",
+      "request_ms": 224047.1,
+      "first_text_ms": 1126.5,
+      "complete_ms": 1393.2
+    },
+    {
+      "index": 5,
+      "interaction_id": "4f52be9e4eda5826bf63e48931319bdc",
+      "request_ms": 231116.1,
+      "first_text_ms": 742.2,
+      "complete_ms": 947.7
+    }
+  ],
+  "speech": [
+    {
+      "voice": "Microsoft Ava Multilingual Online (Natural) - English (United States)",
+      "text": "Perfect, one breakfast sandwich.",
+      "requested_ms": 195202.6,
+      "start_ms": 197260.6,
+      "end_ms": null,
+      "error": "interrupted"
+    },
+    {
+      "voice": "Microsoft Ava Multilingual Online (Natural) - English (United States)",
+      "text": "Sounds good, I've got the sandwich down.",
+      "requested_ms": 202593.6,
+      "start_ms": 203642.4,
+      "end_ms": null,
+      "error": "interrupted"
+    },
+    {
+      "voice": "Microsoft Ava Multilingual Online (Natural) - English (United States)",
+      "text": "I hear you, latte and a breakfast sandwich, got it.",
+      "requested_ms": 210366.5,
+      "start_ms": 212194.9,
+      "end_ms": null,
+      "error": "interrupted"
+    },
+    {
+      "voice": "Microsoft Ava Multilingual Online (Natural) - English (United States)",
+      "text": "Okay, let me make this easy.",
+      "requested_ms": 217017.5,
+      "start_ms": 219964.1,
+      "end_ms": null,
+      "error": "interrupted"
+    },
+    {
+      "voice": "Microsoft Ava Multilingual Online (Natural) - English (United States)",
+      "text": "Sure, the sandwich is on the list already.",
+      "requested_ms": 225342.1,
+      "start_ms": null,
+      "end_ms": null,
+      "error": "synthesis-failed"
+    },
+    {
+      "voice": "Microsoft Mark - English (United States)",
+      "text": "Sure, the sandwich is on the list already.",
+      "requested_ms": 226896.8,
+      "start_ms": 227151.1,
+      "end_ms": null,
+      "error": "interrupted"
+    },
+    {
+      "voice": "Microsoft Ava Multilingual Online (Natural) - English (United States)",
+      "text": "I've got both of those down already.",
+      "requested_ms": 231958.6,
+      "start_ms": null,
+      "end_ms": null,
+      "error": null
+    }
+  ]
+}

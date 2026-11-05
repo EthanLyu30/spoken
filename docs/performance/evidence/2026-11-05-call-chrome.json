@@ -1,0 +1,89 @@
+{
+  "probes": [
+    {
+      "index": 1,
+      "interaction_id": "2194646933b567e7f4d7f95d851bf67c",
+      "request_ms": 219963.2,
+      "first_text_ms": 835.0,
+      "complete_ms": 1107.5
+    },
+    {
+      "index": 2,
+      "interaction_id": "67367ef23c7c11ec4aeaf89eedee30de",
+      "request_ms": 250662.6,
+      "first_text_ms": 1390.9,
+      "complete_ms": 1638.1
+    },
+    {
+      "index": 3,
+      "interaction_id": "ab2d5b74597dbd8479924cc2b1168f89",
+      "request_ms": 276209.8,
+      "first_text_ms": 1232.8,
+      "complete_ms": 1493.8
+    },
+    {
+      "index": 4,
+      "interaction_id": "d8fcb5de5b4df9dd6ad56d1784c90a19",
+      "request_ms": 302226.5,
+      "first_text_ms": 843.8,
+      "complete_ms": 1082.5
+    },
+    {
+      "index": 5,
+      "interaction_id": "a534d55e4cf62a03d1406fdff73126be",
+      "request_ms": 337362.6,
+      "first_text_ms": 368.3,
+      "complete_ms": 561.6
+    }
+  ],
+  "speech": [
+    {
+      "voice": "Google US English",
+      "text": "Alright, your medium latte and breakfast sandwich are coming right up.",
+      "requested_ms": 195643.2,
+      "start_ms": 196006.7,
+      "end_ms": null,
+      "error": "interrupted"
+    },
+    {
+      "voice": "Google US English",
+      "text": "You're all set, card's gone through.",
+      "requested_ms": 220984,
+      "start_ms": 221190.5,
+      "end_ms": null,
+      "error": "interrupted"
+    },
+    {
+      "voice": "Google US English",
+      "text": "Your order's already done and paid for, so you're good to go.",
+      "requested_ms": 252255.2,
+      "start_ms": 252468.1,
+      "end_ms": null,
+      "error": "interrupted"
+    },
+    {
+      "voice": "Google US English",
+      "text": "You've already paid and got your food, so you're all set.",
+      "requested_ms": 277621.2,
+      "start_ms": 278106.1,
+      "end_ms": null,
+      "error": "interrupted"
+    },
+    {
+      "voice": "Google US English",
+      "text": "Looks like we're going in circles a bit, so let's take a quick break from ordering.",
+      "requested_ms": 303274.2,
+      "start_ms": 303474,
+      "end_ms": null,
+      "error": "interrupted"
+    },
+    {
+      "voice": "Google US English",
+      "text": "Let's keep it simple.",
+      "requested_ms": 337868.1,
+      "start_ms": 338040.8,
+      "end_ms": null,
+      "error": null
+    }
+  ]
+}

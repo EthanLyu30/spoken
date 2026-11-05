@@ -1,0 +1,67 @@
+[
+  {
+    "index": 1,
+    "interaction_id": "b331de55a27c571c2ff5d63cd138dc64",
+    "text": "I would like a latte, and the total is $3.50, please.",
+    "request_ms": 220558.6,
+    "first_text_ms": 949.8,
+    "complete_ms": 950.6,
+    "speech_requested_ms": 967.5,
+    "native_start_ms": 1568.2,
+    "native_start_delay_ms": 600.7,
+    "voice": null,
+    "error": null
+  },
+  {
+    "index": 2,
+    "interaction_id": "8d1277df0c0d55e92916239a6aa23934",
+    "text": "Could I get an iced americano with oat milk?",
+    "request_ms": 226848.6,
+    "first_text_ms": 830.5,
+    "complete_ms": 1043.6,
+    "speech_requested_ms": 1101.0,
+    "native_start_ms": 1329.6,
+    "native_start_delay_ms": 228.6,
+    "voice": null,
+    "error": null
+  },
+  {
+    "index": 3,
+    "interaction_id": "7e2332c20da4d906107bf730bcb402cb",
+    "text": "Do you have any breakfast sandwiches under $8?",
+    "request_ms": 233148.6,
+    "first_text_ms": 942.1,
+    "complete_ms": 1119.9,
+    "speech_requested_ms": 1138.6,
+    "native_start_ms": 1339.3,
+    "native_start_delay_ms": 200.7,
+    "voice": null,
+    "error": null
+  },
+  {
+    "index": 4,
+    "interaction_id": "fa44a0642d971c3ac2d186101ef70b80",
+    "text": "I will pay by card, thank you.",
+    "request_ms": 239867.8,
+    "first_text_ms": 823.7,
+    "complete_ms": 1076.4,
+    "speech_requested_ms": 1080.2,
+    "native_start_ms": 1384.9,
+    "native_start_delay_ms": 304.7,
+    "voice": null,
+    "error": null
+  },
+  {
+    "index": 5,
+    "interaction_id": "dda26173097141fe44074bf36b0e229c",
+    "text": "Can I have the bill, please?",
+    "request_ms": 246188.3,
+    "first_text_ms": 855.8,
+    "complete_ms": 1024.1,
+    "speech_requested_ms": 1035.0,
+    "native_start_ms": 1205.5,
+    "native_start_delay_ms": 170.5,
+    "voice": null,
+    "error": null
+  }
+]
