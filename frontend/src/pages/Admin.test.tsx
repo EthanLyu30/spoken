@@ -23,13 +23,16 @@ const fetcher = vi.fn();
 function show(view = "diagnostics") {
   return render(<MemoryRouter initialEntries={[`/admin?view=${view}`]}><Admin /></MemoryRouter>);
 }
+const releaseParam = (url: string) => new URL(String(url), "http://localhost").searchParams.get("release");
+const modelExperience = (samples: number, p50: number) => ({ stages: [{ operation: "model.first_text", samples, p50, p95: p50, p99: p50 }],
+  playback: { completed: samples, failed: 0, cancelled: 0, classified: 0, never_started: 0, recovered: 0, recovery_failed: 0, recovery_cancelled: 0 } });
 beforeEach(() => {
   setToken("test-admin-session");
   useAuth.setState({ user });
   fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes("/overview") ? overview : url.includes(`/traces/${trace.trace_id}`) ? trace : { items: [], total: 0 }), { status: 200 }));
   vi.stubGlobal("fetch", fetcher);
 });
-afterEach(() => { vi.unstubAllGlobals(); fetcher.mockReset(); clearToken(); useAuth.setState({ user: null }); });
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); fetcher.mockReset(); clearToken(); useAuth.setState({ user: null }); });
 
 it("labels non-model operations by type instead of claiming a missing model", () => {
   expect(modelLabel({ ...trace, operation: "DELETE /api/words/{word_id}", model: null })).toBe("数据删除");
@@ -97,7 +100,7 @@ it("shows per-stage samples on the overview and opens playback diagnostics", asy
   expect(within(stages).getByText("300 ms")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "查看记录" }));
   expect(await screen.findByRole("region", { name: "调用记录" })).toBeVisible();
-  expect(screen.getByRole("tab", { name: "浏览器体验" })).toHaveAttribute("aria-selected", "true");
+  await waitFor(() => expect(screen.getByRole("tab", { name: "浏览器体验" })).toHaveAttribute("aria-selected", "true"));
   expect(screen.getByLabelText("业务操作")).toHaveValue("speech.complete");
 });
 
@@ -106,6 +109,294 @@ it("does not present a legacy capped account response as the global count", asyn
   show("users");
   expect(await screen.findByRole("alert")).toHaveTextContent("账号列表加载失败");
   expect(screen.queryByText("100")).not.toBeInTheDocument();
+});
+
+it("does not infer first-practice eligibility while account data is unavailable", async () => {
+  let finishRequest: (response: Response) => void = () => {};
+  fetcher.mockImplementation(() => new Promise<Response>(resolve => { finishRequest = resolve; }));
+  show("users");
+  const activation = within(screen.getByRole("region", { name: "首练转化" }));
+  expect(activation.getByText("正在读取首练数据…")).toBeVisible();
+  await act(async () => finishRequest(new Response("{}", { status: 500 })));
+  expect(activation.getByText("首练数据暂不可用")).toBeVisible();
+  expect(activation.queryByText("新注册账号尚未满 24 小时")).not.toBeInTheDocument();
+});
+
+it("defaults the overview to actual server release and supports all/history scopes", async () => {
+  const current = {
+    ...overview, server_release: "server-current", count: 2,
+    facets: { ...overview.facets, releases: ["server-current", "browser-current", "development", "unknown"] },
+  };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(
+    String(url).includes("/overview") ? current : { items: [], total: 0 })));
+  show("overview");
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => releaseParam(String(url)) === "server-current")).toBe(true));
+  const version = screen.getByLabelText("发布版本");
+  expect(version).toHaveValue("__current");
+  expect(screen.getByText(/当前发布（server-cur/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "调用诊断" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "浏览器体验" }));
+  const browserRelease = String(import.meta.env.VITE_RELEASE ?? "unknown");
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => {
+    const value = String(url);
+    return value.includes("source=browser") && releaseParam(value) === browserRelease;
+  })).toBe(true));
+  fireEvent.change(screen.getByLabelText("发布版本"), { target: { value: "__all" } });
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => {
+    const value = String(url);
+    return value.includes("source=browser") && releaseParam(value) === null;
+  })).toBe(true));
+  fireEvent.change(screen.getByLabelText("发布版本"), { target: { value: "development" } });
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => releaseParam(String(url)) === "development")).toBe(true));
+});
+
+it("shows an explicit empty state when the current release has no samples", async () => {
+  const empty = {
+    ...overview, server_release: "server-empty", count: 0, errors: 0,
+    facets: { ...overview.facets, releases: ["server-empty", "development", "unknown"] },
+  };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(
+    String(url).includes("/overview") ? empty : { items: [], total: 0 })));
+  show("overview");
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => releaseParam(String(url)) === "server-empty")).toBe(true));
+  expect(await screen.findByText(/当前发布暂无可比较样本/)).toBeVisible();
+  expect(screen.getByRole("option", { name: /测试 · development/ })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "未知版本" })).toBeInTheDocument();
+});
+
+it("keeps overview and diagnostics scopes independent", async () => {
+  const current = { ...overview, server_release: "server-current", count: 2 };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(
+    String(url).includes("/overview") ? current : { items: [], total: 0 })));
+  show("overview");
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => releaseParam(String(url)) === "server-current")).toBe(true));
+  expect(screen.getByLabelText("发布版本")).toHaveValue("__current");
+  fireEvent.click(screen.getByRole("button", { name: "调用诊断" }));
+  await waitFor(() => expect(screen.getByRole("tab", { name: "浏览器体验" })).toBeVisible());
+  fireEvent.click(screen.getByRole("tab", { name: "浏览器体验" }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => {
+    const value = String(url); return value.includes("source=browser") && releaseParam(value) === String(import.meta.env.VITE_RELEASE ?? "unknown");
+  })).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "运行概览" }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => {
+    const value = String(url); const params = new URL(value, "http://localhost").searchParams;
+    return params.get("source") === "server" && params.get("release") === "server-current" && params.get("operation") === null;
+  })).toBe(true));
+});
+
+it("shows unknown backend release without pretending it is current", async () => {
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(
+    String(url).includes("/overview") ? { ...overview, server_release: "unknown", count: 1 } : { items: [], total: 0 })));
+  show("overview");
+  expect(await screen.findByText(/后端当前版本未知/)).toBeVisible();
+  expect(screen.getByLabelText("发布版本")).toHaveValue("__current");
+});
+
+it("keeps a historical version selected across diagnostics sources", async () => {
+  const current = { ...overview, server_release: "server-current", count: 2,
+    facets: { ...overview.facets, releases: ["server-current", "development"] } };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(
+    String(url).includes("/overview") ? current : { items: [], total: 0 })));
+  show("overview");
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => releaseParam(String(url)) === "server-current")).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "调用诊断" }));
+  await waitFor(() => expect(screen.getByLabelText("发布版本")).toBeVisible());
+  fireEvent.change(screen.getByLabelText("发布版本"), { target: { value: "development" } });
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => releaseParam(String(url)) === "development")).toBe(true));
+  fireEvent.click(screen.getByRole("tab", { name: "浏览器体验" }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => {
+    const value = String(url); return value.includes("source=browser") && releaseParam(value) === "development";
+  })).toBe(true));
+  expect(screen.getByLabelText("发布版本")).toHaveValue("development");
+  fireEvent.click(screen.getByRole("tab", { name: "后端调用" }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => {
+    const value = String(url); return value.includes("source=server") && releaseParam(value) === "development";
+  })).toBe(true));
+});
+
+it("uses the frontend release for playback drilldown while keeping the backend scope separate", async () => {
+  const current = { ...overview, server_release: "server-current", count: 2,
+    experience: { stages: [], playback: { completed: 1, failed: 0, cancelled: 0, classified: 0, never_started: 0, recovered: 0, recovery_failed: 0, recovery_cancelled: 0 } } };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(
+    String(url).includes("/overview") ? current : { items: [], total: 0 })));
+  show("overview");
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => releaseParam(String(url)) === "server-current")).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "查看记录" }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => {
+    const value = String(url); const params = new URL(value, "http://localhost").searchParams;
+    return params.get("source") === "browser" && params.get("operation") === "speech.complete"
+      && params.get("release") === String(import.meta.env.VITE_RELEASE ?? "unknown")
+      && params.get("experience_server_release") === "server-current";
+  })).toBe(true));
+});
+
+it("does not inherit the backend release for browser experience when frontend release is unknown", async () => {
+  vi.stubEnv("VITE_RELEASE", "unknown");
+  fetcher.mockImplementation(async (url: string) => {
+    if (!String(url).includes("/overview")) return new Response(JSON.stringify({ items: [], total: 0 }));
+    const params = new URL(String(url), "http://localhost").searchParams;
+    const inherited = params.get("experience_browser_release") === "server-current";
+    return new Response(JSON.stringify({ ...overview, count: 2, server_release: "server-current",
+      experience: { stages: [{ operation: "chat.first_text", samples: inherited ? 1 : 2,
+        p50: inherited ? 900 : 100, p95: inherited ? 900 : 100, p99: inherited ? 900 : 100 }],
+        playback: { completed: 2, failed: 0, cancelled: 0, classified: 0, never_started: 0, recovered: 0, recovery_failed: 0, recovery_cancelled: 0 } } }));
+  });
+  show("overview");
+  await waitFor(() => {
+    const latest = fetcher.mock.calls.map(([url]) => new URL(String(url), "http://localhost"))
+      .filter(url => url.pathname.endsWith("/admin/overview")).at(-1);
+    expect(latest?.searchParams.get("release")).toBe("server-current");
+    expect(latest?.searchParams.get("experience_server_release")).toBe("server-current");
+    expect(latest?.searchParams.get("experience_browser_release")).toBe("__all");
+  });
+  const stages = await screen.findByRole("region", { name: "新对话等待" });
+  const row = within(stages).getByRole("row", { name: /浏览器请求至首段文本/ });
+  expect(within(row).getAllByText("100 ms")).toHaveLength(2);
+  expect(within(row).getByText("2")).toBeVisible();
+  expect(within(row).queryByText("900 ms")).not.toBeInTheDocument();
+});
+
+it("keeps the model card on the full retained scope when current release is unknown", async () => {
+  fetcher.mockImplementation(async (url: string) => {
+    if (!String(url).includes("/overview")) return new Response(JSON.stringify({ items: [], total: 0 }));
+    const params = new URL(String(url), "http://localhost").searchParams;
+    const filtered = params.get("experience_server_release") === "unknown";
+    return new Response(JSON.stringify({ ...overview, count: 2, server_release: "unknown",
+      experience: modelExperience(filtered ? 1 : 2, filtered ? 900 : 100) }));
+  });
+  show("overview");
+  expect(await screen.findByText(/后端当前版本未知/)).toBeVisible();
+  const stages = await screen.findByRole("region", { name: "新对话等待" });
+  const row = within(stages).getByRole("row", { name: /模型请求至首段文本/ });
+  expect(within(row).getAllByText("100 ms")).toHaveLength(2);
+  expect(within(row).getByText("2")).toBeVisible();
+  expect(within(row).queryByText("900 ms")).not.toBeInTheDocument();
+  const latest = fetcher.mock.calls.map(([url]) => new URL(String(url), "http://localhost"))
+    .filter(url => url.pathname.endsWith("/admin/overview")).at(-1);
+  expect(latest?.searchParams.get("release")).toBeNull();
+  expect(latest?.searchParams.get("experience_server_release")).toBeNull();
+});
+
+it("keeps an explicitly selected unknown version filtered", async () => {
+  fetcher.mockImplementation(async (url: string) => {
+    if (!String(url).includes("/overview")) return new Response(JSON.stringify({ items: [], total: 0 }));
+    const params = new URL(String(url), "http://localhost").searchParams;
+    const explicitUnknown = params.get("release") === "unknown" || params.get("experience_server_release") === "unknown";
+    return new Response(JSON.stringify({ ...overview, count: explicitUnknown ? 1 : 2, server_release: "server-current",
+      facets: { ...overview.facets, releases: ["server-current", "unknown"] },
+      experience: modelExperience(explicitUnknown ? 1 : 2, explicitUnknown ? 900 : 100) }));
+  });
+  show("overview");
+  await waitFor(() => expect(screen.getByLabelText("发布版本")).toHaveValue("__current"));
+  fireEvent.change(screen.getByLabelText("发布版本"), { target: { value: "unknown" } });
+  await waitFor(() => {
+    const latest = fetcher.mock.calls.map(([url]) => new URL(String(url), "http://localhost")).filter(url => url.pathname.endsWith("/admin/overview")).at(-1);
+    expect(latest?.searchParams.get("release")).toBe("unknown");
+    expect(latest?.searchParams.get("experience_server_release")).toBe("unknown");
+  });
+  const stages = await screen.findByRole("region", { name: "新对话等待" });
+  const row = within(stages).getByRole("row", { name: /模型请求至首段文本/ });
+  expect(within(row).getAllByText("900 ms")).toHaveLength(2);
+  expect(within(row).getByText("1")).toBeVisible();
+});
+
+it("keeps browser source and operation when filtering failures inside diagnostics", async () => {
+  const browserOverview = { ...overview, source: "browser", count: 2, errors: 1, failure: 0,
+    facets: { ...overview.facets, operations: ["speech.complete"] } };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(
+    String(url).includes("/overview") ? browserOverview : { items: [], total: 0 })));
+  show("diagnostics");
+  await waitFor(() => expect(screen.getByRole("tab", { name: "浏览器体验" })).toBeVisible());
+  fireEvent.click(screen.getByRole("tab", { name: "浏览器体验" }));
+  await waitFor(() => expect(screen.getByLabelText("业务操作")).toHaveValue(""));
+  fireEvent.change(screen.getByLabelText("业务操作"), { target: { value: "speech.complete" } });
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).includes("source=browser") && String(url).includes("operation=speech.complete"))).toBe(true));
+  const before = fetcher.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: /^失败 1$/ }));
+  await waitFor(() => {
+    const later = fetcher.mock.calls.slice(before).map(([url]) => new URL(String(url), "http://localhost"));
+    expect(later.some(url => url.pathname.endsWith("/admin/traces")
+      && url.searchParams.get("source") === "browser"
+      && url.searchParams.get("operation") === "speech.complete"
+      && url.searchParams.get("outcome") === "error")).toBe(true);
+  });
+  expect(screen.getByRole("tab", { name: "浏览器体验" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByLabelText("业务操作")).toHaveValue("speech.complete");
+  expect(screen.getByRole("button", { name: /^失败 1$/ })).toHaveAttribute("aria-pressed", "true");
+});
+
+it("resets the diagnostics page when drilling in from overview", async () => {
+  const large = { ...overview, count: 100, errors: 1, facets: { ...overview.facets, operations: ["speech.complete"] } };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(
+    String(url).includes("/overview") ? large : { items: [trace], total: 100 })));
+  show("diagnostics");
+  await waitFor(() => expect(screen.getByRole("button", { name: "下一页" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => new URL(String(url), "http://localhost").searchParams.get("offset") === "50")).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "运行概览" }));
+  await waitFor(() => expect(screen.getByRole("region", { name: "运行指标" })).toBeVisible());
+  const before = fetcher.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: /^失败 1$/ }));
+  await waitFor(() => {
+    const later = fetcher.mock.calls.slice(before).map(([url]) => new URL(String(url), "http://localhost"));
+    expect(later.some(url => url.pathname.endsWith("/admin/traces") && url.searchParams.get("offset") === "0")).toBe(true);
+  });
+  expect(await screen.findByText(/第 1–1 条 \/ 100/)).toBeVisible();
+});
+
+it("resets the page for playback drilldown from overview", async () => {
+  const large = { ...overview, count: 100, errors: 1,
+    experience: { stages: [], playback: { completed: 1, failed: 0, cancelled: 0, classified: 0, never_started: 0, recovered: 0, recovery_failed: 0, recovery_cancelled: 0 } },
+    facets: { ...overview.facets, operations: ["speech.complete"] } };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(
+    String(url).includes("/overview") ? large : { items: [trace], total: 100 })));
+  show("diagnostics");
+  await waitFor(() => expect(screen.getByRole("button", { name: "下一页" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => new URL(String(url), "http://localhost").searchParams.get("offset") === "50")).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "运行概览" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "查看记录" })).toBeVisible());
+  const before = fetcher.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "查看记录" }));
+  await waitFor(() => {
+    const later = fetcher.mock.calls.slice(before).map(([url]) => new URL(String(url), "http://localhost"));
+    expect(later.some(url => url.pathname.endsWith("/admin/traces") && url.searchParams.get("offset") === "0"
+      && url.searchParams.get("operation") === "speech.complete")).toBe(true);
+  });
+  expect(await screen.findByText(/第 1–1 条 \/ 100/)).toBeVisible();
+});
+
+it("clears the old release query when a known release refreshes to unknown", async () => {
+  let overviewCalls = 0;
+  fetcher.mockImplementation(async (url: string) => {
+    if (String(url).includes("/overview")) {
+      overviewCalls += 1;
+      const params = new URL(String(url), "http://localhost").searchParams;
+      const current = overviewCalls <= 2;
+      const filtered = params.get("experience_server_release") === "unknown";
+      return new Response(JSON.stringify({ ...overview, count: current ? 2 : 2,
+        server_release: current ? "server-current" : "unknown",
+        experience: modelExperience(filtered ? 1 : 2, filtered ? 900 : 100) }));
+    }
+    return new Response(JSON.stringify({ items: [], total: 0 }));
+  });
+  show("overview");
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => releaseParam(String(url)) === "server-current")).toBe(true));
+  const refresh = screen.getByRole("button", { name: "刷新数据" });
+  await waitFor(() => expect(refresh).toBeEnabled());
+  const before = fetcher.mock.calls.length;
+  fireEvent.click(refresh);
+  expect(await screen.findByText(/后端当前版本未知/)).toBeVisible();
+  const overviewAfter = fetcher.mock.calls.slice(before)
+    .map(([url]) => new URL(String(url), "http://localhost"))
+    .filter(url => url.pathname.endsWith("/admin/overview"));
+  expect(overviewAfter.at(-1)?.searchParams.get("release")).toBeNull();
+  expect(overviewAfter.at(-1)?.searchParams.get("experience_server_release")).toBe("__all");
+  const stages = await screen.findByRole("region", { name: "新对话等待" });
+  const row = within(stages).getByRole("row", { name: /模型请求至首段文本/ });
+  expect(within(row).getAllByText("100 ms")).toHaveLength(2);
+  expect(within(row).getByText("2")).toBeVisible();
+  expect(within(row).queryByText("900 ms")).not.toBeInTheDocument();
 });
 
 it("opens the first scoped failure from the overview shortcut", async () => {
