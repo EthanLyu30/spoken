@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timezone
 import json
 import secrets
+import re
 from time import monotonic
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -57,7 +58,10 @@ async def client_timing(request: Request):
     sink = getattr(request.app.state, "telemetry_sink", None)
     if sink:
         diagnostics = event.model_dump(include=SINK_DIAGNOSTIC_FIELDS, exclude_none=True)
-        sink.submit({"trace_id": secrets.token_hex(16), "interaction_id": event.interaction_id, "started_at": datetime.now(timezone.utc).replace(tzinfo=None),
+        header_test_run = request.headers.get("x-test-run-id", "")
+        test_run_id = event.test_run_id or (header_test_run if re.fullmatch(r"[A-Za-z0-9._-]{1,64}", header_test_run) else None)
+        sink.submit({"trace_id": secrets.token_hex(16), "interaction_id": event.interaction_id,
+            "test_run_id": test_run_id, "started_at": datetime.now(timezone.utc).replace(tzinfo=None),
             "operation": event.operation, "source": "browser", "outcome": event.outcome,
             "duration_ms": event.duration_ms, "release": event.release, "model": f"{event.engine}/{event.transport}", "spans_json": json.dumps([
                 {"id": secrets.token_hex(8), "parent_id": None, "name": event.operation, "offset_ms": 0,

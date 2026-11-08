@@ -33,6 +33,17 @@ def test_root_failure_collects_class_names_without_exception_messages():
     assert caught.record()['outcome'] == 'timeout'
 
 
+def test_trace_context_carries_test_run_id_and_safe_classification():
+    from app.core.observability import TraceContext, trace_classify
+
+    with TraceContext('POST /api/asr', test_run_id='run-2026-11-08') as trace:
+        trace_classify('XfAsrQuotaError', 'XfAsrError')
+    record = trace.record()
+    assert record['test_run_id'] == 'run-2026-11-08'
+    assert record['error_type'] == 'XfAsrQuotaError'
+    assert record['error_cause_type'] == 'XfAsrError'
+
+
 def test_old_and_new_failure_details_preserve_unknowns():
     from app.models.telemetry import TelemetryRecord
     from app.services.telemetry import serialize
@@ -222,6 +233,28 @@ def test_shared_browser_diagnostic_fields_reach_the_sink_by_operation():
             expected = {k: v for k, v in body.items() if k not in {'operation', 'duration_ms'}}
             assert all(attributes[k] == v for k, v in expected.items())
             assert 'private' not in json.dumps(attributes)
+    finally:
+        if previous is None:
+            del app.state.telemetry_sink
+        else:
+            app.state.telemetry_sink = previous
+
+
+def test_browser_test_run_id_accepts_payload_or_header():
+    from types import SimpleNamespace
+    records = []
+    previous = getattr(app.state, 'telemetry_sink', None)
+    app.state.telemetry_sink = SimpleNamespace(submit=records.append)
+    try:
+        client = TestClient(app)
+        payload = {'operation': 'asr.attempt', 'duration_ms': 10, 'stage': 'open',
+                   'attempt': 1, 'fallback_reason': 'unavailable', 'result_class': 'empty'}
+        assert client.post('/api/telemetry/client', json={**payload, 'test_run_id': 'run-body'}).status_code == 202
+        assert client.post('/api/telemetry/client', json=payload, headers={'X-Test-Run-Id': 'run-header'}).status_code == 202
+        assert client.post('/api/telemetry/client', json={**payload, 'test_run_id': 'private value'}).status_code == 422
+        assert client.post('/api/telemetry/client', json={'operation': 'chat.first_text', 'duration_ms': 10, 'test_run_id': 'run-chat'}).status_code == 202
+        assert records[0]['test_run_id'] == 'run-body'
+        assert records[1]['test_run_id'] == 'run-header'
     finally:
         if previous is None:
             del app.state.telemetry_sink

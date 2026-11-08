@@ -7,7 +7,8 @@ NATIVE_END_FIELDS = {"reason", "error_code", "state_at_event", "watchdog_budget_
 ASR_ATTEMPT_FIELDS = {"stage", "attempt", "fallback_reason", "audio_bytes", "result_class"}
 PRONUNCIATION_FIELDS = {"entry", "audio_bytes"}
 PLAYBACK_FIELDS = {"playback_started", "reason", "error_code", "voice_type"}
-SINK_DIAGNOSTIC_FIELDS = NATIVE_START_FIELDS | NATIVE_END_FIELDS | ASR_ATTEMPT_FIELDS | PRONUNCIATION_FIELDS | PLAYBACK_FIELDS
+TEST_FIELDS = {"test_run_id"}
+SINK_DIAGNOSTIC_FIELDS = NATIVE_START_FIELDS | NATIVE_END_FIELDS | ASR_ATTEMPT_FIELDS | PRONUNCIATION_FIELDS | PLAYBACK_FIELDS | TEST_FIELDS
 
 
 class BrowserTiming(BaseModel):
@@ -22,6 +23,7 @@ class BrowserTiming(BaseModel):
     transport: Literal["direct", "relay", "buffered", "local", "unknown"] = "unknown"
     interaction_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     release: str = Field(default="unknown", max_length=80, pattern=r"^[A-Za-z0-9._-]+$")
+    test_run_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
 
     reason: Literal["started", "startup_timeout", "end_before_start", "speech_error", "speak_exception", "cancelled",
                     "end", "native_error", "completion_timeout"] | None = None
@@ -47,7 +49,7 @@ class BrowserTiming(BaseModel):
 
     @model_validator(mode="after")
     def operation_fields_only(self):
-        supplied = self.model_fields_set
+        supplied = self.model_fields_set - TEST_FIELDS
         if self.operation != "speech.native_end" and self.duration_ms > 300_000:
             raise ValueError("duration_ms exceeds the operation limit")
         native_start_only = {"state_before", "state_after", "voice_type", "voice_matched"}

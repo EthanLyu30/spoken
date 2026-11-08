@@ -136,6 +136,8 @@ class XfAsrClient:
         async for message in ws:
             resp = json.loads(message)
             if resp.get("code") != 0:
+                trace_attribute("provider_code", str(resp.get("code")))
+                trace_attribute("failure_stage", "provider_finalize")
                 raise XfAsrError(
                     f"iFlytek ASR error {resp.get('code')}: {resp.get('message')}"
                 )

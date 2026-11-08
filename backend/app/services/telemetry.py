@@ -280,7 +280,7 @@ def serialize(record, *, detail=False):
     from app.services.model_pricing import record_reference_cost
     out = {key: getattr(record, key) for key in ("trace_id", "interaction_id", "operation", "source", "outcome", "duration_ms",
         "http_status", "ttft_ms", "model", "input_tokens", "output_tokens", "release",
-        "error_type", "error_cause_type")}
+        "error_type", "error_cause_type", "test_run_id")}
     out["started_at"] = record.started_at.isoformat(timespec="milliseconds") + "Z"
     spans = None
     if detail or not out["model"]:

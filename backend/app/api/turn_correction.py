@@ -12,6 +12,7 @@ from app.schemas.turn_correction import (
 )
 from app.services.deepseek import DeepSeekClient, DeepSeekError
 from app.services.turn_correction import generate_turn_correction
+from app.core.observability import trace_classify
 
 router = APIRouter(tags=["turn-correction"])
 
@@ -41,4 +42,5 @@ async def turn_correction(
             detail="纠错分析超时，请稍后重试。",
         ) from exc
     except DeepSeekError as exc:
+        trace_classify("TurnCorrectionError", type(exc.__cause__).__name__ if exc.__cause__ else None)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
