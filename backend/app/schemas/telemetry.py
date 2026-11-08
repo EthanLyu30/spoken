@@ -7,7 +7,9 @@ NATIVE_END_FIELDS = {"reason", "error_code", "state_at_event", "watchdog_budget_
 ASR_ATTEMPT_FIELDS = {"stage", "attempt", "fallback_reason", "audio_bytes", "result_class"}
 PRONUNCIATION_FIELDS = {"entry", "audio_bytes"}
 PLAYBACK_FIELDS = {"playback_started", "reason", "error_code", "voice_type"}
-SINK_DIAGNOSTIC_FIELDS = NATIVE_START_FIELDS | NATIVE_END_FIELDS | ASR_ATTEMPT_FIELDS | PRONUNCIATION_FIELDS | PLAYBACK_FIELDS
+TEST_FIELDS = {"test_run_id"}
+GLOBAL_DIAGNOSTIC_FIELDS = {"test_run_id", "provider_code"}
+SINK_DIAGNOSTIC_FIELDS = NATIVE_START_FIELDS | NATIVE_END_FIELDS | ASR_ATTEMPT_FIELDS | PRONUNCIATION_FIELDS | PLAYBACK_FIELDS | GLOBAL_DIAGNOSTIC_FIELDS
 
 
 class BrowserTiming(BaseModel):
@@ -22,6 +24,7 @@ class BrowserTiming(BaseModel):
     transport: Literal["direct", "relay", "buffered", "local", "unknown"] = "unknown"
     interaction_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     release: str = Field(default="unknown", max_length=80, pattern=r"^[A-Za-z0-9._-]+$")
+    test_run_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
 
     reason: Literal["started", "startup_timeout", "end_before_start", "speech_error", "speak_exception", "cancelled",
                     "end", "native_error", "completion_timeout"] | None = None
@@ -43,11 +46,12 @@ class BrowserTiming(BaseModel):
     fallback_reason: Literal["none", "timeout", "disconnect", "provider_error", "empty", "http_error", "unavailable", "unknown"] | None = None
     audio_bytes: int | None = Field(default=None, ge=0, le=5_760_000, strict=True)
     result_class: Literal["empty", "nonempty"] | None = None
+    provider_code: int | None = Field(default=None, ge=1, le=99999, strict=True)
     entry: Literal["turn_correction", "follow_read"] | None = None
 
     @model_validator(mode="after")
     def operation_fields_only(self):
-        supplied = self.model_fields_set
+        supplied = self.model_fields_set - GLOBAL_DIAGNOSTIC_FIELDS
         if self.operation != "speech.native_end" and self.duration_ms > 300_000:
             raise ValueError("duration_ms exceeds the operation limit")
         native_start_only = {"state_before", "state_after", "voice_type", "voice_matched"}

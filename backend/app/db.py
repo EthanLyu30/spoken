@@ -121,9 +121,12 @@ def _migrate_telemetry_errors() -> None:
             for column in ("error_type", "error_cause_type"):
                 if column not in existing:
                     conn.exec_driver_sql(f"ALTER TABLE telemetry_records ADD COLUMN {column} VARCHAR(100)")
+            if "test_run_id" not in existing:
+                conn.exec_driver_sql("ALTER TABLE telemetry_records ADD COLUMN test_run_id VARCHAR(64)")
         else:
             for column in ("error_type", "error_cause_type"):
                 conn.exec_driver_sql(f"ALTER TABLE telemetry_records ADD COLUMN IF NOT EXISTS {column} VARCHAR(100)")
+            conn.exec_driver_sql("ALTER TABLE telemetry_records ADD COLUMN IF NOT EXISTS test_run_id VARCHAR(64)")
 
 
 def _migrate_session_identity() -> None:

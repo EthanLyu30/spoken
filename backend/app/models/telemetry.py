@@ -32,6 +32,7 @@ class TelemetryRecord(Base):
     http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     error_cause_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    test_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     ttft_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.observability import TraceContext
+from app.core.observability import TraceContext, span
 from app.services import xf_asr
 
 
@@ -234,6 +234,34 @@ def test_provider_rejection_is_not_retried_as_a_transient_dial_failure(monkeypat
         assert socket.closed
 
     asyncio.run(run())
+
+
+def test_provider_error_stage_is_not_always_finalize():
+    class OneMessage:
+        def __init__(self, payload):
+            self.payload = payload
+        def __aiter__(self):
+            return self
+        async def __anext__(self):
+            if self.payload is None:
+                raise StopAsyncIteration
+            payload, self.payload = self.payload, None
+            return payload
+
+    client = xf_asr.XfAsrClient(SETTINGS)
+    async def run(phase):
+        with TraceContext("POST /api/asr") as trace:
+            with span("asr.transcribe"):
+                with pytest.raises(xf_asr.XfAsrError):
+                    await client._recv(OneMessage(json.dumps({"code": 10005, "message": "rejected"})), [], started=0, phase=phase)
+        attrs = next(span["attributes"] for span in json.loads(trace.record()["spans_json"]) if span["name"] == "asr.transcribe")
+        return attrs
+
+    stream_attrs = asyncio.run(run({"final": False}))
+    final_attrs = asyncio.run(run({"final": True}))
+    assert stream_attrs["provider_code"] == "10005"
+    assert stream_attrs["failure_stage"] == "provider_stream"
+    assert final_attrs["failure_stage"] == "provider_finalize"
 
 
 def test_buffered_final_wait_has_its_own_short_deadline(monkeypatch):

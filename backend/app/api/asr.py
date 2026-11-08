@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 
 from fastapi import (
     APIRouter,
@@ -18,6 +19,7 @@ from app.core.config import Settings, get_settings
 from app.core.deps import get_optional_client_id
 from app.services.xf_auth import build_auth_url
 from app.services.xf_asr import XfAsrClient, XfAsrError, XfAsrStream
+from app.core.observability import trace_classify
 from app.services.xf_ise import MAX_AUDIO_BYTES
 
 router = APIRouter(tags=["asr"])
@@ -59,6 +61,9 @@ async def asr(
     try:
         text = await client.transcribe(pcm, language=language)
     except XfAsrError as exc:
+        match = re.search(r"iFlytek ASR error (\d+)", str(exc))
+        code = match.group(1) if match else None
+        trace_classify("XfAsrQuotaError" if code == "11201" else "XfAsrError", "XfAsrError")
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"text": text}
 
@@ -124,7 +129,14 @@ async def _relay_utterance(websocket: WebSocket, settings, make_stream, language
     except WebSocketDisconnect:
         return True
     except XfAsrError as exc:
-        await websocket.send_json({"type": "error", "message": str(exc)})
+        provider_code = getattr(stream, "_provider_code", None) if stream is not None else None
+        if provider_code is None:
+            code_match = re.search(r"iFlytek ASR error (\d+)", str(exc))
+            provider_code = code_match.group(1) if code_match else None
+        payload = {"type": "error", "message": str(exc)}
+        if provider_code is not None:
+            payload["code"] = int(provider_code) if provider_code.isdigit() else provider_code
+        await websocket.send_json(payload)
         # Remaining queued frames still belong to this failed utterance. Close
         # the relay so they cannot become a new session with a tail-only final.
         return True

@@ -28,7 +28,8 @@ _span_data: ContextVar[dict | None] = ContextVar("spoken_span_data", default=Non
 _ATTRS = {"provider", "model", "attempt", "cache_hit", "input_tokens", "output_tokens",
           "input_chars", "output_chars", "audio_bytes", "engine", "transport",
           "error_type", "ttft_ms", "scoring_version", "answer_count", "provider_status",
-          "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "result_class", "entry"}
+          "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "result_class", "entry",
+          "provider_code", "failure_stage", "test_run_id"}
 
 
 def _attributes(values):
@@ -46,11 +47,12 @@ def _outcome(exc):
 
 
 class TraceContext:
-    def __init__(self, operation: str, *, source="server", interaction_id=None):
+    def __init__(self, operation: str, *, source="server", interaction_id=None, test_run_id=None):
         self.trace_id = secrets.token_hex(16)
         self.operation = operation
         self.source = source
         self.interaction_id = interaction_id
+        self.test_run_id = test_run_id
         self.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
         self.start = perf_counter()
         self.duration_ms = None
@@ -83,6 +85,11 @@ class TraceContext:
         cause = exc.__cause__
         self.error_cause_type = type(cause).__name__[:100] if cause is not None else None
 
+    def classify(self, error_type, cause_type=None):
+        if self.error_type is None:
+            self.error_type = str(error_type)[:100]
+            self.error_cause_type = str(cause_type)[:100] if cause_type else None
+
     def record(self):
         elapsed = self.duration_ms if self.duration_ms is not None else (perf_counter()-self.start)*1000
         snapshots = []
@@ -104,7 +111,7 @@ class TraceContext:
         models = [s["attributes"] for s in snapshots if s["name"].startswith("deepseek.")]
         complete = bool(models) and all(type(m.get("input_tokens")) is int and type(m.get("output_tokens")) is int for m in models)
         first = [m["ttft_ms"] for m in models if isinstance(m.get("ttft_ms"), (float, int))]
-        return {"trace_id": self.trace_id, "interaction_id": self.interaction_id, "started_at": self.started_at,
+        return {"trace_id": self.trace_id, "interaction_id": self.interaction_id, "test_run_id": self.test_run_id, "started_at": self.started_at,
                 "operation": self.operation[:120], "source": self.source,
                 "outcome": self.outcome, "http_status": self.http_status,
                 "error_type": self.error_type, "error_cause_type": self.error_cause_type,
@@ -164,6 +171,12 @@ def trace_error(kind="error"):
         kind = _outcome(kind)
     if trace and kind in {"error", "timeout", "cancelled"}:
         trace.outcome = kind
+
+
+def trace_classify(error_type: str, cause_type: str | None = None):
+    trace = _current.get()
+    if trace is not None:
+        trace.classify(error_type, cause_type)
 
 
 def traced(name: str, **attributes):
@@ -265,7 +278,9 @@ class TelemetryMiddleware:
             return await self.app(scope, receive, send)
         interaction = next((value for key, value in scope.get("headers", []) if key.lower() == b"x-interaction-id"), b"")
         interaction_id = interaction.decode("ascii") if re.fullmatch(b"[a-f0-9]{32}", interaction) else None
-        trace = TraceContext(operation="unmatched", interaction_id=interaction_id)
+        test_run = next((value for key, value in scope.get("headers", []) if key.lower() == b"x-test-run-id"), b"")
+        test_run_id = test_run.decode("ascii") if re.fullmatch(rb"[A-Za-z0-9._-]{1,64}", test_run) else None
+        trace = TraceContext(operation="unmatched", interaction_id=interaction_id, test_run_id=test_run_id)
         disconnected = False
         transport_failed = False
         response_complete = False

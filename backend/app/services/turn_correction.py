@@ -12,6 +12,7 @@ from app.schemas.turn_correction import (
     TurnCorrectionResponse,
 )
 from app.services.deepseek import DeepSeekClient, DeepSeekError
+from app.core.observability import span, trace_classify
 
 _SYSTEM = """You are a concise English coach for a Chinese learner.
 Analyse only the learner's current sentence in the supplied role-play context.
@@ -55,10 +56,12 @@ async def generate_turn_correction(
         response_format={"type": "json_object"},
     )
     try:
-        data = json.loads(raw)
-        data["original"] = request.text
-        response = TurnCorrectionResponse(**data)
+        with span("turn_correction.parse", provider="local"):
+            data = json.loads(raw)
+            data["original"] = request.text
+            response = TurnCorrectionResponse(**data)
     except (json.JSONDecodeError, TypeError, ValidationError) as exc:
+        trace_classify("TurnCorrectionParseError", type(exc).__name__)
         raise DeepSeekError(f"could not parse turn correction: {exc}") from exc
     if response.natural and response.issues:
         response = response.model_copy(update={"issues": []})
