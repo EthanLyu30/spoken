@@ -1,0 +1,71 @@
+{
+  "captured_at_utc": "2026-11-08T14:32:00Z",
+  "run_id": "chrome-baseline-20261108",
+  "audio": "same verified 7.37s Zira cafe-order WAV",
+  "test_run_id_note": "client-only tag; production backend did not yet persist test_run_id",
+  "turns": [
+    {
+      "iid": "b98cb75df62d2dffe9156575d5782c03",
+      "chat_start": 13866.799999999814,
+      "chat_first": 14777.5,
+      "chat_complete": 15027.399999999907,
+      "speech_request": 14888.200000000186,
+      "speech_start": null,
+      "speech_voice": "Google US English",
+      "speech_error": "interrupted",
+      "finalize_sent": 12954.5,
+      "final_received": 13864.399999999907,
+      "chat_first_ms": 910.7,
+      "chat_complete_ms": 1160.6,
+      "finalize_ms": 909.9,
+      "speech_start_ms": null,
+      "total_to_speech_ms": null,
+      "backend_chat_trace_id": "bacd340da7dfd8f80efd528f4369a976",
+      "backend_chat_duration_ms": 904.6
+    },
+    {
+      "iid": "2cdb67b466631047949d4f9c299cea0a",
+      "chat_start": 22433.700000000186,
+      "chat_first": 23263.600000000093,
+      "chat_complete": 23638.5,
+      "speech_request": 23468.600000000093,
+      "speech_start": 23657.200000000186,
+      "speech_voice": "Google US English",
+      "speech_error": null,
+      "finalize_sent": 22304.799999999814,
+      "final_received": 22432.700000000186,
+      "chat_first_ms": 829.9,
+      "chat_complete_ms": 1204.8,
+      "finalize_ms": 127.9,
+      "speech_start_ms": 188.6,
+      "total_to_speech_ms": 1223.5,
+      "backend_chat_trace_id": "42d053e42125ed33cc99e9f1c124cbd1",
+      "backend_chat_duration_ms": 1100.0
+    },
+    {
+      "iid": "075fbf4c0b8246c7e41c66564d5180c5",
+      "chat_start": 27828.299999999814,
+      "chat_first": 28522.600000000093,
+      "chat_complete": 28775.200000000186,
+      "speech_request": 28647.700000000186,
+      "speech_start": 28838.299999999814,
+      "speech_voice": "Google US English",
+      "speech_error": "interrupted",
+      "finalize_sent": 27746.600000000093,
+      "final_received": 27826.899999999907,
+      "chat_first_ms": 694.3,
+      "chat_complete_ms": 946.9,
+      "finalize_ms": 80.3,
+      "speech_start_ms": 190.6,
+      "total_to_speech_ms": 1010.0,
+      "backend_chat_trace_id": "db52b0c6bd04a11b5b774c9ef6bf2abf",
+      "backend_chat_duration_ms": 842.3
+    }
+  ],
+  "not_measured": [
+    "controlled timeout",
+    "controlled disconnect",
+    "incomplete transcript",
+    "acoustic output"
+  ]
+}
