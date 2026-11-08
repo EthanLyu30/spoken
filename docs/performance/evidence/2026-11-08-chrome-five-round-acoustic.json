@@ -1,0 +1,835 @@
+{
+  "run_id": "chrome-5round-20261108",
+  "rounds": [
+    {
+      "round": 1,
+      "run_id": "chrome-5round-20261108",
+      "interaction_id": "db7b49c2f97979c05ef532fed81d59dd",
+      "recording": {
+        "device": "扬声器 (2- Realtek(R) Audio)",
+        "rate": 48000,
+        "channels": 2,
+        "window_ms": 50,
+        "threshold": 0.02,
+        "consecutive_windows": 2,
+        "recording_start_wall": 1794152921192.106,
+        "call_click_wall": 1794152921794.3474
+      },
+      "audio_file": "docs\\performance\\evidence\\audio\\2026-11-08-round-1-16k.wav",
+      "audio": {
+        "first_audible_ms": 7300.0,
+        "max_rms": 0.3986029326915741
+      },
+      "events": [
+        {
+          "t": 4516.5,
+          "wall": 1794152921159,
+          "seq": 1,
+          "type": "probe.installed"
+        },
+        {
+          "t": 5525.5,
+          "wall": 1794152922168,
+          "seq": 2,
+          "type": "fetch.start",
+          "iid": "db7b49c2f97979c05ef532fed81d59dd",
+          "kind": "session"
+        },
+        {
+          "t": 5706.799999999814,
+          "wall": 1794152922349,
+          "seq": 3,
+          "type": "fetch.headers",
+          "iid": "db7b49c2f97979c05ef532fed81d59dd",
+          "kind": "session",
+          "status": 200
+        },
+        {
+          "t": 10705.400000000373,
+          "wall": 1794152927348,
+          "seq": 4,
+          "type": "asr.finalize.sent",
+          "transport": "direct"
+        },
+        {
+          "t": 10890,
+          "wall": 1794152927532,
+          "seq": 5,
+          "type": "fetch.start",
+          "iid": "db7b49c2f97979c05ef532fed81d59dd",
+          "kind": "chat"
+        },
+        {
+          "t": 10980.200000000186,
+          "wall": 1794152927623,
+          "seq": 6,
+          "type": "fetch.headers",
+          "iid": "db7b49c2f97979c05ef532fed81d59dd",
+          "kind": "chat",
+          "status": 200
+        },
+        {
+          "t": 11638.599999999627,
+          "wall": 1794152928281,
+          "seq": 7,
+          "type": "chat.first_bytes",
+          "iid": "db7b49c2f97979c05ef532fed81d59dd"
+        },
+        {
+          "t": 11745.700000000186,
+          "wall": 1794152928388,
+          "seq": 8,
+          "type": "speech.speak",
+          "speech": {
+            "text": "Great choice!",
+            "voice": "Google US English",
+            "requested": 11745.700000000186,
+            "start": 11898.5,
+            "end": 12801,
+            "error": null,
+            "wall": 1794152928388
+          }
+        },
+        {
+          "t": 11840.200000000186,
+          "wall": 1794152928483,
+          "seq": 9,
+          "type": "chat.complete",
+          "iid": "db7b49c2f97979c05ef532fed81d59dd",
+          "bytes": 1123
+        },
+        {
+          "t": 12800.900000000373,
+          "wall": 1794152929443,
+          "seq": 10,
+          "type": "speech.speak",
+          "speech": {
+            "text": "What size latte would you like, small, medium or large?",
+            "voice": "Google US English",
+            "requested": 12800.900000000373,
+            "start": 12988,
+            "end": 16416.5,
+            "error": null,
+            "wall": 1794152929443
+          }
+        }
+      ],
+      "stages": {
+        "finalize_ms": null,
+        "final_to_chat_ms": 184.6,
+        "chat_first_ms": 748.6,
+        "chat_complete_ms": 950.2,
+        "native_start_delay_ms": 152.8,
+        "chat_to_native_ms": 1008.5,
+        "audio_end_to_acoustic_ms": -675.6
+      },
+      "backend_trace": {
+        "trace_id": "f1c686ec9dea20134f52964eea1bf666",
+        "interaction_id": "db7b49c2f97979c05ef532fed81d59dd",
+        "operation": "POST /api/chat/stream",
+        "source": "server",
+        "outcome": "ok",
+        "duration_ms": 861.4370690193027,
+        "http_status": 200,
+        "ttft_ms": 656.1592891812325,
+        "model": "deepseek-flash",
+        "input_tokens": 702,
+        "output_tokens": 16,
+        "release": "22c239699c28d87cb56af94c8c282af29607b7ed",
+        "error_type": null,
+        "error_cause_type": null,
+        "test_run_id": "chrome-5round-20261108",
+        "started_at": "2026-11-08T15:48:47.907Z",
+        "cost_min_cny": 7.804e-05,
+        "cost_max_cny": 0.001532
+      },
+      "playback": [
+        {
+          "operation": "voice.complete",
+          "outcome": "ok",
+          "duration_ms": 5708.200000000186,
+          "trace_id": "bb9182e35a0e4d0b6ef771259627cbbc"
+        },
+        {
+          "operation": "speech.complete",
+          "outcome": "ok",
+          "duration_ms": 5521.799999999814,
+          "trace_id": "3f8934640de3f57d1818a6f8c5bf0c3a"
+        }
+      ],
+      "acoustic_stage": {
+        "acoustic_wall": 1794152928492.1,
+        "vad_wall": 1794152927348,
+        "native_start_wall": 1794152928540.8,
+        "audio_end_wall": 1794152929167.7,
+        "vad_to_acoustic_ms": 1144.1,
+        "audio_end_to_acoustic_ms": -675.6,
+        "native_to_acoustic_ms": -48.7
+      }
+    },
+    {
+      "round": 2,
+      "run_id": "chrome-5round-20261108",
+      "interaction_id": "484e5d0881b9de93db0937f4f22c29d9",
+      "recording": {
+        "device": "扬声器 (2- Realtek(R) Audio)",
+        "rate": 48000,
+        "channels": 2,
+        "window_ms": 50,
+        "threshold": 0.02,
+        "consecutive_windows": 2,
+        "recording_start_wall": 1794152949981.6467,
+        "call_click_wall": 1794152950582.176
+      },
+      "audio_file": "docs\\performance\\evidence\\audio\\2026-11-08-round-2-16k.wav",
+      "audio": {
+        "first_audible_ms": 8750.0,
+        "max_rms": 0.3616478443145752
+      },
+      "events": [
+        {
+          "t": 4529.799999999814,
+          "wall": 1794152949978,
+          "seq": 1,
+          "type": "probe.installed"
+        },
+        {
+          "t": 5363.899999999441,
+          "wall": 1794152950812,
+          "seq": 2,
+          "type": "fetch.start",
+          "iid": "484e5d0881b9de93db0937f4f22c29d9",
+          "kind": "session"
+        },
+        {
+          "t": 5605.199999999255,
+          "wall": 1794152951054,
+          "seq": 3,
+          "type": "fetch.headers",
+          "iid": "484e5d0881b9de93db0937f4f22c29d9",
+          "kind": "session",
+          "status": 200
+        },
+        {
+          "t": 10545.299999999814,
+          "wall": 1794152955994,
+          "seq": 4,
+          "type": "asr.finalize.sent",
+          "transport": "direct"
+        },
+        {
+          "t": 10698.099999999627,
+          "wall": 1794152956146,
+          "seq": 5,
+          "type": "fetch.start",
+          "iid": "484e5d0881b9de93db0937f4f22c29d9",
+          "kind": "chat"
+        },
+        {
+          "t": 10844,
+          "wall": 1794152956292,
+          "seq": 6,
+          "type": "fetch.headers",
+          "iid": "484e5d0881b9de93db0937f4f22c29d9",
+          "kind": "chat",
+          "status": 200
+        },
+        {
+          "t": 11395.699999999255,
+          "wall": 1794152956844,
+          "seq": 7,
+          "type": "chat.first_bytes",
+          "iid": "484e5d0881b9de93db0937f4f22c29d9"
+        },
+        {
+          "t": 11470.299999999814,
+          "wall": 1794152956919,
+          "seq": 8,
+          "type": "speech.speak",
+          "speech": {
+            "text": "Great choice!",
+            "voice": "Google US English",
+            "requested": 11470.299999999814,
+            "start": 13161.599999999627,
+            "end": 14077.599999999627,
+            "error": null,
+            "wall": 1794152956919
+          }
+        },
+        {
+          "t": 11570,
+          "wall": 1794152957018,
+          "seq": 9,
+          "type": "chat.complete",
+          "iid": "484e5d0881b9de93db0937f4f22c29d9",
+          "bytes": 1125
+        },
+        {
+          "t": 14077.599999999627,
+          "wall": 1794152959526,
+          "seq": 10,
+          "type": "speech.speak",
+          "speech": {
+            "text": "What size latte would you like, small, medium or large?",
+            "voice": "Google US English",
+            "requested": 14077.599999999627,
+            "start": 14477.899999999441,
+            "end": 17920.699999999255,
+            "error": null,
+            "wall": 1794152959526
+          }
+        }
+      ],
+      "stages": {
+        "finalize_ms": null,
+        "final_to_chat_ms": 152.8,
+        "chat_first_ms": 697.6,
+        "chat_complete_ms": 871.9,
+        "native_start_delay_ms": 1691.3,
+        "chat_to_native_ms": 2463.5,
+        "audio_end_to_acoustic_ms": 776.1
+      },
+      "backend_trace": {
+        "trace_id": "3c3c5ec379820e7f926e63c34c1dcb3f",
+        "interaction_id": "484e5d0881b9de93db0937f4f22c29d9",
+        "operation": "POST /api/chat/stream",
+        "source": "server",
+        "outcome": "ok",
+        "duration_ms": 729.620975907892,
+        "http_status": 200,
+        "ttft_ms": 544.1840270068496,
+        "model": "deepseek-flash",
+        "input_tokens": 702,
+        "output_tokens": 16,
+        "release": "22c239699c28d87cb56af94c8c282af29607b7ed",
+        "error_type": null,
+        "error_cause_type": null,
+        "test_run_id": "chrome-5round-20261108",
+        "started_at": "2026-11-08T15:49:16.569Z",
+        "cost_min_cny": 7.804e-05,
+        "cost_max_cny": 0.001532
+      },
+      "playback": [
+        {
+          "operation": "voice.complete",
+          "outcome": "ok",
+          "duration_ms": 7373.0,
+          "trace_id": "13c1bbd92d684bf2e407f8679f15b55c"
+        },
+        {
+          "operation": "speech.complete",
+          "outcome": "ok",
+          "duration_ms": 7218.300000000745,
+          "trace_id": "da693f262bbcedd1f13a2979c93a5278"
+        }
+      ],
+      "acoustic_stage": {
+        "acoustic_wall": 1794152958731.6,
+        "vad_wall": 1794152955994,
+        "native_start_wall": 1794152958610.3,
+        "audio_end_wall": 1794152957955.6,
+        "vad_to_acoustic_ms": 2737.6,
+        "audio_end_to_acoustic_ms": 776.1,
+        "native_to_acoustic_ms": 121.3
+      }
+    },
+    {
+      "round": 3,
+      "run_id": "chrome-5round-20261108",
+      "interaction_id": "f74b34a161b2ea6ee72fc7e933ad53bc",
+      "recording": {
+        "device": "扬声器 (2- Realtek(R) Audio)",
+        "rate": 48000,
+        "channels": 2,
+        "window_ms": 50,
+        "threshold": 0.02,
+        "consecutive_windows": 2,
+        "recording_start_wall": 1794152978607.2087,
+        "call_click_wall": 1794152979208.1643
+      },
+      "audio_file": "docs\\performance\\evidence\\audio\\2026-11-08-round-3-16k.wav",
+      "audio": {
+        "first_audible_ms": 7600.0,
+        "max_rms": 0.34657835960388184
+      },
+      "events": [
+        {
+          "t": 4515.5,
+          "wall": 1794152978599,
+          "seq": 1,
+          "type": "probe.installed"
+        },
+        {
+          "t": 5503.399999999441,
+          "wall": 1794152979587,
+          "seq": 2,
+          "type": "fetch.start",
+          "iid": "f74b34a161b2ea6ee72fc7e933ad53bc",
+          "kind": "session"
+        },
+        {
+          "t": 5889.5999999996275,
+          "wall": 1794152979973,
+          "seq": 3,
+          "type": "fetch.headers",
+          "iid": "f74b34a161b2ea6ee72fc7e933ad53bc",
+          "kind": "session",
+          "status": 200
+        },
+        {
+          "t": 10684,
+          "wall": 1794152984768,
+          "seq": 4,
+          "type": "asr.finalize.sent",
+          "transport": "direct"
+        },
+        {
+          "t": 10863.200000000186,
+          "wall": 1794152984947,
+          "seq": 5,
+          "type": "fetch.start",
+          "iid": "f74b34a161b2ea6ee72fc7e933ad53bc",
+          "kind": "chat"
+        },
+        {
+          "t": 10965.700000000186,
+          "wall": 1794152985049,
+          "seq": 6,
+          "type": "fetch.headers",
+          "iid": "f74b34a161b2ea6ee72fc7e933ad53bc",
+          "kind": "chat",
+          "status": 200
+        },
+        {
+          "t": 11578.299999999814,
+          "wall": 1794152985662,
+          "seq": 7,
+          "type": "chat.first_bytes",
+          "iid": "f74b34a161b2ea6ee72fc7e933ad53bc"
+        },
+        {
+          "t": 11657.299999999814,
+          "wall": 1794152985741,
+          "seq": 8,
+          "type": "speech.speak",
+          "speech": {
+            "text": "Great choice!",
+            "voice": "Google US English",
+            "requested": 11657.299999999814,
+            "start": 11988.700000000186,
+            "end": 12899.200000000186,
+            "error": null,
+            "wall": 1794152985741
+          }
+        },
+        {
+          "t": 11723.399999999441,
+          "wall": 1794152985807,
+          "seq": 9,
+          "type": "chat.complete",
+          "iid": "f74b34a161b2ea6ee72fc7e933ad53bc",
+          "bytes": 1158
+        },
+        {
+          "t": 12899.099999999627,
+          "wall": 1794152986983,
+          "seq": 10,
+          "type": "speech.speak",
+          "speech": {
+            "text": "What size latte would you like, small, medium, or large?",
+            "voice": "Google US English",
+            "requested": 12899,
+            "start": 13105.5,
+            "end": 16730.39999999944,
+            "error": null,
+            "wall": 1794152986983
+          }
+        }
+      ],
+      "stages": {
+        "finalize_ms": null,
+        "final_to_chat_ms": 179.2,
+        "chat_first_ms": 715.1,
+        "chat_complete_ms": 860.2,
+        "native_start_delay_ms": 331.4,
+        "chat_to_native_ms": 1125.5,
+        "audio_end_to_acoustic_ms": -374.4
+      },
+      "backend_trace": {
+        "trace_id": "cf58aa10462d586358fe00a82f6676e9",
+        "interaction_id": "f74b34a161b2ea6ee72fc7e933ad53bc",
+        "operation": "POST /api/chat/stream",
+        "source": "server",
+        "outcome": "ok",
+        "duration_ms": 755.2313839551061,
+        "http_status": 200,
+        "ttft_ms": 599.0785951726139,
+        "model": "deepseek-flash",
+        "input_tokens": 702,
+        "output_tokens": 17,
+        "release": "22c239699c28d87cb56af94c8c282af29607b7ed",
+        "error_type": null,
+        "error_cause_type": null,
+        "test_run_id": "chrome-5round-20261108",
+        "started_at": "2026-11-08T15:49:45.337Z",
+        "cost_min_cny": 8.204e-05,
+        "cost_max_cny": 0.00154
+      },
+      "playback": [
+        {
+          "operation": "voice.complete",
+          "outcome": "ok",
+          "duration_ms": 6045.700000000186,
+          "trace_id": "41ac6534f70521ccb4b3e7e9d2a4c9ae"
+        },
+        {
+          "operation": "speech.complete",
+          "outcome": "ok",
+          "duration_ms": 5863.5999999996275,
+          "trace_id": "40193619cd01f25a70effa1e90e0c341"
+        }
+      ],
+      "acoustic_stage": {
+        "acoustic_wall": 1794152986207.2,
+        "vad_wall": 1794152984768,
+        "native_start_wall": 1794152986072.4,
+        "audio_end_wall": 1794152986581.6,
+        "vad_to_acoustic_ms": 1439.2,
+        "audio_end_to_acoustic_ms": -374.4,
+        "native_to_acoustic_ms": 134.8
+      }
+    },
+    {
+      "round": 4,
+      "run_id": "chrome-5round-20261108",
+      "interaction_id": "c0818cab1f84e035a7c09d2de1be911f",
+      "recording": {
+        "device": "扬声器 (2- Realtek(R) Audio)",
+        "rate": 48000,
+        "channels": 2,
+        "window_ms": 50,
+        "threshold": 0.02,
+        "consecutive_windows": 2,
+        "recording_start_wall": 1794153007213.9417,
+        "call_click_wall": 1794153007815.9714
+      },
+      "audio_file": "docs\\performance\\evidence\\audio\\2026-11-08-round-4-16k.wav",
+      "audio": {
+        "first_audible_ms": 7400.0,
+        "max_rms": 0.3986347019672394
+      },
+      "events": [
+        {
+          "t": 4510.9000000003725,
+          "wall": 1794153007206,
+          "seq": 1,
+          "type": "probe.installed"
+        },
+        {
+          "t": 5492.200000000186,
+          "wall": 1794153008187,
+          "seq": 2,
+          "type": "fetch.start",
+          "iid": "c0818cab1f84e035a7c09d2de1be911f",
+          "kind": "session"
+        },
+        {
+          "t": 5698.100000000559,
+          "wall": 1794153008393,
+          "seq": 3,
+          "type": "fetch.headers",
+          "iid": "c0818cab1f84e035a7c09d2de1be911f",
+          "kind": "session",
+          "status": 200
+        },
+        {
+          "t": 10672.100000000559,
+          "wall": 1794153013367,
+          "seq": 4,
+          "type": "asr.finalize.sent",
+          "transport": "direct"
+        },
+        {
+          "t": 10831.900000000373,
+          "wall": 1794153013527,
+          "seq": 5,
+          "type": "fetch.start",
+          "iid": "c0818cab1f84e035a7c09d2de1be911f",
+          "kind": "chat"
+        },
+        {
+          "t": 10941.400000000373,
+          "wall": 1794153013636,
+          "seq": 6,
+          "type": "fetch.headers",
+          "iid": "c0818cab1f84e035a7c09d2de1be911f",
+          "kind": "chat",
+          "status": 200
+        },
+        {
+          "t": 11710.700000000186,
+          "wall": 1794153014405,
+          "seq": 7,
+          "type": "chat.first_bytes",
+          "iid": "c0818cab1f84e035a7c09d2de1be911f"
+        },
+        {
+          "t": 11816.800000000745,
+          "wall": 1794153014511,
+          "seq": 8,
+          "type": "speech.speak",
+          "speech": {
+            "text": "Great choice!",
+            "voice": "Google US English",
+            "requested": 11816.700000000186,
+            "start": 11971.800000000745,
+            "end": 12885.300000000745,
+            "error": null,
+            "wall": 1794153014511
+          }
+        },
+        {
+          "t": 11897.300000000745,
+          "wall": 1794153014592,
+          "seq": 9,
+          "type": "chat.complete",
+          "iid": "c0818cab1f84e035a7c09d2de1be911f",
+          "bytes": 1124
+        },
+        {
+          "t": 12885.100000000559,
+          "wall": 1794153015580,
+          "seq": 10,
+          "type": "speech.speak",
+          "speech": {
+            "text": "What size latte would you like, small, medium or large?",
+            "voice": "Google US English",
+            "requested": 12885.100000000559,
+            "start": 13031.600000000559,
+            "end": 16454.700000000186,
+            "error": null,
+            "wall": 1794153015580
+          }
+        }
+      ],
+      "stages": {
+        "finalize_ms": null,
+        "final_to_chat_ms": 159.8,
+        "chat_first_ms": 878.8,
+        "chat_complete_ms": 1065.4,
+        "native_start_delay_ms": 155.1,
+        "chat_to_native_ms": 1139.9,
+        "audio_end_to_acoustic_ms": -575.4
+      },
+      "backend_trace": {
+        "trace_id": "6ec0fa17ec17944e0114141634c09163",
+        "interaction_id": "c0818cab1f84e035a7c09d2de1be911f",
+        "operation": "POST /api/chat/stream",
+        "source": "server",
+        "outcome": "ok",
+        "duration_ms": 943.8819959759712,
+        "http_status": 200,
+        "ttft_ms": 765.2796029578894,
+        "model": "deepseek-flash",
+        "input_tokens": 702,
+        "output_tokens": 16,
+        "release": "22c239699c28d87cb56af94c8c282af29607b7ed",
+        "error_type": null,
+        "error_cause_type": null,
+        "test_run_id": "chrome-5round-20261108",
+        "started_at": "2026-11-08T15:50:13.921Z",
+        "cost_min_cny": 7.804e-05,
+        "cost_max_cny": 0.001532
+      },
+      "playback": [
+        {
+          "operation": "voice.complete",
+          "outcome": "ok",
+          "duration_ms": 5782.5,
+          "trace_id": "a14562a943473255e83b84cc21786381"
+        },
+        {
+          "operation": "speech.complete",
+          "outcome": "ok",
+          "duration_ms": 5622.399999999441,
+          "trace_id": "19cd47c4f3b89df939feb4c1befebd48"
+        }
+      ],
+      "acoustic_stage": {
+        "acoustic_wall": 1794153014613.9,
+        "vad_wall": 1794153013367,
+        "native_start_wall": 1794153014666.1,
+        "audio_end_wall": 1794153015189.4,
+        "vad_to_acoustic_ms": 1246.9,
+        "audio_end_to_acoustic_ms": -575.4,
+        "native_to_acoustic_ms": -52.2
+      }
+    },
+    {
+      "round": 5,
+      "run_id": "chrome-5round-20261108",
+      "interaction_id": "b32363788d9320280f30282cd98eb6b9",
+      "recording": {
+        "device": "扬声器 (2- Realtek(R) Audio)",
+        "rate": 48000,
+        "channels": 2,
+        "window_ms": 50,
+        "threshold": 0.02,
+        "consecutive_windows": 2,
+        "recording_start_wall": 1794153036026.9102,
+        "call_click_wall": 1794153036627.9636
+      },
+      "audio_file": "docs\\performance\\evidence\\audio\\2026-11-08-round-5-16k.wav",
+      "audio": {
+        "first_audible_ms": 12150.0,
+        "max_rms": 0.343761682510376
+      },
+      "events": [
+        {
+          "t": 4516.700000000186,
+          "wall": 1794153036020,
+          "seq": 1,
+          "type": "probe.installed"
+        },
+        {
+          "t": 5341.600000000559,
+          "wall": 1794153036845,
+          "seq": 2,
+          "type": "fetch.start",
+          "iid": "b32363788d9320280f30282cd98eb6b9",
+          "kind": "session"
+        },
+        {
+          "t": 5685.200000000186,
+          "wall": 1794153037188,
+          "seq": 3,
+          "type": "fetch.headers",
+          "iid": "b32363788d9320280f30282cd98eb6b9",
+          "kind": "session",
+          "status": 200
+        },
+        {
+          "t": 10532.799999999814,
+          "wall": 1794153042036,
+          "seq": 4,
+          "type": "asr.finalize.sent",
+          "transport": "direct"
+        },
+        {
+          "t": 10704.200000000186,
+          "wall": 1794153042207,
+          "seq": 5,
+          "type": "fetch.start",
+          "iid": "b32363788d9320280f30282cd98eb6b9",
+          "kind": "chat"
+        },
+        {
+          "t": 10810.799999999814,
+          "wall": 1794153042314,
+          "seq": 6,
+          "type": "fetch.headers",
+          "iid": "b32363788d9320280f30282cd98eb6b9",
+          "kind": "chat",
+          "status": 200
+        },
+        {
+          "t": 11708.100000000559,
+          "wall": 1794153043211,
+          "seq": 7,
+          "type": "chat.first_bytes",
+          "iid": "b32363788d9320280f30282cd98eb6b9"
+        },
+        {
+          "t": 11782.600000000559,
+          "wall": 1794153043286,
+          "seq": 8,
+          "type": "speech.speak",
+          "speech": {
+            "text": "Great choice!",
+            "voice": "Google US English",
+            "requested": 11782.600000000559,
+            "start": 16529.10000000056,
+            "end": 17472.299999999814,
+            "error": null,
+            "wall": 1794153043286
+          }
+        },
+        {
+          "t": 11860,
+          "wall": 1794153043363,
+          "seq": 9,
+          "type": "chat.complete",
+          "iid": "b32363788d9320280f30282cd98eb6b9",
+          "bytes": 1126
+        },
+        {
+          "t": 17472.299999999814,
+          "wall": 1794153048976,
+          "seq": 10,
+          "type": "speech.speak",
+          "speech": {
+            "text": "What size latte would you like, small, medium or large?",
+            "voice": "Google US English",
+            "requested": 17472.299999999814,
+            "start": 17677.400000000373,
+            "end": 21119.700000000186,
+            "error": null,
+            "wall": 1794153048976
+          }
+        }
+      ],
+      "stages": {
+        "finalize_ms": null,
+        "final_to_chat_ms": 171.4,
+        "chat_first_ms": 1003.9,
+        "chat_complete_ms": 1155.8,
+        "native_start_delay_ms": 4746.5,
+        "chat_to_native_ms": 5824.9,
+        "audio_end_to_acoustic_ms": 4175.5
+      },
+      "backend_trace": {
+        "trace_id": "375bb14f70374fa58d99c9dff232cff1",
+        "interaction_id": "b32363788d9320280f30282cd98eb6b9",
+        "operation": "POST /api/chat/stream",
+        "source": "server",
+        "outcome": "ok",
+        "duration_ms": 1053.8359789643437,
+        "http_status": 200,
+        "ttft_ms": 881.929379189387,
+        "model": "deepseek-flash",
+        "input_tokens": 702,
+        "output_tokens": 16,
+        "release": "22c239699c28d87cb56af94c8c282af29607b7ed",
+        "error_type": null,
+        "error_cause_type": null,
+        "test_run_id": "chrome-5round-20261108",
+        "started_at": "2026-11-08T15:50:42.598Z",
+        "cost_min_cny": 7.804e-05,
+        "cost_max_cny": 0.001532
+      },
+      "playback": [
+        {
+          "operation": "speech.complete",
+          "outcome": "ok",
+          "duration_ms": 10410.200000000186,
+          "trace_id": "c460270ada69e1075da6f561aad5d669"
+        },
+        {
+          "operation": "voice.complete",
+          "outcome": "ok",
+          "duration_ms": 10586.200000000186,
+          "trace_id": "b77ed5d690f7d275a104046f579aae0a"
+        }
+      ],
+      "acoustic_stage": {
+        "acoustic_wall": 1794153048176.9,
+        "vad_wall": 1794153042036,
+        "native_start_wall": 1794153048032.5,
+        "audio_end_wall": 1794153044001.4,
+        "vad_to_acoustic_ms": 6140.9,
+        "audio_end_to_acoustic_ms": 4175.5,
+        "native_to_acoustic_ms": 144.4
+      }
+    }
+  ]
+}
