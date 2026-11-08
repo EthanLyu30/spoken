@@ -1,0 +1,50 @@
+{
+  "second_snapshot_utc": "2026-11-08T14:15:00Z",
+  "window": "rolling 72 hours; all retained releases",
+  "event_count": 3022,
+  "server": {
+    "events": 454,
+    "interaction_id_present": 443,
+    "unique_interaction_ids": 443,
+    "missing_interaction_id_records": 11,
+    "missing_by_operation": {
+      "POST /api/asr": 5,
+      "GET /api/sessions": 1,
+      "GET /api/progress/sessions": 1,
+      "GET /api/practice": 1,
+      "GET /api/words": 1,
+      "GET /api/stats": 1,
+      "POST /api/turn-correction": 1
+    }
+  },
+  "browser": {
+    "events": 2568,
+    "interaction_id_present": 2351,
+    "unique_interaction_ids": 710,
+    "missing_interaction_id_records": 217,
+    "missing_by_operation": {
+      "asr.attempt": 217
+    }
+  },
+  "asr_attempt_coverage": {
+    "records": 1110,
+    "details_with_error": 0,
+    "stage_present": 1110,
+    "fallback_reason_present": 1110,
+    "result_class_present": 3,
+    "stages": {
+      "open": 217,
+      "http_buffered": 444,
+      "whole_clip": 449
+    },
+    "fallback_reasons": {
+      "unavailable": 928,
+      "disconnect": 164,
+      "timeout": 18
+    },
+    "result_classes": {
+      "empty": 3
+    }
+  },
+  "timeout_note": "outcome=timeout is not emitted by the browser client; its allowed outcomes are ok/error/cancelled. The 18 asr.attempt records with fallback_reason=timeout sit inside error."
+}

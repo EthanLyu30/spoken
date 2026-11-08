@@ -1,0 +1,33 @@
+{
+  "captured_at_utc": "2026-11-08T14:13:19Z",
+  "audio": {
+    "source": "Windows Zira fixed cafe-order WAV",
+    "duration_seconds": 7.373,
+    "request_bytes": 117974,
+    "format": "16 kHz mono PCM"
+  },
+  "request": {
+    "endpoint": "POST /api/asr",
+    "http_status": 200,
+    "wall_ms": 5660,
+    "trace_id": "1b7c560f049c4995de33fa744c56b70e",
+    "interaction_id": "76e8220639d1409eb47c6ff398d2bfce"
+  },
+  "response": {
+    "text": "Hello, I would like to order a latte and a breakfast sandwich, please. Can I pay by card?",
+    "nonempty": true,
+    "semantic_match": true
+  },
+  "backend_trace": {
+    "duration_ms": 4156.559,
+    "outcome": "ok",
+    "ttft_ms": 2981.935,
+    "result_class": "nonempty",
+    "stages": {
+      "connect_ms": 570.494,
+      "upload_ms": 1895.394,
+      "final_ms": 1435.595
+    }
+  },
+  "note": "The transcript exactly matches the known source phrase; this supersedes the earlier empty-payload 200 probe."
+}

@@ -71,22 +71,66 @@
 
 失败高度集中在 11 月 5 日 22–23 点，之后只有 12 条。这个时间形态与当天的自动化 ASR 测试窗口重合，不能把它当成三天里均匀发生的自然用户故障；现有记录没有测试标记，无法做纯净的生产/测试拆分。
 
-## 当前 ASR 状态
+## 有效音频冒烟
 
-在 `2026-11-08T14:07:44Z` 单独请求生产 `/api/asr`（无效短负载）返回：
+`2026-11-08T14:13:19Z` 用固定 Zira 点单音频（7.37 秒，已转 16 kHz mono PCM）请求生产 `/api/asr`：
 
-```text
-HTTP 200 {"text":""}
-```
+- HTTP：200
+- Trace：`1b7c560f049c4995de33fa744c56b70e`
+- interaction ID：`76e8220639d1409eb47c6ff398d2bfce`
+- 转写：`Hello, I would like to order a latte and a breakfast sandwich, please. Can I pay by card?`
+- 与已知文案语义一致、非空
+- 后端 Trace：4156.6ms，`result_class=nonempty`，connect 570.5ms / upload 1895.4ms / final 1435.6ms
 
-这只能说明当前接口和上游授权已能返回，**不能证明真实语音额度已恢复**，也不能用它覆盖 11 月 5 日的 11201；必须用固定有效音频再做一次真实识别冒烟。
+这说明当前真实音频识别已可用；11 月 5 日的 11201 不能再延续为今天的状态。
+
+## 复核补正：交互去重与阶段字段
+
+第二个快照（`2026-11-08T14:15Z`，滚动 72h）为 3022 条失败事件；因滚动窗口/保留清理，与首份 3127 条快照相差 105 条。以下去重和阶段覆盖基于第二个快照，原始 3127 条汇总保持不变。
+
+| 来源 | 事件 | 有 ID | 唯一 interaction ID | 缺 ID 记录 |
+|---|---:|---:|---:|---:|
+| 后端 | 454 | 443 | 443 | 11 |
+| 浏览器 | 2568 | 2351 | 710 | 217 |
+
+浏览器缺 ID 全部是 `asr.attempt`。后端缺 ID 包括 5 条 ASR、5 条普通 GET、1 条 turn-correction。
+
+`asr.attempt` 阶段字段覆盖（1110 条实际 Trace）：
+
+| 字段 | 存在 | 覆盖 |
+|---|---:|---:|
+| `stage` | 1110 | 100% |
+| `fallback_reason` | 1110 | 100% |
+| `result_class` | 3 | 0.27% |
+
+阶段分布：`open=217`、`http_buffered=444`、`whole_clip=449`。  
+失败原因分布：`unavailable=928`、`disconnect=164`、`timeout=18`。
+
+因此：
+
+- `timeout=0` **不能解释为没有超时**；浏览器只上报 `ok/error/cancelled`，18 条 `fallback_reason=timeout` 都落在 error 事件中。
+- `fallback_reason` 是阶段内前一次尝试的原因，不能脱离 `stage` 直接当成整轮根因。
+- `result_class` 基本没有在端侧失败事件中记录，无法从这批数据统计空结果/非空结果。
+
+### 纠错 503 的阶段证据
+
+[脱敏 Trace](evidence/2026-11-08-turn-correction-503-trace.json)：
+
+- `POST /api/turn-correction` 返回 503
+- `deepseek.chat` span：`outcome=ok`，1600.9ms
+- 没有解析/校验 span
+- 代码在模型返回后执行 `json.loads` 和 `TurnCorrectionResponse` 校验，失败会返回 503；但现有 Trace 不足以证明这次一定是解析失败，只能确认**不是模型请求失败**
+
+## 补充证据
+
+- [有效音频冒烟 JSON](evidence/2026-11-08-valid-audio-asr-smoke.json)
+- [交互/阶段复核 JSON](evidence/2026-11-08-72h-dedupe-stage-summary.json)
+- [纠错 503 Trace](evidence/2026-11-08-turn-correction-503-trace.json)
 
 ## 结论
 
 - 72 小时失败记录里，没有证据支持把问题统一归因于 DeepSeek。
 - 主体是 ASR 相关 503/端侧 ASR 失败；5 条普通 400 不是模型错误；1 条 turn-correction 503 的模型 span 还是成功。
-- 11 月 5 日集中失败不能外推为 11 月 8 日仍在限额；当前 `/api/asr` 已返回 200，但真实识别未验证。
-- 现有遥测缺少 `error_type`/讯飞原始错误码，且没有测试/生产标记，无法把 3127 条当成纯净的生产故障样本。
+- 11 月 5 日集中失败不能外推为 11 月 8 日仍在限额；固定有效音频已在 11 月 8 日 22:13 取得非空、语义正确转写。
+- 现有遥测缺少 `error_type`/讯飞原始错误码，且没有测试/生产标记，无法把 3127 条（或去重快照）当成纯净的生产故障样本。
 
-证据：
-- [72h 汇总 JSON](evidence/2026-11-08-72h-failure-summary.json)

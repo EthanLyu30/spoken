@@ -1,0 +1,48 @@
+{
+  "trace_id": "3facaf779147fe1cb5761700442af662",
+  "interaction_id": null,
+  "operation": "POST /api/turn-correction",
+  "outcome": "error",
+  "duration_ms": 1607.9946006648242,
+  "http_status": 503,
+  "error_type": null,
+  "error_cause_type": null,
+  "release": "2d5d0dc001a0954c14ab4b926522e5f2ced83d17",
+  "started_at": "2026-11-06T05:49:17.468Z",
+  "spans": [
+    {
+      "id": "1ee2359c05584ccf",
+      "parent_id": null,
+      "name": "deepseek.chat",
+      "offset_ms": 0.7800688035786152,
+      "duration_ms": 1600.94640776515,
+      "outcome": "ok",
+      "attributes": {
+        "provider": "deepseek",
+        "model": "deepseek-flash",
+        "input_tokens": 233,
+        "output_tokens": 212,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 233
+      }
+    },
+    {
+      "id": "performance",
+      "parent_id": null,
+      "name": "performance",
+      "offset_ms": 0,
+      "duration_ms": 1607.9946006648242,
+      "outcome": "error",
+      "attributes": {
+        "llm_tcp": 5.953095853328705,
+        "llm_tls": 3.5713971592485905,
+        "llm_headers": 117.42535885423422,
+        "llm_prompt_cache_hit_tokens": 0,
+        "llm_prompt_cache_miss_tokens": 233,
+        "llm_first_text": 1600.9142268449068,
+        "llm_total": 1600.921596866101,
+        "response_ready": 1607.480937615037
+      }
+    }
+  ]
+}
