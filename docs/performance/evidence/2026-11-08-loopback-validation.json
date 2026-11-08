@@ -1,0 +1,12 @@
+{
+  "validated_at": "2026-11-08T15:29:00Z",
+  "device": "扬声器 (2- Realtek(R) Audio)",
+  "method": "soundcard WASAPI loopback",
+  "pre_playback_silence_seconds": 2.0,
+  "recording_seconds": 12.0,
+  "known_audio": "call.wav 7.37s Zira cafe-order",
+  "first_audible_seconds": 2.3,
+  "max_rms": 0.3403,
+  "result": "PASS: silent before playback, audible after known audio started",
+  "wav": "local temporary file, not committed"
+}
