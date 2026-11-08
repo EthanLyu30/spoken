@@ -1,17 +1,36 @@
 {
   "captured_at_utc": "2026-11-08T14:13:19Z",
   "audio": {
-    "source": "Windows Zira fixed cafe-order WAV",
-    "duration_seconds": 7.373,
-    "request_bytes": 117974,
-    "format": "16 kHz mono PCM"
+    "source": {
+      "file_bytes": 325212,
+      "pcm_bytes": 325166,
+      "sample_rate_hz": 22050,
+      "bit_depth": 16,
+      "channels": 1,
+      "frames": 162583,
+      "duration_seconds": 7.373378684807256,
+      "sha256": "b41e47358e300bdc07cae595b612f87aae16a248f7f9e26a68197647ed2af9be"
+    },
+    "upload_pcm": {
+      "format": "s16le",
+      "sample_rate_hz": 16000,
+      "bit_depth": 16,
+      "channels": 1,
+      "samples": 117974,
+      "duration_seconds": 7.373375,
+      "bytes": 235948,
+      "sha256": "16e8e68f54c240b5ddd73636ca32fd9b378b2eb2131ad7de1de7cb744cf32717"
+    },
+    "consistency": "117974 samples / 16000 Hz = 7.373375s; 117974 * 2 bytes = 235948 bytes; backend trace asr.upload.audio_bytes = 235948"
   },
   "request": {
     "endpoint": "POST /api/asr",
     "http_status": 200,
     "wall_ms": 5660,
     "trace_id": "1b7c560f049c4995de33fa744c56b70e",
-    "interaction_id": "76e8220639d1409eb47c6ff398d2bfce"
+    "interaction_id": "76e8220639d1409eb47c6ff398d2bfce",
+    "bytes": 235948,
+    "note": "client stopwatch includes network; backend trace duration is separate"
   },
   "response": {
     "text": "Hello, I would like to order a latte and a breakfast sandwich, please. Can I pay by card?",
@@ -27,7 +46,8 @@
       "connect_ms": 570.494,
       "upload_ms": 1895.394,
       "final_ms": 1435.595
-    }
+    },
+    "audio_bytes": 235948
   },
   "note": "The transcript exactly matches the known source phrase; this supersedes the earlier empty-payload 200 probe."
 }
