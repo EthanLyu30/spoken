@@ -21,7 +21,53 @@
       "speech_start_ms": null,
       "total_to_speech_ms": null,
       "backend_chat_trace_id": "bacd340da7dfd8f80efd528f4369a976",
-      "backend_chat_duration_ms": 904.6
+      "backend_chat_duration_ms": 904.6,
+      "backend_chat_trace": {
+        "trace_id": "bacd340da7dfd8f80efd528f4369a976",
+        "interaction_id": "b98cb75df62d2dffe9156575d5782c03",
+        "duration_ms": 904.5784869231284,
+        "ttft_ms": 653.4857298247516,
+        "spans": [
+          {
+            "name": "deepseek.stream",
+            "offset_ms": 1.0260241106152534,
+            "duration_ms": 903.0717117711902,
+            "outcome": "ok",
+            "attributes": {
+              "provider": "deepseek",
+              "model": "deepseek-flash",
+              "ttft_ms": 653.4857298247516,
+              "input_tokens": 702,
+              "output_tokens": 20,
+              "prompt_cache_hit_tokens": 512,
+              "prompt_cache_miss_tokens": 190
+            }
+          },
+          {
+            "name": "performance",
+            "offset_ms": 0,
+            "duration_ms": 904.5784869231284,
+            "outcome": "ok",
+            "attributes": {
+              "response_ready": 0.9539630264043808,
+              "llm_tcp": 5.579945165663958,
+              "llm_tls": 3.40585270896554,
+              "llm_headers": 114.7491866722703,
+              "llm_response_headers": 125.44128578156233,
+              "llm_keepalives_before_text": 0,
+              "llm_first_event": 127.56460811942816,
+              "llm_headers_to_text": 527.9906722716987,
+              "llm_first_text": 653.431958053261,
+              "llm_prompt_cache_hit_tokens": 512,
+              "llm_prompt_cache_miss_tokens": 190,
+              "llm_done": 902.4404361844063,
+              "llm_last_text": 901.2241861782968,
+              "llm_tail": 1.216250006109476,
+              "llm_total": 902.4534057825804
+            }
+          }
+        ]
+      }
     },
     {
       "iid": "2cdb67b466631047949d4f9c299cea0a",
@@ -40,7 +86,53 @@
       "speech_start_ms": 188.6,
       "total_to_speech_ms": 1223.5,
       "backend_chat_trace_id": "42d053e42125ed33cc99e9f1c124cbd1",
-      "backend_chat_duration_ms": 1100.0
+      "backend_chat_duration_ms": 1100.0,
+      "backend_chat_trace": {
+        "trace_id": "42d053e42125ed33cc99e9f1c124cbd1",
+        "interaction_id": "2cdb67b466631047949d4f9c299cea0a",
+        "duration_ms": 1100.0160239636898,
+        "ttft_ms": 715.0661647319794,
+        "spans": [
+          {
+            "name": "deepseek.stream",
+            "offset_ms": 1.0602260008454323,
+            "duration_ms": 1098.6180086620152,
+            "outcome": "ok",
+            "attributes": {
+              "provider": "deepseek",
+              "model": "deepseek-flash",
+              "ttft_ms": 715.0661647319794,
+              "input_tokens": 729,
+              "output_tokens": 29,
+              "prompt_cache_hit_tokens": 512,
+              "prompt_cache_miss_tokens": 217
+            }
+          },
+          {
+            "name": "performance",
+            "offset_ms": 0,
+            "duration_ms": 1100.0160239636898,
+            "outcome": "ok",
+            "attributes": {
+              "response_ready": 0.9910636581480503,
+              "llm_tcp": 6.262861657887697,
+              "llm_tls": 4.669402725994587,
+              "llm_headers": 113.32278093323112,
+              "llm_response_headers": 127.0675752311945,
+              "llm_keepalives_before_text": 0,
+              "llm_first_event": 131.46368227899075,
+              "llm_headers_to_text": 587.9254280589521,
+              "llm_first_text": 714.9930032901466,
+              "llm_prompt_cache_hit_tokens": 512,
+              "llm_prompt_cache_miss_tokens": 217,
+              "llm_done": 1098.0194541625679,
+              "llm_last_text": 1097.863390110433,
+              "llm_tail": 0.15606405213475227,
+              "llm_total": 1098.0302053503692
+            }
+          }
+        ]
+      }
     },
     {
       "iid": "075fbf4c0b8246c7e41c66564d5180c5",
@@ -59,7 +151,53 @@
       "speech_start_ms": 190.6,
       "total_to_speech_ms": 1010.0,
       "backend_chat_trace_id": "db52b0c6bd04a11b5b774c9ef6bf2abf",
-      "backend_chat_duration_ms": 842.3
+      "backend_chat_duration_ms": 842.3,
+      "backend_chat_trace": {
+        "trace_id": "db52b0c6bd04a11b5b774c9ef6bf2abf",
+        "interaction_id": "075fbf4c0b8246c7e41c66564d5180c5",
+        "duration_ms": 842.2549022361636,
+        "ttft_ms": 583.2017743960023,
+        "spans": [
+          {
+            "name": "deepseek.stream",
+            "offset_ms": 1.1990289203822613,
+            "duration_ms": 840.6833941116929,
+            "outcome": "ok",
+            "attributes": {
+              "provider": "deepseek",
+              "model": "deepseek-flash",
+              "ttft_ms": 583.2017743960023,
+              "input_tokens": 764,
+              "output_tokens": 24,
+              "prompt_cache_hit_tokens": 512,
+              "prompt_cache_miss_tokens": 252
+            }
+          },
+          {
+            "name": "performance",
+            "offset_ms": 0,
+            "duration_ms": 842.2549022361636,
+            "outcome": "ok",
+            "attributes": {
+              "response_ready": 1.069796271622181,
+              "llm_tcp": 9.210124146193266,
+              "llm_tls": 4.078988917171955,
+              "llm_headers": 113.66748483851552,
+              "llm_response_headers": 129.13937913253903,
+              "llm_keepalives_before_text": 0,
+              "llm_first_event": 131.02544518187642,
+              "llm_headers_to_text": 454.00842279195786,
+              "llm_first_text": 583.1478019244969,
+              "llm_prompt_cache_hit_tokens": 512,
+              "llm_prompt_cache_miss_tokens": 252,
+              "llm_done": 840.0665782392025,
+              "llm_last_text": 839.1523761674762,
+              "llm_tail": 0.9142020717263222,
+              "llm_total": 840.0765489786863
+            }
+          }
+        ]
+      }
     }
   ],
   "not_measured": [
