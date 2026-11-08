@@ -1,0 +1,42 @@
+{
+  "captured_at_utc": "2026-11-08T15:19:00Z",
+  "run_id": "voice-deploy-20261108-2318",
+  "audio": "same verified 7.37s Zira cafe-order WAV; one utterance followed by 25s silence",
+  "browser": {
+    "interaction_id": "c0b021a93edaac92788ea7356840e086",
+    "session_start_to_headers_ms": 1723.4,
+    "finalize_sent_to_final_ms": 170.1,
+    "final_to_chat_start_ms": 1.4,
+    "chat_start_to_first_text_ms": 1178.5,
+    "chat_start_to_complete_ms": 1350.7,
+    "speech_request_to_native_start_ms": 367.1,
+    "chat_start_to_native_start_ms": 1641.6,
+    "second_speech_native_start_ms": 17013.3,
+    "second_speech_native_end_ms": 20456.1,
+    "playback_complete_event_ms": 6138.8,
+    "voice_complete_event_ms": 6362.6,
+    "acoustic_loopback": "未采集（soundcard loopback 初始化失败）",
+    "vad_wait": "未单独采集"
+  },
+  "backend": {
+    "chat_trace_id": "819669e13283fab4eb7f38a1a55e3595",
+    "chat_ttft_ms": 892.0,
+    "chat_duration_ms": 1073.2,
+    "asr_session_trace_matches_interaction": true,
+    "server_test_run_events": 2,
+    "browser_test_run_events": 16
+  },
+  "cross_end_check": {
+    "same_test_run_id": true,
+    "same_interaction_id_for_asr_session_and_chat": true,
+    "multiple_interaction_ids_in_run": false
+  },
+  "not_measured": [
+    "VAD start/end separately",
+    "actual acoustic first sound",
+    "playback acoustic completion",
+    "controlled timeout",
+    "controlled disconnect",
+    "incomplete transcript"
+  ]
+}
