@@ -5,7 +5,7 @@
 import { openDirectAsrStream } from "./directAsr";
 import { getInteraction, measureAsrStream, reportTiming } from "./telemetry";
 import { assertAuthGeneration, getAuthGeneration } from "./authToken";
-import { AsrQuotaError, isAsrQuotaCooling, isAsrQuotaError, markAsrQuota } from "./asrQuota";
+import { AsrQuotaError, asrProviderError, isAsrQuotaCooling, isAsrQuotaError } from "./asrQuota";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -33,7 +33,7 @@ const FINAL_TIMEOUT_MS = 8000;
 const cancelledError = () => new DOMException("ASR cancelled", "AbortError");
 function relayProviderError(message: string, code?: unknown): Error {
   const numeric = typeof code === "number" ? code : Number((message.match(/\b(\d{5})\b/) || [])[1]);
-  return numeric === 11201 ? markAsrQuota(message) : new Error(message || "ASR provider error");
+  return Number.isFinite(numeric) && numeric > 0 ? asrProviderError(numeric, message) : new Error(message || "ASR provider error");
 }
 
 /** Direct→relay is allowed only while opening; later failures use complete PCM. */

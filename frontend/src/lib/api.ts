@@ -14,7 +14,7 @@ import { invalidateProgress, progressGeneration, subscribeProgress } from "./pro
 import { ReadResource } from "./readResource";
 import { traceHeaders, getInteraction, reportTiming } from "./telemetry";
 import { assertAudioWithinLimit } from "./audioLimits";
-import { AsrQuotaError, isAsrQuotaCooling, isAsrQuotaError, markAsrQuota } from "./asrQuota";
+import { AsrQuotaError, asrProviderError, isAsrQuotaCooling, isAsrQuotaError } from "./asrQuota";
 export { withTimeout } from "./requestTimeout";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -391,7 +391,8 @@ export async function postAsr(
         const body = await res.clone().json() as { detail?: unknown };
         detail = typeof body.detail === "string" ? body.detail : "";
       } catch { /* non-JSON provider error */ }
-      if (res.status === 503 && /\b11201\b/.test(detail)) throw markAsrQuota(detail);
+      const provider = detail.match(/iFlytek ASR error (\d+)/);
+      if (provider) throw asrProviderError(Number(provider[1]), detail);
       throw new Error(`asr failed: ${res.status}`);
     }
     const data = (await res.json()) as { text: string };

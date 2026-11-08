@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetAsrQuotaForTest } from "./asrQuota";
+import { isAsrQuotaCooling, resetAsrQuotaForTest } from "./asrQuota";
 
 class Socket {
   static OPEN = 1;
@@ -156,6 +156,15 @@ describe("direct cloud ASR transport", () => {
     await vi.waitFor(() => expect(socket.frames.length).toBeGreaterThan(0));
     socket.onmessage?.({ data: JSON.stringify({ code: 11201, message: "licc failed" }) });
     await expect(closing).rejects.toMatchObject({ name: "AsrQuotaError" });
+  });
+
+  it.each([10005, 11200])("preserves non-quota provider code %s", async (code) => {
+    const { stream, socket } = await ready();
+    stream.send(new Uint8Array(1280).fill(1).buffer);
+    const final = stream.finishUtterance();
+    socket.onmessage?.({ data: JSON.stringify({ code, message: "provider rejected" }) });
+    await expect(final).rejects.toMatchObject({ name: "AsrProviderError", providerCode: code });
+    expect(isAsrQuotaCooling()).toBe(false);
   });
 
   it("does not lose 11201 while uploading a whole clip", async () => {

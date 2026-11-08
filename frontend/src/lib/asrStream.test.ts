@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openRelayAsrStream } from "./asrStream";
 import { setToken } from "./authToken";
-import { resetAsrQuotaForTest } from "./asrQuota";
+import { isAsrQuotaCooling, resetAsrQuotaForTest } from "./asrQuota";
 
 class Socket {
   static OPEN = 1;
@@ -45,6 +45,14 @@ describe("streaming ASR final boundaries", () => {
     const { stream, socket } = await ready();
     socket.message({ type: "error", code: 11201, message: "licc failed" });
     await expect(stream.finishUtterance()).rejects.toMatchObject({ name: "AsrQuotaError" });
+  });
+
+  it.each([10005, 11200])("preserves relay non-quota provider code %s", async (code) => {
+    const { stream, socket } = await ready();
+    const final = stream.finishUtterance();
+    socket.message({ type: "error", code, message: "provider rejected" });
+    await expect(final).rejects.toMatchObject({ name: "AsrProviderError", providerCode: code });
+    expect(isAsrQuotaCooling()).toBe(false);
   });
 
   it("preserves 11201 after relay readiness and rejects the pending final", async () => {

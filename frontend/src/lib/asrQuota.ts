@@ -4,6 +4,13 @@ export const ASR_QUOTA_MESSAGE = "今日语音识别额度已用完，可以改�
 const QUOTA_COOLDOWN_MS = 5 * 60_000;
 let quotaUntil = 0;
 
+export class AsrProviderError extends Error {
+  constructor(readonly providerCode: number, readonly providerMessage = "") {
+    super(`ASR provider error ${providerCode}`);
+    this.name = "AsrProviderError";
+  }
+}
+
 export class AsrQuotaError extends Error {
   partialText?: string;
   constructor(readonly providerCode = ASR_QUOTA_CODE, readonly detail = "") {
@@ -31,4 +38,8 @@ export function isAsrQuotaError(error: unknown): error is AsrQuotaError {
 
 export function quotaErrorFromDetail(detail: string) {
   return markAsrQuota(detail);
+}
+
+export function asrProviderError(code: number, message = "") {
+  return code === ASR_QUOTA_CODE ? markAsrQuota(message) : new AsrProviderError(code, message);
 }

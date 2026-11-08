@@ -3,7 +3,7 @@ import { getToken, getAuthGeneration, assertAuthGeneration } from "./authToken";
 import { getClientId } from "./clientId";
 import { withTimeout } from "./requestTimeout";
 import { bindInteraction, getInteraction, measureAsrStream, traceHeaders } from "./telemetry";
-import { AsrQuotaError, isAsrQuotaCooling, markAsrQuota } from "./asrQuota";
+import { AsrQuotaError, asrProviderError, isAsrQuotaCooling } from "./asrQuota";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const FRAME = 1280;
@@ -71,10 +71,10 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
         close(cancelledError());
         return true;
       };
-      const fail = (message = "ASR connection failed") => {
+      const fail = (failure: string | Error = "ASR connection failed") => {
         if (retired) return;
         if (!signal?.aborted && generation === getAuthGeneration()) unavailableUntil = Date.now() + 30_000;
-        close(new Error(message));
+        close(typeof failure === "string" ? new Error(failure) : failure);
       };
       const sendFrame = (pcm: Uint8Array) => {
         const data = { status: first ? 0 : 1, format: "audio/L16;rate=16000", encoding: "raw", audio: btoa(String.fromCharCode(...pcm)) };
@@ -118,11 +118,10 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
         try {
           const message = JSON.parse(String(event.data));
           if (message.code !== 0) {
-            if (message.code === 11201) {
-              close(markAsrQuota(typeof message.message === "string" ? message.message : "iFlytek 11201"));
-              return;
-            }
-            fail("ASR provider error"); return;
+            const code = Number(message.code);
+            fail(asrProviderError(Number.isFinite(code) ? code : 0,
+              typeof message.message === "string" ? message.message : ""));
+            return;
           }
           const data = message.data ?? {};
           const result = data.result;
