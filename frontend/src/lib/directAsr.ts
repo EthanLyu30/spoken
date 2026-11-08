@@ -29,6 +29,9 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
     if (!response.ok) throw new Error("ASR authorization unavailable");
     const session = await response.json() as { url: string; app_id: string };
     assertAuthGeneration(generation, signal);
+    // Another request may have exhausted the same AppID's quota while this
+    // signature request was in flight; never open a new provider socket.
+    if (isAsrQuotaCooling()) throw new AsrQuotaError();
     const url = new URL(session.url);
     if (url.protocol !== "wss:" || url.hostname !== "iat-api.xfyun.cn" || url.pathname !== "/v2/iat" || !session.app_id) throw new Error("Invalid ASR destination");
     assertAuthGeneration(generation, signal);

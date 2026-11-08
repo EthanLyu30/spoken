@@ -86,8 +86,10 @@ HTTP 503
   - relay 在 ready 后、finalize 前收到 11201，仍保留配额错误
   - 并发请求触发冷却后，等待中的直连失败不再发 HTTP
   - 并发请求触发冷却后，等待中的直连失败不再打开 relay
+  - 延迟成功的签名返回后，冷却中的请求不再新建讯飞直连
+  - 延迟失败的签名返回后，等待中的请求不再上传 HTTP
 
-测试结果：前端全量 **567 passed**，后端全量 **639 passed**，TypeScript/ESLint 通过。
+测试结果：前端全量 **571 passed**，后端全量 **639 passed**，TypeScript/ESLint 通过。
 
 ## 看板发布后验收
 

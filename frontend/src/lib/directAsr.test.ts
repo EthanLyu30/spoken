@@ -70,6 +70,83 @@ describe("direct cloud ASR transport", () => {
     await expect(final).resolves.toBe("");
   });
 
+  it("does not use a delayed successful signature after quota cooling", async () => {
+    const quota = await import("./asrQuota");
+    const makeSession = () => {
+      let resolveSession!: () => void;
+      const fetchMock = vi.fn((input: unknown) => {
+        if (!String(input).includes("/api/asr/session")) return Promise.resolve(new Response("{}", { status: 202 }));
+        return new Promise<Response>(resolve => { resolveSession = () => resolve(new Response(JSON.stringify({ url: "wss://iat-api.xfyun.cn/v2/iat?authorization=test", app_id: "public-app" }))); });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      return { fetchMock, resolveSession: () => resolveSession!() };
+    };
+
+    const { openAsrStream } = await import("./asrStream");
+    const first = makeSession();
+    const opening = openAsrStream({ onPartial: vi.fn() });
+    await vi.waitFor(() => expect(first.fetchMock).toHaveBeenCalledOnce());
+    quota.markAsrQuota();
+    first.resolveSession();
+    await expect(opening).rejects.toMatchObject({ name: "AsrQuotaError" });
+    expect(Socket.instances).toHaveLength(0);
+    expect(first.fetchMock.mock.calls.filter(([url]) => /\/api\/asr$/.test(String(url)))).toHaveLength(0);
+  });
+
+  it("does not upload a whole clip after a delayed successful signature", async () => {
+    const quota = await import("./asrQuota");
+    let resolveSession!: () => void;
+    const fetchMock = vi.fn((input: unknown) => {
+      if (!String(input).includes("/api/asr/session")) return Promise.resolve(new Response("{}", { status: 202 }));
+      return new Promise<Response>(resolve => { resolveSession = () => resolve(new Response(JSON.stringify({ url: "wss://iat-api.xfyun.cn/v2/iat?authorization=test", app_id: "public-app" }))); });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { postAsr } = await import("./api");
+    const whole = postAsr(new ArrayBuffer(1_280));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    quota.markAsrQuota();
+    resolveSession();
+    await expect(whole).rejects.toMatchObject({ name: "AsrQuotaError" });
+    expect(Socket.instances).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([url]) => /\/api\/asr$/.test(String(url)))).toHaveLength(0);
+  });
+
+  it("does not fall back after a delayed failed signature when quota cooling starts", async () => {
+    const quota = await import("./asrQuota");
+    let rejectSession!: (error: Error) => void;
+    const fetchMock = vi.fn((input: unknown) => {
+      if (!String(input).includes("/api/asr/session")) return Promise.resolve(new Response("{}", { status: 202 }));
+      return new Promise<Response>((_resolve, reject) => { rejectSession = reject; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { openAsrStream } = await import("./asrStream");
+    const opening = openAsrStream({ onPartial: vi.fn() });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    quota.markAsrQuota();
+    rejectSession(new Error("network"));
+    await expect(opening).rejects.toMatchObject({ name: "AsrQuotaError" });
+    expect(Socket.instances).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([url]) => /\/api\/asr$/.test(String(url)))).toHaveLength(0);
+  });
+
+  it("does not upload a whole clip after a delayed failed signature", async () => {
+    const quota = await import("./asrQuota");
+    let rejectSession!: (error: Error) => void;
+    const fetchMock = vi.fn((input: unknown) => {
+      if (!String(input).includes("/api/asr/session")) return Promise.resolve(new Response("{}", { status: 202 }));
+      return new Promise<Response>((_resolve, reject) => { rejectSession = reject; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { postAsr } = await import("./api");
+    const whole = postAsr(new ArrayBuffer(1_280));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    quota.markAsrQuota();
+    rejectSession(new Error("network"));
+    await expect(whole).rejects.toMatchObject({ name: "AsrQuotaError" });
+    expect(Socket.instances).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([url]) => /\/api\/asr$/.test(String(url)))).toHaveLength(0);
+  });
+
   it("preserves 11201 after the last frame and before finalize", async () => {
     const { transcribeDirect } = await import("./directAsr");
     const closing = transcribeDirect(new ArrayBuffer(1_280));
