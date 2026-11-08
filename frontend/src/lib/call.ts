@@ -104,7 +104,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     asr = null;
   }
 
-  function ensureStream(): Promise<void> {
+  function ensureStream(interactionId?: string): Promise<void> {
     if (asr || asrUnavailable || ended) return Promise.resolve();
     if (asrOpening) return asrOpening;
 
@@ -113,6 +113,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     const opening = (async () => {
       try {
         assertAuthGeneration(identityGeneration, lifetime.signal);
+        if (interactionId) bindInteraction(lifetime.signal, interactionId);
         opened = await openAsrStream({
           onPartial: (t) => {
             if (!ended && !busy) cb.onPartial?.(t);
@@ -125,6 +126,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
           opened.close();
           return;
         }
+        if (interactionId) bindInteraction(opened, interactionId);
         asr = opened;
       } catch (error) {
         if (generation === asrGeneration) {
@@ -156,6 +158,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   let started = false;
   let utteranceUsesLocalAsr = false;
   let cloudFramesSent = 0;
+  let turnInteractionId: string | undefined;
 
   const reset = () => {
     collected = [];
@@ -170,13 +173,13 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   const selectAsr = () => {
     utteranceUsesLocalAsr = cb.preferLocalAsr?.() ?? false;
     if (utteranceUsesLocalAsr) invalidateCloudStream();
-    else void ensureStream();
+    else void ensureStream(turnInteractionId);
   };
 
   const handle = async (pcm: ArrayBuffer, useLocalAsr: boolean) => {
     if (ended || identityGeneration !== getAuthGeneration()) return;
     const startedAt = performance.now();
-    const interactionId = newInteractionId();
+    const interactionId = turnInteractionId ?? newInteractionId();
     let outcome: "ok" | "error" | "cancelled" = "ok";
     let firstAudio = false;
     const generation = ++turnGeneration;
@@ -254,6 +257,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     bargeMs = 0;
     busy = false; // reopen the mic immediately for the user's new utterance
     reset();
+    turnInteractionId = newInteractionId();
     collected = buffered;
     utterMs = buffered.reduce((sum, frame) => sum + frame.length / rate * 1000, 0);
     speechMs = speechDuration;
@@ -298,6 +302,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
 
     if (rms > SILENCE_THRESHOLD) {
       if (!started) {
+        turnInteractionId = newInteractionId();
         selectAsr();
       }
       speechMs += frameMs;
