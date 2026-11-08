@@ -3,14 +3,15 @@
 日期：2026-11-08  
 后端：`b7797ad`  
 前端：`0802f6c` + `8a9eb35`（共享 interaction ID）  
-环境：Windows 11 / Chrome 156 / 生产 `/practice/cafe`，固定音频。
+环境：Windows 11 / Chrome 156 / 生产 `/practice/cafe`，固定音频。  
+当前线上主 bundle：`/assets/index-DiLv_drO.js`。
 
 ## 部署顺序
 
 1. 先部署后端 `b7797ad`，确认 `server_release` 生效。
 2. 检查数据库迁移：`test_run_id` 列存在；历史记录为 `null`。
 3. 写入一条带 `test_run_id=voice-deploy-check-20261108` 的浏览器 telemetry，管理员 Trace 返回相同值。
-4. 再部署前端；确认生产 bundle 更新。
+4. 再部署前端；确认生产 bundle 更新为 `/assets/index-DiLv_drO.js`。
 
 ## 单轮结果
 

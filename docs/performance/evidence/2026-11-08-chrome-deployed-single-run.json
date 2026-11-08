@@ -38,5 +38,7 @@
     "controlled timeout",
     "controlled disconnect",
     "incomplete transcript"
-  ]
+  ],
+  "frontend_bundle": "/assets/index-DiLv_drO.js",
+  "main_commit": "7086a85"
 }
