@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { reportTiming, measureAsrStream, bindInteraction, getInteraction, traceHeaders } from "./telemetry";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { delete (globalThis as { __TEST_RUN_ID__?: string }).__TEST_RUN_ID__; vi.unstubAllGlobals(); });
 
 it("submits only bounded numeric timing and declared metadata, never business content", async () => {
   const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
@@ -35,6 +35,19 @@ it("retries a rejected playback diagnostic once in the legacy format", async () 
   expect(second).toMatchObject({ operation: "speech.complete", duration_ms: 200, outcome: "ok", interaction_id: interactionId });
   expect(second).not.toHaveProperty("playback_started");
   expect(second).not.toHaveProperty("reason");
+});
+
+it("carries the automation test run and provider code without content", async () => {
+  (globalThis as { __TEST_RUN_ID__?: string }).__TEST_RUN_ID__ = "run-2026-11-08";
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+  vi.stubGlobal("fetch", fetcher);
+  const error = Object.assign(new Error("quota"), { providerCode: 11201, name: "AsrQuotaError" });
+  const wrapped = measureAsrStream({ send() {}, close() {}, finishUtterance: async () => { throw error; } }, "direct");
+  await expect(wrapped.finishUtterance()).rejects.toBe(error);
+  const body = JSON.parse(fetcher.mock.calls[0][1].body);
+  expect(body.test_run_id).toBe("run-2026-11-08");
+  expect(body.provider_code).toBe(11201);
+  expect(traceHeaders()).toEqual({ "X-Test-Run-Id": "run-2026-11-08" });
 });
 
 it("records a failed finalization while preserving the original exception", async () => {

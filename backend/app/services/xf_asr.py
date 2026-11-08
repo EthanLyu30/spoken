@@ -70,8 +70,9 @@ class XfAsrClient:
         try:
             async with asyncio.timeout(_TRANSCRIBE_TIMEOUT):
                 ws = await _connect(s)
-                sender = asyncio.create_task(self._send(ws, pcm, language))
-                receiver = asyncio.create_task(self._recv(ws, transcript, started=started))
+                phase = {"final": False}
+                sender = asyncio.create_task(self._send(ws, pcm, language, phase=phase))
+                receiver = asyncio.create_task(self._recv(ws, transcript, started=started, phase=phase))
                 tasks = [sender, receiver]
                 done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 if receiver in done:
@@ -102,7 +103,7 @@ class XfAsrClient:
         return text
 
     @traced("asr.upload", provider="xfyun")
-    async def _send(self, ws, pcm: bytes, language: str) -> None:
+    async def _send(self, ws, pcm: bytes, language: str, phase: dict | None = None) -> None:
         total = len(pcm)
         trace_attribute("audio_bytes", total)
         first = True
@@ -129,15 +130,17 @@ class XfAsrClient:
             await ws.send(json.dumps(frame))
             await asyncio.sleep(_SEND_INTERVAL)  # pace uploads without 1x replay
         # One explicit end marker also covers a single sub-40 ms audio frame.
+        if phase is not None:
+            phase["final"] = True
         await ws.send(json.dumps({"data": {"status": 2, "audio": ""}}))
 
-    async def _recv(self, ws, out: list[str], *, started: float) -> None:
+    async def _recv(self, ws, out: list[str], *, started: float, phase: dict | None = None) -> None:
         first_result = True
         async for message in ws:
             resp = json.loads(message)
             if resp.get("code") != 0:
                 trace_attribute("provider_code", str(resp.get("code")))
-                trace_attribute("failure_stage", "provider_finalize")
+                trace_attribute("failure_stage", "provider_finalize" if phase and phase.get("final") else "provider_stream")
                 raise XfAsrError(
                     f"iFlytek ASR error {resp.get('code')}: {resp.get('message')}"
                 )
@@ -192,6 +195,9 @@ class XfAsrStream:
         self._recv_task: asyncio.Task | None = None
         self._done = asyncio.Event()
         self._error: XfAsrError | None = None
+        self._provider_code: str | None = None
+        self._failure_stage: str | None = None
+        self._finalizing = False
         self._closed = False
 
     @traced("asr.open", provider="xfyun")
@@ -244,6 +250,7 @@ class XfAsrStream:
         try:
             if self._pending_pcm:
                 await self.send(bytes(_FRAME - len(self._pending_pcm)))
+            self._finalizing = True
             await self._ws.send(json.dumps({"data": {"status": 2, "audio": ""}}))
         except Exception:
             pass  # connection may already be closing; still drain what we have
@@ -289,6 +296,10 @@ class XfAsrStream:
             async for message in self._ws:  # type: ignore[union-attr]
                 resp = json.loads(message)
                 if resp.get("code") != 0:
+                    self._provider_code = str(resp.get("code"))
+                    self._failure_stage = "provider_finalize" if self._finalizing else "provider_stream"
+                    trace_attribute("provider_code", self._provider_code)
+                    trace_attribute("failure_stage", self._failure_stage)
                     self._error = XfAsrError(
                         f"iFlytek ASR error {resp.get('code')}: {resp.get('message')}"
                     )

@@ -129,7 +129,14 @@ async def _relay_utterance(websocket: WebSocket, settings, make_stream, language
     except WebSocketDisconnect:
         return True
     except XfAsrError as exc:
-        await websocket.send_json({"type": "error", "message": str(exc)})
+        provider_code = getattr(stream, "_provider_code", None) if stream is not None else None
+        if provider_code is None:
+            code_match = re.search(r"iFlytek ASR error (\d+)", str(exc))
+            provider_code = code_match.group(1) if code_match else None
+        payload = {"type": "error", "message": str(exc)}
+        if provider_code is not None:
+            payload["code"] = int(provider_code) if provider_code.isdigit() else provider_code
+        await websocket.send_json(payload)
         # Remaining queued frames still belong to this failed utterance. Close
         # the relay so they cannot become a new session with a tail-only final.
         return True
