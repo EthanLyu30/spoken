@@ -1,0 +1,85 @@
+{
+  "queried_at_utc": "2026-11-08T14:06:42.969220+00:00",
+  "window_hours": 72,
+  "scope": "all retained releases; source=server/browser; outcome=error/timeout",
+  "rows": 3127,
+  "server": {
+    "count": 454,
+    "time_range": {
+      "first": "2026-11-05T14:47:44.171Z",
+      "last": "2026-11-06T06:55:52.067Z"
+    },
+    "operations": {
+      "GET /api/sessions": 1,
+      "GET /api/progress/sessions": 1,
+      "GET /api/practice": 1,
+      "GET /api/words": 1,
+      "GET /api/stats": 1,
+      "POST /api/turn-correction": 1,
+      "POST /api/asr": 448
+    },
+    "statuses": {
+      "400": 5,
+      "503": 449
+    },
+    "releases": {
+      "2d5d0dc001a0954c14ab4b926522e5f2ced83d17": 407,
+      "430924e1b65c7c88cef3833291046367aa2c92ca": 9,
+      "7926b37116e9a8792235042c9bf1663f3030110b": 38
+    },
+    "hours_asia_shanghai": {
+      "2026-11-05 22:00": 103,
+      "2026-11-05 23:00": 345,
+      "2026-11-06 13:00": 1,
+      "2026-11-06 14:00": 5
+    },
+    "error_type": {
+      "None": 454
+    },
+    "error_cause_type": {
+      "None": 454
+    },
+    "model_present": {
+      "None": 453,
+      "deepseek-flash": 1
+    }
+  },
+  "browser": {
+    "count": 2673,
+    "time_range": {
+      "first": "2026-11-05T14:07:07.622Z",
+      "last": "2026-11-07T02:06:14.703Z"
+    },
+    "operations": {
+      "voice.complete": 758,
+      "asr.finalize": 347,
+      "asr.attempt": 1114,
+      "asr.transcribe": 454
+    },
+    "statuses": {
+      "None": 2673
+    },
+    "releases": {
+      "2d5d0dc001a0954c14ab4b926522e5f2ced83d17": 198,
+      "7926b37116e9a8792235042c9bf1663f3030110b": 2475
+    },
+    "hours_asia_shanghai": {
+      "2026-11-05 22:00": 1167,
+      "2026-11-05 23:00": 1500,
+      "2026-11-06 19:00": 2,
+      "2026-11-07 10:00": 4
+    },
+    "error_type": {
+      "None": 2673
+    },
+    "error_cause_type": {
+      "None": 2673
+    },
+    "model_present": {
+      "unknown/unknown": 758,
+      "xfyun/direct": 724,
+      "xfyun/buffered": 893,
+      "xfyun/relay": 298
+    }
+  }
+}
