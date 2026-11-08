@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isAsrQuotaCooling, resetAsrQuotaForTest } from "./asrQuota";
 
 class Socket {
   static OPEN = 1;
@@ -18,11 +19,12 @@ class Socket {
 
 describe("direct cloud ASR transport", () => {
   beforeEach(() => {
+    resetAsrQuotaForTest();
     vi.resetModules(); Socket.instances = [];
     vi.stubGlobal("WebSocket", Socket);
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ url: "wss://iat-api.xfyun.cn/v2/iat?authorization=test", app_id: "public-app" }), { status: 200 })));
   });
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+  afterEach(() => { resetAsrQuotaForTest(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
   async function ready(signal?: AbortSignal, language = "en_us") {
     const { openDirectAsrStream } = await import("./directAsr");
@@ -51,12 +53,129 @@ describe("direct cloud ASR transport", () => {
     expect(socket.readyState).toBe(Socket.CLOSED);
   });
 
+  it("classifies provider code 11201 as a quota failure", async () => {
+    const { stream, socket } = await ready();
+    stream.send(new Uint8Array(1280).fill(1).buffer);
+    const final = stream.finishUtterance();
+    socket.onmessage?.({ data: JSON.stringify({ code: 11201, message: "licc failed" }) });
+    await expect(final).rejects.toMatchObject({ name: "AsrQuotaError" });
+    expect(socket.readyState).toBe(Socket.CLOSED);
+  });
+
   it("resolves a real empty final without turning it into a transport failure", async () => {
     const { stream, socket } = await ready();
     stream.send(new Uint8Array(1280).fill(1).buffer);
     const final = stream.finishUtterance();
     socket.result({ status: 2 });
     await expect(final).resolves.toBe("");
+  });
+
+  it("does not use a delayed successful signature after quota cooling", async () => {
+    const quota = await import("./asrQuota");
+    const makeSession = () => {
+      let resolveSession!: () => void;
+      const fetchMock = vi.fn((input: unknown) => {
+        if (!String(input).includes("/api/asr/session")) return Promise.resolve(new Response("{}", { status: 202 }));
+        return new Promise<Response>(resolve => { resolveSession = () => resolve(new Response(JSON.stringify({ url: "wss://iat-api.xfyun.cn/v2/iat?authorization=test", app_id: "public-app" }))); });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      return { fetchMock, resolveSession: () => resolveSession!() };
+    };
+
+    const { openAsrStream } = await import("./asrStream");
+    const first = makeSession();
+    const opening = openAsrStream({ onPartial: vi.fn() });
+    await vi.waitFor(() => expect(first.fetchMock).toHaveBeenCalledOnce());
+    quota.markAsrQuota();
+    first.resolveSession();
+    await expect(opening).rejects.toMatchObject({ name: "AsrQuotaError" });
+    expect(Socket.instances).toHaveLength(0);
+    expect(first.fetchMock.mock.calls.filter(([url]) => /\/api\/asr$/.test(String(url)))).toHaveLength(0);
+  });
+
+  it("does not upload a whole clip after a delayed successful signature", async () => {
+    const quota = await import("./asrQuota");
+    let resolveSession!: () => void;
+    const fetchMock = vi.fn((input: unknown) => {
+      if (!String(input).includes("/api/asr/session")) return Promise.resolve(new Response("{}", { status: 202 }));
+      return new Promise<Response>(resolve => { resolveSession = () => resolve(new Response(JSON.stringify({ url: "wss://iat-api.xfyun.cn/v2/iat?authorization=test", app_id: "public-app" }))); });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { postAsr } = await import("./api");
+    const whole = postAsr(new ArrayBuffer(1_280));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    quota.markAsrQuota();
+    resolveSession();
+    await expect(whole).rejects.toMatchObject({ name: "AsrQuotaError" });
+    expect(Socket.instances).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([url]) => /\/api\/asr$/.test(String(url)))).toHaveLength(0);
+  });
+
+  it("does not fall back after a delayed failed signature when quota cooling starts", async () => {
+    const quota = await import("./asrQuota");
+    let rejectSession!: (error: Error) => void;
+    const fetchMock = vi.fn((input: unknown) => {
+      if (!String(input).includes("/api/asr/session")) return Promise.resolve(new Response("{}", { status: 202 }));
+      return new Promise<Response>((_resolve, reject) => { rejectSession = reject; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { openAsrStream } = await import("./asrStream");
+    const opening = openAsrStream({ onPartial: vi.fn() });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    quota.markAsrQuota();
+    rejectSession(new Error("network"));
+    await expect(opening).rejects.toMatchObject({ name: "AsrQuotaError" });
+    expect(Socket.instances).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([url]) => /\/api\/asr$/.test(String(url)))).toHaveLength(0);
+  });
+
+  it("does not upload a whole clip after a delayed failed signature", async () => {
+    const quota = await import("./asrQuota");
+    let rejectSession!: (error: Error) => void;
+    const fetchMock = vi.fn((input: unknown) => {
+      if (!String(input).includes("/api/asr/session")) return Promise.resolve(new Response("{}", { status: 202 }));
+      return new Promise<Response>((_resolve, reject) => { rejectSession = reject; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { postAsr } = await import("./api");
+    const whole = postAsr(new ArrayBuffer(1_280));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    quota.markAsrQuota();
+    rejectSession(new Error("network"));
+    await expect(whole).rejects.toMatchObject({ name: "AsrQuotaError" });
+    expect(Socket.instances).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([url]) => /\/api\/asr$/.test(String(url)))).toHaveLength(0);
+  });
+
+  it("preserves 11201 after the last frame and before finalize", async () => {
+    const { transcribeDirect } = await import("./directAsr");
+    const closing = transcribeDirect(new ArrayBuffer(1_280));
+    await vi.waitFor(() => expect(Socket.instances).toHaveLength(1));
+    const socket = Socket.instances[0];
+    socket.onopen?.();
+    await vi.waitFor(() => expect(socket.frames.length).toBeGreaterThan(0));
+    socket.onmessage?.({ data: JSON.stringify({ code: 11201, message: "licc failed" }) });
+    await expect(closing).rejects.toMatchObject({ name: "AsrQuotaError" });
+  });
+
+  it.each([10005, 11200])("preserves non-quota provider code %s", async (code) => {
+    const { stream, socket } = await ready();
+    stream.send(new Uint8Array(1280).fill(1).buffer);
+    const final = stream.finishUtterance();
+    socket.onmessage?.({ data: JSON.stringify({ code, message: "provider rejected" }) });
+    await expect(final).rejects.toMatchObject({ name: "AsrProviderError", providerCode: code });
+    expect(isAsrQuotaCooling()).toBe(false);
+  });
+
+  it("does not lose 11201 while uploading a whole clip", async () => {
+    const { transcribeDirect } = await import("./directAsr");
+    const closing = transcribeDirect(new ArrayBuffer(2_560));
+    await vi.waitFor(() => expect(Socket.instances).toHaveLength(1));
+    const socket = Socket.instances[0];
+    socket.onopen?.();
+    await vi.waitFor(() => expect(socket.frames.length).toBeGreaterThan(0));
+    socket.onmessage?.({ data: JSON.stringify({ code: 11201, message: "licc failed" }) });
+    await expect(closing).rejects.toMatchObject({ name: "AsrQuotaError" });
   });
 
   it("closes an in-flight recording immediately when cancelled", async () => {
@@ -114,7 +233,7 @@ describe("direct cloud ASR transport", () => {
     socket.onmessage?.({ data: JSON.stringify({ code: 10005, message: "rejected" }) });
     const final = stream.finishUtterance();
     socket.result({ status: 2, result: { sn: 0, ws: [{ cw: [{ w: "tail only" }] }] } });
-    await expect(final).rejects.toThrow("ASR connection closed");
+    await expect(final).rejects.toThrow("ASR provider error");
   });
 
   it("keeps direct recognition available when an unused connection expires", async () => {

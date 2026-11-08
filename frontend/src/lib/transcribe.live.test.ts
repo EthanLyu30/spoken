@@ -9,6 +9,7 @@ vi.mock("./api", () => ({ postAsr: mocks.postAsr }));
 vi.mock("./asrStream", () => ({ openAsrStream: mocks.openAsrStream }));
 
 import { createLiveTranscription } from "./transcribe";
+import { AsrQuotaError } from "./asrQuota";
 
 describe("live ASR recovery", () => {
   beforeEach(() => {
@@ -59,6 +60,18 @@ describe("live ASR recovery", () => {
       name: "IncompleteTranscriptionError", partialText: "half a transcript",
     });
     expect(stream.close).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the partial draft when HTTP recovery hits the quota", async () => {
+    const stream = { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn(async () => { throw new Error("closed"); }) };
+    mocks.openAsrStream.mockResolvedValue(stream);
+    mocks.postAsr.mockRejectedValue(new AsrQuotaError());
+    const live = createLiveTranscription();
+    const callbacks = mocks.openAsrStream.mock.calls[0][0] as { onPartial: (text: string) => void };
+    callbacks.onPartial("half a transcript");
+    await expect(live.finish(new ArrayBuffer(1280))).rejects.toMatchObject({
+      name: "AsrQuotaError", partialText: "half a transcript",
+    });
   });
 
   it("does not promote a partial to a final when the stream returns an empty final", async () => {

@@ -23,6 +23,7 @@ interface AsrAttemptDiagnostic {
   fallback_reason?: "none" | "timeout" | "disconnect" | "provider_error" | "empty" | "http_error" | "unavailable" | "unknown";
   audio_bytes?: number;
   result_class?: "empty" | "nonempty";
+  provider_code?: number;
 }
 interface PronunciationDiagnostic {
   entry?: "turn_correction" | "follow_read";
@@ -44,9 +45,14 @@ export function bindInteraction(target: object, id?: string): void {
   if (id && /^[a-f0-9]{32}$/.test(id)) interactions.set(target, id);
 }
 export const getInteraction = (target?: object | null) => target ? interactions.get(target) : undefined;
+function testRunId(): string | undefined {
+  const value = (globalThis as { __TEST_RUN_ID__?: unknown }).__TEST_RUN_ID__;
+  return typeof value === "string" && /^[A-Za-z0-9._-]{1,64}$/.test(value) ? value : undefined;
+}
 export function traceHeaders(target?: object | null): Record<string, string> {
   const id = getInteraction(target);
-  return id ? { "X-Interaction-Id": id } : {};
+  const run = testRunId();
+  return { ...(id ? { "X-Interaction-Id": id } : {}), ...(run ? { "X-Test-Run-Id": run } : {}) };
 }
 
 /** Best effort and deliberately unauthenticated: no content or identity payload. */
@@ -58,6 +64,9 @@ export function reportTiming(operation: Operation, durationMs: number, options: 
   const maxDuration = operation === "speech.native_end" ? 3_600_000 : 300_000;
   if (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > maxDuration) return;
   const diagnostics: Record<string, unknown> = {};
+  if (operation.startsWith("asr.") && typeof options.provider_code === "number" && Number.isInteger(options.provider_code) && options.provider_code > 0) {
+    diagnostics.provider_code = options.provider_code;
+  }
   const integer = (value: number | undefined, min: number, max: number) =>
     typeof value === "number" && Number.isInteger(value) && value >= min && value <= max ? value : undefined;
   const numeric = (value: number | undefined, min: number, max: number) =>
@@ -108,6 +117,7 @@ export function reportTiming(operation: Operation, durationMs: number, options: 
   const timer = setTimeout(() => controller.abort(), 2_000);
   const sample = { operation, duration_ms: durationMs, outcome: options.outcome ?? "ok",
     release: import.meta.env.VITE_RELEASE ?? "unknown",
+    ...(testRunId() ? { test_run_id: testRunId() } : {}),
     engine: options.engine ?? "unknown", transport: options.transport ?? "unknown",
     ...(options.interactionId && /^[a-f0-9]{32}$/.test(options.interactionId) ? { interaction_id: options.interactionId } : {}),
   };
@@ -139,7 +149,8 @@ export function measureAsrStream(stream: AsrStream, transport: "direct" | "relay
         return text;
       } catch (error) {
         reportTiming("asr.finalize", performance.now() - start, { engine: "xfyun", transport, interactionId,
-          outcome: closed || signal?.aborted || (error instanceof DOMException && error.name === "AbortError") ? "cancelled" : "error" });
+          outcome: closed || signal?.aborted || (error instanceof DOMException && error.name === "AbortError") ? "cancelled" : "error",
+          provider_code: typeof (error as { providerCode?: unknown }).providerCode === "number" ? (error as { providerCode: number }).providerCode : undefined });
         throw error;
       }
     },

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openRelayAsrStream } from "./asrStream";
 import { setToken } from "./authToken";
+import { isAsrQuotaCooling, resetAsrQuotaForTest } from "./asrQuota";
 
 class Socket {
   static OPEN = 1;
@@ -29,8 +30,37 @@ async function ready(onClose = vi.fn()) {
 }
 
 describe("streaming ASR final boundaries", () => {
-  beforeEach(() => { vi.useFakeTimers(); Socket.instances = []; vi.stubGlobal("WebSocket", Socket); });
-  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+  beforeEach(() => { resetAsrQuotaForTest(); vi.useFakeTimers(); Socket.instances = []; vi.stubGlobal("WebSocket", Socket); });
+  afterEach(() => { resetAsrQuotaForTest(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+  it("preserves 11201 before relay readiness as a quota error", async () => {
+    const opening = openRelayAsrStream({ onPartial: vi.fn() });
+    const socket = Socket.instances.at(-1)!;
+    socket.onopen?.();
+    socket.message({ type: "error", code: 11201, message: "licc failed" });
+    await expect(opening).rejects.toMatchObject({ name: "AsrQuotaError" });
+  });
+
+  it("preserves 11201 after relay readiness and before finalize", async () => {
+    const { stream, socket } = await ready();
+    socket.message({ type: "error", code: 11201, message: "licc failed" });
+    await expect(stream.finishUtterance()).rejects.toMatchObject({ name: "AsrQuotaError" });
+  });
+
+  it.each([10005, 11200])("preserves relay non-quota provider code %s", async (code) => {
+    const { stream, socket } = await ready();
+    const final = stream.finishUtterance();
+    socket.message({ type: "error", code, message: "provider rejected" });
+    await expect(final).rejects.toMatchObject({ name: "AsrProviderError", providerCode: code });
+    expect(isAsrQuotaCooling()).toBe(false);
+  });
+
+  it("preserves 11201 after relay readiness and rejects the pending final", async () => {
+    const { stream, socket } = await ready();
+    const final = stream.finishUtterance();
+    socket.message({ type: "error", code: 11201, message: "licc failed" });
+    await expect(final).rejects.toMatchObject({ name: "AsrQuotaError" });
+  });
 
   it("discards a timed-out connection before audio from the next utterance is sent", async () => {
     const { stream, socket, onClose } = await ready();
@@ -98,7 +128,7 @@ describe("streaming ASR final boundaries", () => {
     socket.message({ type: "error", message: "opening timed out" });
     const final = stream.finishUtterance();
     socket.message({ type: "final", text: "tail only" });
-    await expect(final).rejects.toThrow("ASR connection closed");
+    await expect(final).rejects.toThrow("opening timed out");
     expect(onClose).toHaveBeenCalledOnce();
     expect(socket.readyState).toBe(Socket.CLOSED);
   });

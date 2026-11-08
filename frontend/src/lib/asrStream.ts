@@ -5,6 +5,7 @@
 import { openDirectAsrStream } from "./directAsr";
 import { getInteraction, measureAsrStream, reportTiming } from "./telemetry";
 import { assertAuthGeneration, getAuthGeneration } from "./authToken";
+import { AsrQuotaError, asrProviderError, isAsrQuotaCooling, isAsrQuotaError } from "./asrQuota";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -24,17 +25,22 @@ export interface AsrStream {
 
 export interface AsrStreamCallbacks {
   onPartial: (text: string) => void;
-  onClose?: () => void;
+  onClose?: (error?: unknown) => void;
 }
 
 const READY_TIMEOUT_MS = 5000;
 const FINAL_TIMEOUT_MS = 8000;
 const cancelledError = () => new DOMException("ASR cancelled", "AbortError");
+function relayProviderError(message: string, code?: unknown): Error {
+  const numeric = typeof code === "number" ? code : Number((message.match(/\b(\d{5})\b/) || [])[1]);
+  return Number.isFinite(numeric) && numeric > 0 ? asrProviderError(numeric, message) : new Error(message || "ASR provider error");
+}
 
 /** Direct→relay is allowed only while opening; later failures use complete PCM. */
 export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us", signal?: AbortSignal): Promise<AsrStream> {
   const generation = getAuthGeneration();
   assertAuthGeneration(generation, signal);
+  if (isAsrQuotaCooling()) throw new AsrQuotaError();
   const interactionId = getInteraction(signal);
   const directStarted = performance.now();
   try {
@@ -46,6 +52,7 @@ export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us", 
     });
     return measureAsrStream(stream, "direct", signal);
   } catch (error) {
+    if (isAsrQuotaError(error)) throw error;
     const cancelled = signal?.aborted || generation !== getAuthGeneration() ||
       ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError");
     reportTiming("asr.attempt", performance.now() - directStarted, {
@@ -55,6 +62,7 @@ export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us", 
     assertAuthGeneration(generation, signal);
     signal?.throwIfAborted();
     if ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError") throw error;
+    if (isAsrQuotaCooling()) throw new AsrQuotaError();
   }
   const relayStarted = performance.now();
   try {
@@ -80,6 +88,7 @@ export function openRelayAsrStream(
   language = "en_us",
   signal?: AbortSignal,
 ): Promise<AsrStream> {
+  if (isAsrQuotaCooling()) return Promise.reject(new AsrQuotaError());
   const generation = getAuthGeneration();
   return new Promise<AsrStream>((resolve, reject) => {
     let ws: WebSocket;
@@ -96,6 +105,7 @@ export function openRelayAsrStream(
     let closeNotified = false;
     let pendingFinal: { resolve: (text: string) => void; reject: (error: unknown) => void } | null = null;
     let finalTimer: ReturnType<typeof setTimeout> | undefined;
+    let terminalError: unknown;
 
     const settlePending = (text = "", error?: unknown) => {
       clearTimeout(finalTimer);
@@ -105,10 +115,10 @@ export function openRelayAsrStream(
       if (error) pending?.reject(error); else pending?.resolve(text);
     };
 
-    const notifyClose = () => {
+    const notifyClose = (error?: unknown) => {
       if (closeNotified) return;
       closeNotified = true;
-      cb.onClose?.();
+      cb.onClose?.(error);
     };
 
     const readyTimer = setTimeout(() => {
@@ -140,6 +150,7 @@ export function openRelayAsrStream(
       finishUtterance: () => new Promise<string>((resolveFinal, rejectFinal) => {
         if (pendingFinal) { rejectFinal(new Error("ASR final is already pending")); return; }
         if (cancelled()) { rejectFinal(cancelledError()); return; }
+        if (terminalError) { rejectFinal(terminalError instanceof Error ? terminalError : new Error("ASR connection closed")); return; }
         if (ws.readyState !== WebSocket.OPEN) { rejectFinal(new Error("ASR connection closed")); return; }
         pendingFinal = { resolve: resolveFinal, reject: rejectFinal };
         try {
@@ -153,13 +164,15 @@ export function openRelayAsrStream(
           const error = new Error("ASR final timed out");
           settlePending("", error);
           try { ws.close(); } catch { /* already closed */ }
-          notifyClose();
+          notifyClose(error);
         }, FINAL_TIMEOUT_MS);
       }),
       close: (error?: unknown) => {
         clearTimeout(readyTimer);
         signal?.removeEventListener("abort", onAbort);
-        settlePending("", error ?? new Error("ASR connection closed"));
+        const reason = error ?? new Error("ASR connection closed");
+        terminalError = reason;
+        settlePending("", reason);
         try { ws.send(JSON.stringify({ type: "close" })); } catch { /* already closed */ }
         try { ws.close(); } catch { /* already closed */ }
       },
@@ -183,14 +196,16 @@ export function openRelayAsrStream(
           resolve(api);
         } else if (msg.type === "error") {
           clearTimeout(readyTimer);
+          reject(relayProviderError(msg.message ?? "", (msg as { code?: unknown }).code));
           try { ws.close(); } catch { /* already closed */ }
-          reject(new Error(msg.message || "asr stream unavailable"));
         }
         return;
       }
       if (msg.type === "partial") cb.onPartial(msg.text ?? "");
       else if (msg.type === "final") settlePending(msg.text ?? "");
-      else if (msg.type === "error") api.close(new Error("ASR provider error"));
+      else if (msg.type === "error") {
+        api.close(relayProviderError(msg.message ?? "", (msg as { code?: unknown }).code));
+      }
     };
 
     ws.onerror = () => {
