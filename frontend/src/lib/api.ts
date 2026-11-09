@@ -56,6 +56,7 @@ const OWNER_QUEUE_KEY = "spoken-owner-pending-writes";
 let localTransition: OwnerTransition | null = null;
 const externalTransitions = new Map<string, Promise<OwnerTransitionOutcome>>();
 const queuedWrites = new Map<string, StoredOwnerWrite>();
+const inflightWrites = new Map<string, Promise<unknown>>();
 
 type OwnerTransitionOutcome = {
   id: string;
@@ -165,9 +166,35 @@ function loadQueuedWrites(): void {
 }
 
 function persistQueuedWrites(): void {
+  // Merge with what other tabs/module instances already persisted.
+  const merged = new Map<string, StoredOwnerWrite>();
   try {
-    localStorage.setItem(OWNER_QUEUE_KEY, JSON.stringify([...queuedWrites.values()]));
+    const raw = localStorage.getItem(OWNER_QUEUE_KEY);
+    const parsed = raw ? JSON.parse(raw) as unknown : [];
+    if (Array.isArray(parsed)) {
+      for (const row of parsed) {
+        if (row && typeof row === "object" && typeof (row as StoredOwnerWrite).id === "string") {
+          merged.set((row as StoredOwnerWrite).id, row as StoredOwnerWrite);
+        }
+      }
+    }
+  } catch { /* ignore corrupt persisted queue */ }
+  for (const row of queuedWrites.values()) merged.set(row.id, row);
+  try {
+    localStorage.setItem(OWNER_QUEUE_KEY, JSON.stringify([...merged.values()]));
   } catch { /* the in-memory copy still protects this page */ }
+}
+
+function removeQueuedWrite(id: string): void {
+  queuedWrites.delete(id);
+  try {
+    const raw = localStorage.getItem(OWNER_QUEUE_KEY);
+    const parsed = raw ? JSON.parse(raw) as unknown : [];
+    if (Array.isArray(parsed)) {
+      localStorage.setItem(OWNER_QUEUE_KEY, JSON.stringify(parsed.filter((row) =>
+        !row || typeof row !== "object" || (row as StoredOwnerWrite).id !== id)));
+    }
+  } catch { /* in-memory deletion still applies */ }
 }
 
 loadQueuedWrites();
@@ -205,8 +232,14 @@ function waitExternalOutcome(id: string): Promise<OwnerTransitionOutcome> {
   return promise;
 }
 
+function discardStaleTransition(): void {
+  const descriptor = transitionDescriptor();
+  if (descriptor && Date.now() - descriptor.startedAt > 60_000) clearTransitionDescriptor();
+}
+
 function currentTransition(): { id: string; guestId: string; outcome: Promise<OwnerTransitionOutcome> } | null {
   if (localTransition) return { id: localTransition.id, guestId: localTransition.guestId, outcome: localTransition.outcome };
+  discardStaleTransition();
   const descriptor = transitionDescriptor();
   if (!descriptor) return null;
   const outcome = waitExternalOutcome(descriptor.id);
@@ -215,6 +248,7 @@ function currentTransition(): { id: string; guestId: string; outcome: Promise<Ow
 
 /** Stop new owner writes from using the old identity while registration runs. */
 export function beginOwnerTransition(): { id: string; guestId: string } {
+  discardStaleTransition();
   if (localTransition) {
     throw new OwnerTransitionError("已有注册正在进行，请等待当前注册完成");
   }
@@ -308,10 +342,23 @@ async function queuedWrite<T>(
   if (tokenSubject(token) !== String(outcome.targetUserId)) {
     throw new OwnerTransitionError("当前登录账号不是该注册记录的目标账号，记录已保留");
   }
-  const data = await sendStoredWrite<T>(record, token!);
-  queuedWrites.delete(record.id);
-  persistQueuedWrites();
-  return data;
+  return sendOnce<T>(record, token!);
+}
+
+async function sendOnce<T>(record: StoredOwnerWrite, token: string): Promise<T> {
+  const existing = inflightWrites.get(record.id) as Promise<T> | undefined;
+  if (existing) return existing;
+  const promise = (async () => {
+    const data = await sendStoredWrite<T>(record, token);
+    removeQueuedWrite(record.id);
+    return data;
+  })();
+  inflightWrites.set(record.id, promise);
+  try {
+    return await promise;
+  } finally {
+    inflightWrites.delete(record.id);
+  }
 }
 
 /** Retry records that can be proven to belong to the currently signed-in account. */
@@ -326,7 +373,9 @@ export async function retryPendingOwnerWrites(): Promise<number> {
     } catch { return null; }
   })();
   let sent = 0;
+  loadQueuedWrites();
   for (const record of [...queuedWrites.values()]) {
+    if (inflightWrites.has(record.id)) continue;
     const targetMatches = outcome?.status === "success" && outcome.id === record.transitionId
       && String(outcome.targetUserId) === subject;
     let allowed = targetMatches;
@@ -344,9 +393,7 @@ export async function retryPendingOwnerWrites(): Promise<number> {
       } catch { /* keep queued */ }
     }
     if (!allowed) continue;
-    await sendStoredWrite(record, token);
-    queuedWrites.delete(record.id);
-    persistQueuedWrites();
+    await sendOnce(record, token);
     sent++;
   }
   return sent;
@@ -384,7 +431,10 @@ export interface HealthResponse {
  */
 async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT): Promise<T> {
   const ownerWrite = isOwnerWrite(path, init);
-  const transition = ownerWrite ? currentTransition() : null;
+  // Only a guest write can be waiting for a guest→account transition. If a
+  // token is already present (e.g. account B), keep that write under B and do
+  // not adopt someone else's in-flight registration.
+  const transition = ownerWrite && !getToken() ? currentTransition() : null;
   if (transition) return queuedWrite<T>(transition, path, init);
   const generation = getAuthGeneration();
   const checkGeneration = () => { if (generation !== getAuthGeneration()) throw new DOMException("Account changed", "AbortError"); };
