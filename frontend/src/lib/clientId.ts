@@ -40,3 +40,12 @@ export function getClientId(): string {
     }
   }
 }
+
+/** A claimed guest id must not be reused after logout. */
+export function rotateClientId(): string {
+  currentId = newId();
+  memoryOnly = false;
+  try { localStorage.setItem(KEY, currentId); } catch { memoryOnly = true; }
+  for (const listener of listeners) listener();
+  return currentId;
+}

@@ -1,9 +1,11 @@
 import { create } from "zustand";
 import {
   getMe, loginUser, registerUser, updateProfile as updateProfileApi,
-  beginOwnerTransition, endOwnerTransition, flushPendingWrites, type AuthUser, ApiError,
+  beginOwnerTransition, completeOwnerTransition, flushPendingWrites, retryPendingOwnerWrites,
+  type AuthUser, ApiError,
 } from "../lib/api";
 import { clearToken, setToken, getToken, getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
+import { rotateClientId } from "../lib/clientId";
 import { useWords } from "./words";
 import { useSession } from "./session";
 import { invalidateProgress } from "../lib/progressCache";
@@ -84,29 +86,36 @@ export const useAuth = create<AuthState>((set, get) => ({
     writeCachedUser(token, user);
     set({ user, resolving: false, resolutionError: false });
     void useWords.getState().refresh();
+    void retryPendingOwnerWrites();
   },
   register: async (email, password) => {
     const revision = ++operation;
     const generation = getAuthGeneration();
-    // Stop owner writes that start after this point (summary save, another tab)
-    // from using the old guest identity; they wait for the token decision.
     beginOwnerTransition();
     try {
       // A just-finished practice/word write must land while this browser is still
-      // the guest owner, otherwise the server claim can move it to the account
-      // and the late response would be orphaned under the old client id.
-      // A failed write aborts registration: never switch account while a
-      // completed practice is unsaved.
+      // the guest owner. A failed write aborts registration rather than silently
+      // switching ownership; writes that start after this point are queued and
+      // remain bound to this transition.
       await flushPendingWrites();
-      if (revision !== operation || generation !== getAuthGeneration()) return;
+      if (revision !== operation || generation !== getAuthGeneration()) {
+        completeOwnerTransition("unknown", undefined, "registration was superseded");
+        return;
+      }
       const { token, user } = await registerUser(email, password);
-      if (revision !== operation || generation !== getAuthGeneration()) return;
+      if (revision !== operation || generation !== getAuthGeneration()) {
+        completeOwnerTransition("unknown", undefined, "registration was superseded");
+        return;
+      }
       setToken(token);
       writeCachedUser(token, user);
       set({ user, resolving: false, resolutionError: false });
+      completeOwnerTransition("success", user.id);
       void useWords.getState().refresh();
-    } finally {
-      endOwnerTransition();
+      void retryPendingOwnerWrites();
+    } catch (error) {
+      completeOwnerTransition("failed", undefined, error instanceof Error ? error.message : "registration failed");
+      throw error;
     }
   },
   logout: () => {
@@ -115,6 +124,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     writeCachedUser(null, null);
     set({ user: null, resolving: false, resolutionError: false });
     resetOwner();
+    rotateClientId();
     void useWords.getState().refresh();
   },
   refresh: async () => {

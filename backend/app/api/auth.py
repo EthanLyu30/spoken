@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_optional_client_id, get_current_user
 from app.core.security import create_token, hash_password, verify_password
 from app.db import get_db
+from app.models.progress import GuestClaim
 from app.models.user import User
 from app.schemas.auth import AuthResponse, LoginRequest, ProfileUpdate, RegisterRequest, UserOut
 from app.services import users as repo
@@ -41,7 +42,11 @@ def register(
     # Bind the progress collected anonymously on this device to the new account.
     # The account row is still uncommitted here: claim_device_data commits both
     # together, or rolls both back if the claim fails.
-    repo.claim_device_data(db, device_id, f"u:{user.id}")
+    try:
+        repo.claim_device_data(db, device_id, f"u:{user.id}")
+    except repo.GuestAlreadyClaimed:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="guest_data_claimed")
     db.commit()
     db.refresh(user)
     return AuthResponse(token=create_token(user.id), user=_user_out(user, db))
@@ -53,6 +58,22 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="邮箱或密码不正确")
     return AuthResponse(token=create_token(user.id), user=_user_out(user, db))
+
+
+@router.get("/guest-claim")
+def guest_claim_status(
+    guest_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, bool]:
+    """Let the current account check whether a queued guest record is its own.
+
+    Never exposes the owning account id; a different login sees ``mine=false``
+    and must keep the record queued rather than writing it under its account.
+    """
+    claim = db.get(GuestClaim, guest_id.strip())
+    owner = f"u:{user.id}"
+    return {"claimed": claim is not None, "mine": claim is not None and claim.owner_id == owner}
 
 
 @router.get("/me", response_model=UserOut)

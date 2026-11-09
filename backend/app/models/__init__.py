@@ -4,7 +4,7 @@ from app.models.user import User
 from app.models.word import WordEntry
 from app.models.telemetry import AdminAccount, AdminBootstrap, TelemetryRecord
 from app.models.monitoring import MonitoringState, SiteVisit
-from app.models.progress import EarnedBadge, LearningEvent, ProgressMigration, ProgressOwner
+from app.models.progress import EarnedBadge, GuestClaim, LearningEvent, ProgressMigration, ProgressOwner
 from app.models.request_receipt import RequestReceipt
 
 __all__ = ["PracticeSession", "Turn", "SkillScore", "WordEntry", "PracticeRecord", "User", "AdminAccount", "AdminBootstrap", "TelemetryRecord", "MonitoringState", "SiteVisit"]

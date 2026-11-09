@@ -40,6 +40,19 @@ class ProgressOwner(Base):
     client_id: Mapped[str] = mapped_column(String(64), primary_key=True)
 
 
+class GuestClaim(Base):
+    """Marks a guest owner as permanently claimed by an account.
+
+    A late write that still carries the old guest id must not recreate guest
+    data after the claim; the request layer turns it into a recoverable 409.
+    """
+
+    __tablename__ = "guest_claims"
+    client_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(64), index=True)
+    claimed_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class ProgressMigration(Base):
     __tablename__ = "progress_migrations"
     version: Mapped[int] = mapped_column(Integer, primary_key=True)

@@ -1,10 +1,11 @@
 """Shared FastAPI dependencies."""
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.core.security import decode_token
 from app.db import get_db
+from app.models.progress import GuestClaim
 from app.models.user import User
 
 
@@ -43,11 +44,28 @@ def get_optional_client_id(
 
 
 def get_client_id(
+    request: Request,
     x_client_id: str | None = Header(default=None, alias="X-Client-Id"),
     authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
 ) -> str:
-    """Private stored data requires an account or an unambiguous guest owner."""
+    """Private stored data requires an account or an unambiguous guest owner.
+
+    Once a guest owner has been claimed, a write that still names it is only
+    allowed for the owning account. The old guest (or a different login) gets a
+    recoverable 409 instead of recreating data under the wrong owner.
+    """
     owner = get_optional_client_id(x_client_id, authorization)
+    guest = (x_client_id or "").strip()
+    if (
+        guest
+        and not guest.lower().startswith("u:")
+        and guest.lower() != "anon"
+        and request.method not in ("GET", "HEAD", "OPTIONS")
+    ):
+        claim = db.get(GuestClaim, guest)
+        if claim is not None and owner != claim.owner_id:
+            raise HTTPException(status_code=409, detail="guest_data_claimed")
     if not owner:
         raise HTTPException(status_code=400, detail="A device identifier or login is required")
     return owner

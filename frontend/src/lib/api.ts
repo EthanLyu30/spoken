@@ -51,101 +51,325 @@ function authHeader(): Record<string, string> {
 
 const pendingWrites = new Map<Promise<void>, { error: unknown | null }>();
 const OWNER_TRANSITION_KEY = "spoken-owner-transition";
-let localTransition: Promise<void> | null = null;
-let releaseLocalTransition: (() => void) | null = null;
-let externalTransition: { id: string; promise: Promise<void> } | null = null;
+const OWNER_OUTCOME_KEY = "spoken-owner-transition-outcome";
+const OWNER_QUEUE_KEY = "spoken-owner-pending-writes";
+let localTransition: OwnerTransition | null = null;
+const externalTransitions = new Map<string, Promise<OwnerTransitionOutcome>>();
+const queuedWrites = new Map<string, StoredOwnerWrite>();
 
-function isOwnerWrite(path: string, init?: RequestInit): boolean {
-  return Boolean(init?.method && init.method !== "GET" && /^\/api\/(sessions|practice|words)(\/|$)/.test(path));
+type OwnerTransitionOutcome = {
+  id: string;
+  status: "success" | "failed" | "unknown";
+  targetUserId?: number;
+  error?: string;
+};
+type OwnerTransition = {
+  id: string;
+  guestId: string;
+  startedAt: number;
+  outcome: Promise<OwnerTransitionOutcome>;
+  settle: (outcome: OwnerTransitionOutcome) => void;
+};
+type StoredOwnerWrite = {
+  id: string;
+  transitionId: string;
+  guestId: string;
+  path: string;
+  method: string;
+  body: string | null;
+  headers: Record<string, string>;
+  createdAt: number;
+};
+
+/** A queued save is safe on disk but its ownership is not confirmed yet. */
+export class OwnerTransitionError extends Error {
+  readonly code = "owner_transition_pending";
+  constructor(message = "身份确认尚未完成，记录已保留，可稍后重试") {
+    super(message);
+    this.name = "OwnerTransitionError";
+  }
 }
 
-function transitionDescriptor(): { id: string; startedAt: number } | null {
+function randomId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function tokenSubject(token: string | null): string | null {
+  if (!token) return null;
   try {
-    const raw = localStorage.getItem(OWNER_TRANSITION_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { id?: unknown; startedAt?: unknown };
-    if (typeof parsed.id !== "string" || typeof parsed.startedAt !== "number") return null;
-    return { id: parsed.id, startedAt: parsed.startedAt };
+    const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(part + "=".repeat((4 - (part.length % 4)) % 4))) as { sub?: unknown };
+    return typeof payload.sub === "string" && payload.sub ? payload.sub : null;
   } catch {
     return null;
   }
+}
+
+function transitionDescriptor(): { id: string; guestId: string; startedAt: number } | null {
+  try {
+    const raw = localStorage.getItem(OWNER_TRANSITION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { id?: unknown; guestId?: unknown; startedAt?: unknown };
+    if (typeof parsed.id !== "string" || typeof parsed.guestId !== "string" || typeof parsed.startedAt !== "number") return null;
+    return { id: parsed.id, guestId: parsed.guestId, startedAt: parsed.startedAt };
+  } catch {
+    return null;
+  }
+}
+
+function readTransitionOutcome(id: string): OwnerTransitionOutcome | null {
+  try {
+    const raw = localStorage.getItem(OWNER_OUTCOME_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<OwnerTransitionOutcome>;
+    if (parsed.id !== id || (parsed.status !== "success" && parsed.status !== "failed" && parsed.status !== "unknown")) return null;
+    return { id, status: parsed.status, targetUserId: parsed.targetUserId, error: parsed.error };
+  } catch {
+    return null;
+  }
+}
+
+function writeTransitionOutcome(outcome: OwnerTransitionOutcome): void {
+  try { localStorage.setItem(OWNER_OUTCOME_KEY, JSON.stringify(outcome)); } catch { /* RAM-only */ }
 }
 
 function clearTransitionDescriptor(): void {
   try { localStorage.removeItem(OWNER_TRANSITION_KEY); } catch { /* RAM-only transition */ }
 }
 
-/**
- * A registration in another tab is an identity transition too. Wait for its
- * token to land (or for the transition marker to disappear) before a new owner
- * write is sent with the old guest identity.
- */
-function ownerTransitionGate(): Promise<void> | null {
-  if (localTransition) return localTransition;
-  const descriptor = transitionDescriptor();
-  if (!descriptor) return null;
-  if (Date.now() - descriptor.startedAt > 60_000) {
-    clearTransitionDescriptor();
-    return null;
-  }
-  if (externalTransition?.id === descriptor.id) return externalTransition.promise;
-  const promise = new Promise<void>((resolve) => {
-    let finished = false;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
+function loadQueuedWrites(): void {
+  try {
+    const raw = localStorage.getItem(OWNER_QUEUE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return;
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Partial<StoredOwnerWrite>;
+      if (typeof row.id !== "string" || typeof row.transitionId !== "string" || typeof row.guestId !== "string"
+        || typeof row.path !== "string" || typeof row.method !== "string" || typeof row.createdAt !== "number") continue;
+      queuedWrites.set(row.id, {
+        id: row.id,
+        transitionId: row.transitionId,
+        guestId: row.guestId,
+        path: row.path,
+        method: row.method,
+        body: typeof row.body === "string" ? row.body : null,
+        headers: row.headers && typeof row.headers === "object" ? row.headers as Record<string, string> : {},
+        createdAt: row.createdAt,
+      });
+    }
+  } catch { /* ignore corrupt local queue */ }
+}
+
+function persistQueuedWrites(): void {
+  try {
+    localStorage.setItem(OWNER_QUEUE_KEY, JSON.stringify([...queuedWrites.values()]));
+  } catch { /* the in-memory copy still protects this page */ }
+}
+
+loadQueuedWrites();
+
+function waitExternalOutcome(id: string): Promise<OwnerTransitionOutcome> {
+  const existing = readTransitionOutcome(id);
+  if (existing) return Promise.resolve(existing);
+  const cached = externalTransitions.get(id);
+  if (cached) return cached;
+  const promise = new Promise<OwnerTransitionOutcome>((resolve) => {
+    let done = false;
+    const finish = (outcome: OwnerTransitionOutcome) => {
+      if (done) return;
+      done = true;
       window.removeEventListener("storage", onStorage);
-      unsubscribe();
       clearTimeout(timer);
-      externalTransition = null;
-      resolve();
+      resolve(outcome);
     };
     const onStorage = (event: StorageEvent) => {
-      if (event.key === OWNER_TRANSITION_KEY || event.key === null) finish();
+      if (event.key === OWNER_OUTCOME_KEY) {
+        const outcome = readTransitionOutcome(id);
+        if (outcome) finish(outcome);
+        return;
+      }
+      // A removed marker without a success/failure outcome is inconclusive;
+      // keep the record queued instead of sending it as the old guest.
+      if (event.key === OWNER_TRANSITION_KEY && !transitionDescriptor()) {
+        finish({ id, status: "unknown", error: "transition ended without an outcome" });
+      }
     };
-    const unsubscribe = subscribeAuthGeneration(finish);
-    const timer = setTimeout(finish, 15_000);
+    const timer = setTimeout(() => finish({ id, status: "unknown", error: "transition outcome timed out" }), 60_000);
     window.addEventListener("storage", onStorage);
   });
-  externalTransition = { id: descriptor.id, promise };
+  externalTransitions.set(id, promise);
   return promise;
 }
 
-/** Stop new owner writes from using the old identity while registration runs. */
-export function beginOwnerTransition(): void {
-  if (localTransition) return;
-  clearTransitionDescriptor();
-  const id = typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  try {
-    localStorage.setItem(OWNER_TRANSITION_KEY, JSON.stringify({ id, startedAt: Date.now() }));
-  } catch { /* the in-memory gate still protects this tab */ }
-  localTransition = new Promise<void>((resolve) => { releaseLocalTransition = resolve; });
+function currentTransition(): { id: string; guestId: string; outcome: Promise<OwnerTransitionOutcome> } | null {
+  if (localTransition) return { id: localTransition.id, guestId: localTransition.guestId, outcome: localTransition.outcome };
+  const descriptor = transitionDescriptor();
+  if (!descriptor) return null;
+  const outcome = waitExternalOutcome(descriptor.id);
+  return { id: descriptor.id, guestId: descriptor.guestId, outcome };
 }
 
-/** Release writes queued behind a registration, after the token decision. */
-export function endOwnerTransition(): void {
+/** Stop new owner writes from using the old identity while registration runs. */
+export function beginOwnerTransition(): { id: string; guestId: string } {
+  if (localTransition) {
+    throw new OwnerTransitionError("已有注册正在进行，请等待当前注册完成");
+  }
+  if (transitionDescriptor()) {
+    throw new OwnerTransitionError("另一个标签页正在注册，请等待其完成");
+  }
+  const id = randomId();
+  const guestId = getClientId();
+  let settle!: (outcome: OwnerTransitionOutcome) => void;
+  const outcome = new Promise<OwnerTransitionOutcome>((resolve) => { settle = resolve; });
+  localTransition = { id, guestId, startedAt: Date.now(), outcome, settle };
+  try {
+    localStorage.setItem(OWNER_TRANSITION_KEY, JSON.stringify({ id, guestId, startedAt: Date.now() }));
+  } catch { /* the in-memory transition still protects this tab */ }
+  return { id, guestId };
+}
+
+/** Record the outcome of the specific registration transaction. */
+export function completeOwnerTransition(
+  status: OwnerTransitionOutcome["status"],
+  targetUserId?: number,
+  error?: string,
+): void {
+  if (!localTransition) return;
+  const outcome: OwnerTransitionOutcome = { id: localTransition.id, status, targetUserId, error };
+  localTransition.settle(outcome);
+  writeTransitionOutcome(outcome);
   clearTransitionDescriptor();
-  releaseLocalTransition?.();
-  releaseLocalTransition = null;
   localTransition = null;
-  externalTransition = null;
+}
+
+/** Compatibility helper for callers that only signal failure. */
+export function endOwnerTransition(): void {
+  completeOwnerTransition("failed", undefined, "registration ended without a confirmed owner");
+}
+
+function headersForStored(record: StoredOwnerWrite, token: string): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    "X-Client-Id": record.guestId,
+    "X-Timezone": deviceTimezone(),
+    Authorization: `Bearer ${token}`,
+    ...record.headers,
+  };
+}
+
+async function sendStoredWrite<T>(record: StoredOwnerWrite, token: string): Promise<T> {
+  const response = await fetch(`${BASE_URL}${record.path}`, {
+    method: record.method,
+    headers: headersForStored(record, token),
+    body: record.body,
+    signal: withTimeout(undefined, DEFAULT_TIMEOUT),
+  });
+  if (!response.ok) {
+    let detail = "";
+    try {
+      const data = await response.json();
+      if (data && typeof data.detail === "string") detail = data.detail;
+    } catch { /* non-JSON error body */ }
+    throw new ApiError(detail || `${record.method} ${record.path} failed: ${response.status}`, response.status);
+  }
+  const data = await response.json() as T;
+  if (/^\/api\/(sessions|practice|words)(\/|$)/.test(record.path)) invalidateProgress();
+  return data;
+}
+
+async function queuedWrite<T>(
+  transition: { id: string; guestId: string; outcome: Promise<OwnerTransitionOutcome> },
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  const record: StoredOwnerWrite = {
+    id: randomId(),
+    transitionId: transition.id,
+    guestId: transition.guestId,
+    path,
+    method: init?.method ?? "POST",
+    body: typeof init?.body === "string" ? init.body : null,
+    headers: init?.headers && typeof init.headers === "object"
+      ? init.headers as Record<string, string>
+      : {},
+    createdAt: Date.now(),
+  };
+  queuedWrites.set(record.id, record);
+  persistQueuedWrites();
+  const outcome = await transition.outcome;
+  if (outcome.status !== "success" || !outcome.targetUserId) {
+    throw new OwnerTransitionError(outcome.error ?? "注册未确认成功，记录已保留，可稍后重试");
+  }
+  const token = getToken();
+  if (tokenSubject(token) !== String(outcome.targetUserId)) {
+    throw new OwnerTransitionError("当前登录账号不是该注册记录的目标账号，记录已保留");
+  }
+  const data = await sendStoredWrite<T>(record, token!);
+  queuedWrites.delete(record.id);
+  persistQueuedWrites();
+  return data;
+}
+
+/** Retry records that can be proven to belong to the currently signed-in account. */
+export async function retryPendingOwnerWrites(): Promise<number> {
+  const token = getToken();
+  if (!token) return 0;
+  const subject = tokenSubject(token);
+  const outcome = (() => {
+    try {
+      const raw = localStorage.getItem(OWNER_OUTCOME_KEY);
+      return raw ? JSON.parse(raw) as OwnerTransitionOutcome : null;
+    } catch { return null; }
+  })();
+  let sent = 0;
+  for (const record of [...queuedWrites.values()]) {
+    const targetMatches = outcome?.status === "success" && outcome.id === record.transitionId
+      && String(outcome.targetUserId) === subject;
+    let allowed = targetMatches;
+    if (!allowed) {
+      // Lost registration response: ask the server whether this guest was
+      // claimed by *this* account before sending anything.
+      try {
+        const response = await fetch(`${BASE_URL}/api/auth/guest-claim?guest_id=${encodeURIComponent(record.guestId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.ok) {
+          const status = await response.json() as { claimed?: boolean; mine?: boolean };
+          allowed = status.claimed === true && status.mine === true;
+        }
+      } catch { /* keep queued */ }
+    }
+    if (!allowed) continue;
+    await sendStoredWrite(record, token);
+    queuedWrites.delete(record.id);
+    persistQueuedWrites();
+    sent++;
+  }
+  return sent;
+}
+
+function isOwnerWrite(path: string, init?: RequestInit): boolean {
+  return Boolean(init?.method && init.method !== "GET" && /^\/api\/(sessions|practice|words)(\/|$)/.test(path));
 }
 
 /**
- * Wait until every owner-scoped write has reached the server and succeeded.
- *
- * Registration must not change the bearer token while a just-finished
- * practice/word write is still in flight, and a failed write must abort the
- * registration instead of silently switching ownership.
+ * Wait until every owner-scoped write that started before registration has
+ * reached the server and succeeded. Writes starting after the transition are
+ * queued separately and are released only by a confirmed transition outcome.
  */
 export async function flushPendingWrites(): Promise<void> {
   while (pendingWrites.size > 0) {
     const entries = [...pendingWrites.entries()];
     await Promise.all(entries.map(([settled]) => settled));
-    const failed = entries.find(([, result]) => result.error !== null);
-    if (failed) throw failed[1].error;
+    const failed = entries.filter(([, result]) => result.error !== null);
+    if (failed.length > 0) {
+      for (const [settled] of failed) pendingWrites.delete(settled);
+      throw failed[0][1].error;
+    }
   }
 }
 
@@ -160,8 +384,8 @@ export interface HealthResponse {
  */
 async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT): Promise<T> {
   const ownerWrite = isOwnerWrite(path, init);
-  const gate = ownerWrite ? ownerTransitionGate() : null;
-  if (gate) await gate;
+  const transition = ownerWrite ? currentTransition() : null;
+  if (transition) return queuedWrite<T>(transition, path, init);
   const generation = getAuthGeneration();
   const checkGeneration = () => { if (generation !== getAuthGeneration()) throw new DOMException("Account changed", "AbortError"); };
   const requestInit: RequestInit = {
@@ -184,7 +408,7 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
     pendingWrites.set(settled, entry);
     settlePending = (error) => {
       entry.error = error ?? null;
-      pendingWrites.delete(settled);
+      if (!error) pendingWrites.delete(settled);
       resolve();
     };
   }
