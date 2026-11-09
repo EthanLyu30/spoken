@@ -1,6 +1,11 @@
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
+from app.db import SessionLocal
 from app.main import app
+from app.models.user import User
+from app.api import auth as auth_api
 
 client = TestClient(app)
 
@@ -82,3 +87,80 @@ def test_update_profile_rejects_bad_avatar_and_requires_auth():
     auth = {"Authorization": f"Bearer {reg.json()['token']}"}
     assert client.patch("/api/auth/me", json={"avatar_url": "http://evil/x.png"}, headers=auth).status_code == 422
     assert client.patch("/api/auth/me", json={"display_name": "x"}).status_code == 401
+
+
+def test_register_claims_all_saved_guest_progress():
+    dev = {"X-Client-Id": "device-claim-all"}
+    session = client.post(
+        "/api/sessions",
+        headers=dev,
+        json={
+            "scenario_id": "cafe",
+            "client_session_id": "guest-session-all",
+            "messages": [{"role": "user", "content": "A latte, please."}],
+            "overall": 80,
+        },
+    )
+    assert session.status_code == 201
+    practice = client.post(
+        "/api/practice",
+        headers=dev,
+        json={"kind": "interview", "score": 5, "title": "Guest interview"},
+    )
+    assert practice.status_code == 201
+    word = client.post(
+        "/api/words",
+        headers=dev,
+        json={"text": "guest-word", "meaning": "m", "example": "e"},
+    )
+    assert word.status_code == 201
+    assert client.post(
+        f"/api/words/{word.json()['id']}/review",
+        headers=dev,
+        json={"remembered": True},
+    ).status_code == 200
+
+    reg = client.post(
+        "/api/auth/register",
+        json={"email": "claim-all@b.com", "password": "secret1"},
+        headers=dev,
+    )
+    assert reg.status_code == 201
+    auth = {"Authorization": f"Bearer {reg.json()['token']}"}
+
+    sessions = client.get("/api/sessions", headers=auth).json()
+    assert any(row["id"] == session.json()["id"] for row in sessions)
+    practice_rows = client.get("/api/practice?kind=interview", headers=auth).json()
+    assert any(row["id"] == practice.json()["id"] for row in practice_rows)
+    words = client.get("/api/words", headers=auth).json()
+    assert any(row["id"] == word.json()["id"] for row in words)
+    stats = client.get("/api/stats", headers=auth).json()
+    assert stats["total_sessions"] >= 1
+    assert stats["total_practice"] >= 1
+    assert stats["words_count"] >= 1
+
+    # The guest identity no longer sees the claimed records.
+    assert not any(
+        row["id"] == session.json()["id"]
+        for row in client.get("/api/sessions", headers=dev).json()
+    )
+
+
+def test_register_rolls_back_account_when_claim_fails(monkeypatch):
+    email = "claim-rollback@b.com"
+    device = {"X-Client-Id": "device-claim-rollback"}
+
+    def fail_claim(*args, **kwargs):
+        raise RuntimeError("claim unavailable")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(auth_api.repo, "claim_device_data", fail_claim)
+        with pytest.raises(RuntimeError, match="claim unavailable"):
+            client.post("/api/auth/register", json={"email": email, "password": "secret1"}, headers=device)
+
+    with SessionLocal() as db:
+        assert db.scalar(select(User).where(User.email == email)) is None
+
+    # The rolled-back email can be registered again instead of returning 409.
+    retry = client.post("/api/auth/register", json={"email": email, "password": "secret1"}, headers=device)
+    assert retry.status_code == 201

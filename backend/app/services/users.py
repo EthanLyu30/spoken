@@ -19,11 +19,25 @@ def get_by_email(db: Session, email: str) -> User | None:
     return db.scalars(select(User).where(User.email == email)).first()
 
 
-def create_user(db: Session, email: str, password_hash: str, display_name: str = "") -> User:
+def create_user(
+    db: Session,
+    email: str,
+    password_hash: str,
+    display_name: str = "",
+    *,
+    commit: bool = True,
+) -> User:
+    """Create an account.
+
+    Callers that must make account creation and the anonymous-data claim atomic
+    pass ``commit=False``.  The claim then commits both rows, or rolls both back.
+    """
     user = User(email=email, password_hash=password_hash, display_name=display_name)
     db.add(user)
-    db.commit()
-    db.refresh(user)
+    db.flush()
+    if commit:
+        db.commit()
+        db.refresh(user)
     return user
 
 
