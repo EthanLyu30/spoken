@@ -55,7 +55,11 @@ export interface VoiceCall {
 }
 
 const SILENCE_THRESHOLD = 0.012; // RMS below this counts as silence
-const END_SILENCE_MS = 650;
+// Keep a little headroom over natural mid-sentence pauses: the fixed call
+// fixture has an 800ms pause between "breakfast sandwich" and "Can I pay by
+// card?". At 650ms that pause ended the turn; 900ms keeps it in one utterance
+// while adding only 250ms to a normal end-of-turn wait.
+const END_SILENCE_MS = 900;
 const MIN_SPEECH_MS = 180; // include brief answers such as "yes" and "no"
 const MAX_UTTER_MS = 15000; // safety cap
 const LEADING_SILENCE_DROP_MS = 4000; // drop long leading silence

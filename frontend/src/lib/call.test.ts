@@ -52,15 +52,20 @@ class FakeAudioContext {
   }
 }
 
-function pushFrame(value: number): void {
+function pushFrame(value: number, samples = 4_096): void {
   const processor = latestProcessor;
   if (!processor?.onaudioprocess) throw new Error("audio graph not ready");
-  const samples = new Float32Array(4_096).fill(value);
+  const pcm = new Float32Array(samples).fill(value);
   processor.onaudioprocess({
     inputBuffer: {
-      getChannelData: () => samples,
+      getChannelData: () => pcm,
     },
   } as unknown as AudioProcessingEvent);
+}
+
+function pushMs(ms: number, value: number): void {
+  const frames = Math.round(ms / 20);
+  for (let i = 0; i < frames; i++) pushFrame(value, 320);
 }
 
 describe("voice call ASR engine boundaries", () => {
@@ -413,6 +418,60 @@ describe("voice call ASR engine boundaries", () => {
       const pcm = transcribe.mock.calls[0][0];
       expect(new DataView(pcm).getInt16(0, true)).toBe(3276);
       await vi.waitFor(() => expect(reply).toHaveBeenCalledWith("complete user turn", expect.any(ArrayBuffer), expect.any(Function), expect.any(AbortSignal)));
+    } finally { call.end(); }
+  });
+
+  it("keeps an 800ms sentence-internal pause in one cloud finalize", async () => {
+    const opened = {
+      send: vi.fn(),
+      close: vi.fn(),
+      finishUtterance: vi.fn(async () => "Hello, I would like to order a latte and a breakfast sandwich, please. Can I pay by card?"),
+    };
+    mocks.openAsrStream.mockResolvedValue(opened);
+    const transcribe = vi.fn();
+    const reply = vi.fn(async (_text: string, _pcm: ArrayBuffer, onSpeaking: () => void) => { onSpeaking(); });
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => false, transcribe, reply, onError: vi.fn() });
+    try {
+      pushMs(300, 0.1);
+      await Promise.resolve();
+      pushMs(800, 0);
+      expect(opened.finishUtterance).not.toHaveBeenCalled();
+      pushMs(600, 0.1);
+      pushMs(800, 0);
+      expect(opened.finishUtterance).not.toHaveBeenCalled();
+      pushMs(120, 0);
+      await vi.waitFor(() => expect(opened.finishUtterance).toHaveBeenCalledOnce());
+      expect(transcribe).not.toHaveBeenCalled();
+      expect(reply).toHaveBeenCalledOnce();
+      expect(reply.mock.calls[0][0]).toContain("Can I pay by card?");
+    } finally { call.end(); }
+  });
+
+  it("ends a short answer only after the 900ms silence boundary", async () => {
+    const transcribe = vi.fn(async () => "yes");
+    const reply = vi.fn(async () => undefined);
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => true, transcribe, reply, onError: vi.fn() });
+    try {
+      pushMs(260, 0.1);
+      pushMs(800, 0);
+      expect(transcribe).not.toHaveBeenCalled();
+      pushMs(120, 0);
+      await vi.waitFor(() => expect(transcribe).toHaveBeenCalledOnce());
+      expect(reply).toHaveBeenCalledWith("yes", expect.any(ArrayBuffer), expect.any(Function), expect.any(AbortSignal));
+    } finally { call.end(); }
+  });
+
+  it("keeps a normal sentence end in the same turn until the silence boundary", async () => {
+    const transcribe = vi.fn(async () => "a normal sentence");
+    const reply = vi.fn(async () => undefined);
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => true, transcribe, reply, onError: vi.fn() });
+    try {
+      pushMs(1_200, 0.1);
+      pushMs(800, 0);
+      expect(transcribe).not.toHaveBeenCalled();
+      pushMs(120, 0);
+      await vi.waitFor(() => expect(transcribe).toHaveBeenCalledOnce());
+      expect(reply).toHaveBeenCalledOnce();
     } finally { call.end(); }
   });
 });
