@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { beginOwnerTransition, completeOwnerTransition, flushPendingWrites, postSession } from "./api";
+import { beginOwnerTransition, completeOwnerTransition, flushPendingWrites, postSession, retryPendingOwnerWrites } from "./api";
 import { clearToken, setToken } from "./authToken";
 
 function accountToken(id: number): string {
@@ -153,4 +153,72 @@ it("retains a failed save for a later registration flush", async () => {
   const save = postSession({ ...payload }).catch((error) => error);
   await save;
   await expect(flushPendingWrites()).rejects.toThrow("save unavailable");
+});
+
+
+it("keeps an existing account write out of a guest registration transition", async () => {
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: 45 }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+  beginOwnerTransition();
+  setToken(accountToken(2));
+
+  await postSession({ ...payload });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const headers = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers as Record<string, string>;
+  expect(headers.Authorization).toBe(`Bearer ${accountToken(2)}`);
+  completeOwnerTransition("failed");
+});
+
+it("clears a stale transition marker before starting a new registration", () => {
+  localStorage.setItem("spoken-owner-transition", JSON.stringify({
+    id: "stale", guestId: "guest-stale", startedAt: Date.now() - 24 * 60 * 60 * 1000,
+  }));
+  const transition = beginOwnerTransition();
+  expect(transition.id).not.toBe("stale");
+  expect(JSON.parse(localStorage.getItem("spoken-owner-transition")!).id).toBe(transition.id);
+  completeOwnerTransition("failed");
+});
+
+it("merges queued writes instead of replacing another module's record", async () => {
+  const old = {
+    id: "old-record", transitionId: "old-transition", guestId: "guest-old",
+    path: "/api/sessions", method: "POST", body: "{}", headers: {}, createdAt: Date.now(),
+  };
+  localStorage.setItem("spoken-owner-pending-writes", JSON.stringify([old]));
+  beginOwnerTransition();
+  const save = postSession({ ...payload }).catch(() => undefined);
+  await Promise.resolve();
+
+  const rows = JSON.parse(localStorage.getItem("spoken-owner-pending-writes")!) as Array<{ id: string }>;
+  expect(rows.some((row) => row.id === "old-record")).toBe(true);
+  expect(rows.length).toBeGreaterThanOrEqual(2);
+  completeOwnerTransition("failed");
+  await save;
+});
+
+it("sends the same queued record only once when retries race", async () => {
+  const token = accountToken(3);
+  const record = {
+    id: "one-record", transitionId: "one-transition", guestId: "guest-one",
+    path: "/api/sessions", method: "POST", body: JSON.stringify(payload),
+    headers: {}, createdAt: Date.now(),
+  };
+  localStorage.setItem("spoken-owner-pending-writes", JSON.stringify([record]));
+  localStorage.setItem("spoken-owner-transition-outcome", JSON.stringify({
+    id: "one-transition", status: "success", targetUserId: 3,
+  }));
+  setToken(token);
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ id: 46 }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  await Promise.all([retryPendingOwnerWrites(), retryPendingOwnerWrites()]);
+  const saves = fetchMock.mock.calls.filter(([url, init]) =>
+    String(url).endsWith("/api/sessions") && init?.method === "POST");
+  expect(saves).toHaveLength(1);
 });
