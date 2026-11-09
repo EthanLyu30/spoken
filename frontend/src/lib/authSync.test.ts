@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const api = vi.hoisted(() => ({ getMe: vi.fn(), getWords: vi.fn(), loginUser: vi.fn(), updateProfile: vi.fn() }));
+const api = vi.hoisted(() => ({
+  getMe: vi.fn(),
+  getWords: vi.fn(),
+  loginUser: vi.fn(),
+  updateProfile: vi.fn(),
+  registerUser: vi.fn(),
+  flushPendingWrites: vi.fn(),
+  beginOwnerTransition: vi.fn(),
+  endOwnerTransition: vi.fn(),
+}));
 vi.mock("./api", async (load) => ({ ...(await load<object>()), ...api }));
 const account = (id: number) => ({ id, email: `test${id}@example.test`, display_name: "", avatar_url: "", created_at: "" });
 let stop: (() => void) | undefined;
@@ -199,4 +208,17 @@ it("keeps auth mutations usable when BroadcastChannel postMessage throws", async
   const { token } = await setup();
   expect(() => token.setToken("a")).not.toThrow();
   expect(() => token.clearToken()).not.toThrow();
+});
+
+it("does not register or switch accounts when a pending guest save fails", async () => {
+  const { token, useAuth } = await setup();
+  api.flushPendingWrites.mockRejectedValueOnce(new Error("save unavailable"));
+
+  await expect(useAuth.getState().register("guest@example.test", "secret123"))
+    .rejects.toThrow("save unavailable");
+
+  expect(api.beginOwnerTransition).toHaveBeenCalledTimes(1);
+  expect(api.endOwnerTransition).toHaveBeenCalledTimes(1);
+  expect(api.registerUser).not.toHaveBeenCalled();
+  expect(token.getToken()).toBeNull();
 });
