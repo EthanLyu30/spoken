@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import {
   getMe, loginUser, registerUser, updateProfile as updateProfileApi,
-  flushPendingWrites, type AuthUser, ApiError,
+  beginOwnerTransition, endOwnerTransition, flushPendingWrites, type AuthUser, ApiError,
 } from "../lib/api";
 import { clearToken, setToken, getToken, getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
 import { useWords } from "./words";
@@ -88,17 +88,26 @@ export const useAuth = create<AuthState>((set, get) => ({
   register: async (email, password) => {
     const revision = ++operation;
     const generation = getAuthGeneration();
-    // A just-finished practice/word write must land while this browser is still
-    // the guest owner, otherwise the server claim can move it to the account
-    // and the late response would be orphaned under the old client id.
-    await flushPendingWrites();
-    if (revision !== operation || generation !== getAuthGeneration()) return;
-    const { token, user } = await registerUser(email, password);
-    if (revision !== operation || generation !== getAuthGeneration()) return;
-    setToken(token);
-    writeCachedUser(token, user);
-    set({ user, resolving: false, resolutionError: false });
-    void useWords.getState().refresh();
+    // Stop owner writes that start after this point (summary save, another tab)
+    // from using the old guest identity; they wait for the token decision.
+    beginOwnerTransition();
+    try {
+      // A just-finished practice/word write must land while this browser is still
+      // the guest owner, otherwise the server claim can move it to the account
+      // and the late response would be orphaned under the old client id.
+      // A failed write aborts registration: never switch account while a
+      // completed practice is unsaved.
+      await flushPendingWrites();
+      if (revision !== operation || generation !== getAuthGeneration()) return;
+      const { token, user } = await registerUser(email, password);
+      if (revision !== operation || generation !== getAuthGeneration()) return;
+      setToken(token);
+      writeCachedUser(token, user);
+      set({ user, resolving: false, resolutionError: false });
+      void useWords.getState().refresh();
+    } finally {
+      endOwnerTransition();
+    }
   },
   logout: () => {
     operation++;

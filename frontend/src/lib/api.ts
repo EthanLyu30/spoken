@@ -49,24 +49,103 @@ function authHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-const pendingWrites = new Set<Promise<unknown>>();
+const pendingWrites = new Map<Promise<void>, { error: unknown | null }>();
+const OWNER_TRANSITION_KEY = "spoken-owner-transition";
+let localTransition: Promise<void> | null = null;
+let releaseLocalTransition: (() => void) | null = null;
+let externalTransition: { id: string; promise: Promise<void> } | null = null;
 
 function isOwnerWrite(path: string, init?: RequestInit): boolean {
   return Boolean(init?.method && init.method !== "GET" && /^\/api\/(sessions|practice|words)(\/|$)/.test(path));
 }
 
+function transitionDescriptor(): { id: string; startedAt: number } | null {
+  try {
+    const raw = localStorage.getItem(OWNER_TRANSITION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { id?: unknown; startedAt?: unknown };
+    if (typeof parsed.id !== "string" || typeof parsed.startedAt !== "number") return null;
+    return { id: parsed.id, startedAt: parsed.startedAt };
+  } catch {
+    return null;
+  }
+}
+
+function clearTransitionDescriptor(): void {
+  try { localStorage.removeItem(OWNER_TRANSITION_KEY); } catch { /* RAM-only transition */ }
+}
+
 /**
- * Wait until every owner-scoped write has reached the server.
+ * A registration in another tab is an identity transition too. Wait for its
+ * token to land (or for the transition marker to disappear) before a new owner
+ * write is sent with the old guest identity.
+ */
+function ownerTransitionGate(): Promise<void> | null {
+  if (localTransition) return localTransition;
+  const descriptor = transitionDescriptor();
+  if (!descriptor) return null;
+  if (Date.now() - descriptor.startedAt > 60_000) {
+    clearTransitionDescriptor();
+    return null;
+  }
+  if (externalTransition?.id === descriptor.id) return externalTransition.promise;
+  const promise = new Promise<void>((resolve) => {
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      window.removeEventListener("storage", onStorage);
+      unsubscribe();
+      clearTimeout(timer);
+      externalTransition = null;
+      resolve();
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === OWNER_TRANSITION_KEY || event.key === null) finish();
+    };
+    const unsubscribe = subscribeAuthGeneration(finish);
+    const timer = setTimeout(finish, 15_000);
+    window.addEventListener("storage", onStorage);
+  });
+  externalTransition = { id: descriptor.id, promise };
+  return promise;
+}
+
+/** Stop new owner writes from using the old identity while registration runs. */
+export function beginOwnerTransition(): void {
+  if (localTransition) return;
+  clearTransitionDescriptor();
+  const id = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  try {
+    localStorage.setItem(OWNER_TRANSITION_KEY, JSON.stringify({ id, startedAt: Date.now() }));
+  } catch { /* the in-memory gate still protects this tab */ }
+  localTransition = new Promise<void>((resolve) => { releaseLocalTransition = resolve; });
+}
+
+/** Release writes queued behind a registration, after the token decision. */
+export function endOwnerTransition(): void {
+  clearTransitionDescriptor();
+  releaseLocalTransition?.();
+  releaseLocalTransition = null;
+  localTransition = null;
+  externalTransition = null;
+}
+
+/**
+ * Wait until every owner-scoped write has reached the server and succeeded.
  *
  * Registration must not change the bearer token while a just-finished
- * practice/word write is still in flight: the backend claim could move the old
- * data before the late request lands under the old guest owner.
+ * practice/word write is still in flight, and a failed write must abort the
+ * registration instead of silently switching ownership.
  */
 export async function flushPendingWrites(): Promise<void> {
-  // Give owner writes queued in the same turn a chance to register.
-  await new Promise((resolve) => setTimeout(resolve, 50));
   while (pendingWrites.size > 0) {
-    await Promise.allSettled([...pendingWrites]);
+    const entries = [...pendingWrites.entries()];
+    await Promise.all(entries.map(([settled]) => settled));
+    const failed = entries.find(([, result]) => result.error !== null);
+    if (failed) throw failed[1].error;
   }
 }
 
@@ -80,6 +159,9 @@ export interface HealthResponse {
  * cleanly (surfaced as an error the UI can show) instead of spinning forever.
  */
 async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT): Promise<T> {
+  const ownerWrite = isOwnerWrite(path, init);
+  const gate = ownerWrite ? ownerTransitionGate() : null;
+  if (gate) await gate;
   const generation = getAuthGeneration();
   const checkGeneration = () => { if (generation !== getAuthGeneration()) throw new DOMException("Account changed", "AbortError"); };
   const requestInit: RequestInit = {
@@ -94,31 +176,45 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
     },
     signal: withTimeout(init?.signal, timeoutMs),
   };
-  checkGeneration();
-  const response = fetch(`${BASE_URL}${path}`, requestInit);
-  if (isOwnerWrite(path, init)) {
-    const tracked: Promise<unknown> = response.finally(() => pendingWrites.delete(tracked));
-    pendingWrites.add(tracked);
+  let settlePending: ((error?: unknown) => void) | null = null;
+  if (ownerWrite) {
+    let resolve!: () => void;
+    const settled = new Promise<void>((done) => { resolve = done; });
+    const entry: { error: unknown | null } = { error: null };
+    pendingWrites.set(settled, entry);
+    settlePending = (error) => {
+      entry.error = error ?? null;
+      pendingWrites.delete(settled);
+      resolve();
+    };
   }
-  const res = await response;
-  checkGeneration();
-  if (!res.ok) {
-    // Surface the backend's message (FastAPI `detail`) when present, e.g. the
-    // Chinese login/register errors; fall back to a generic status string.
-    let detail = "";
-    try {
-      const data = await res.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch {
-      /* non-JSON error body */
-    }
+  try {
     checkGeneration();
-    throw new ApiError(detail || `${init?.method ?? "GET"} ${path} failed: ${res.status}`, res.status);
+    const response = fetch(`${BASE_URL}${path}`, requestInit);
+    const res = await response;
+    checkGeneration();
+    if (!res.ok) {
+      // Surface the backend's message (FastAPI `detail`) when present, e.g. the
+      // Chinese login/register errors; fall back to a generic status string.
+      let detail = "";
+      try {
+        const data = await res.json();
+        if (data && typeof data.detail === "string") detail = data.detail;
+      } catch {
+        /* non-JSON error body */
+      }
+      checkGeneration();
+      throw new ApiError(detail || `${init?.method ?? "GET"} ${path} failed: ${res.status}`, res.status);
+    }
+    const data = await res.json() as T;
+    checkGeneration();
+    if (init?.method && init.method !== "GET" && /^\/api\/(sessions|practice|words)(\/|$)/.test(path)) invalidateProgress();
+    settlePending?.();
+    return data;
+  } catch (error) {
+    settlePending?.(error);
+    throw error;
   }
-  const data = await res.json() as T;
-  checkGeneration();
-  if (init?.method && init.method !== "GET" && /^\/api\/(sessions|practice|words)(\/|$)/.test(path)) invalidateProgress();
-  return data;
 }
 
 /** Liveness check used to surface backend connectivity in the UI. */
