@@ -1,0 +1,70 @@
+{
+  "date": "2026-11-09",
+  "branch": "review/three-workstreams-20261109",
+  "base": "42f10ba9532d259d8231b9b9c29ec0a867251780",
+  "scope": "guest write ownership during registration",
+  "environment": {
+    "browser": "Chrome 156.0.8078.75",
+    "page": "http://127.0.0.1:5173/practice/cafe",
+    "api": "http://127.0.0.1:8011",
+    "cors_override": false,
+    "disable_web_security": false,
+    "chrome_flags": ["--remote-debugging-port", "--no-sandbox", "--disable-gpu"],
+    "debug_hooks": "temporary, removed before commit"
+  },
+  "scenarios": [
+    {
+      "name": "late_save_after_register_post",
+      "register_post_observed_ms": 3061.3,
+      "save_started_ms": 3066.5,
+      "save_finished_ms": 4478.2,
+      "late_session_id": 2,
+      "new_account_sessions": [2, 1],
+      "old_guest_sessions": [],
+      "result": "pass"
+    },
+    {
+      "name": "save_503",
+      "save_requests": 1,
+      "register_requests": 0,
+      "register_error": "ApiError: save unavailable",
+      "token_after_attempt": null,
+      "transition_marker": null,
+      "unhandled_rejections": [],
+      "result": "pass"
+    },
+    {
+      "name": "register_response_lost",
+      "register_requests": 1,
+      "register_error": "TypeError: network lost after request",
+      "token_after_register": null,
+      "login_error": null,
+      "seed_visible": true,
+      "old_guest_sessions": [],
+      "result": "pass"
+    },
+    {
+      "name": "two_tabs",
+      "result": "not_accepted",
+      "reason": "page 2 save started after registration completed and token was already present; cross-tab gate is covered by unit test only"
+    },
+    {
+      "name": "repeat_click",
+      "result": "not_collected"
+    }
+  ],
+  "remaining_gaps": [
+    "two-tab browser gate not exercised",
+    "repeat click not browser-accepted",
+    "real network loss/recovery UI not accepted",
+    "server still accepts arbitrary guest writes after claim; application gate prevents app-issued late writes"
+  ],
+  "tests": {
+    "targeted": "pendingWrites 4 + authSync 16 = 20 passed",
+    "frontend_full": "73 files / 585 passed",
+    "typecheck": "pass",
+    "lint": "pass",
+    "production_build": "pass, 9.46s",
+    "backend": "unchanged; 644 passed before this frontend-only change"
+  }
+}
