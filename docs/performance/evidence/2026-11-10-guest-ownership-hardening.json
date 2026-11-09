@@ -1,0 +1,52 @@
+{
+  "generated_at": "2026-11-10T08:00:00+08:00",
+  "branch": "review/three-workstreams-20261109",
+  "base_commits": ["2f139e0", "87659ef", "d18d15e"],
+  "scope": "guest ownership hardening after audit of four P1 failures",
+  "fixes": {
+    "enqueue_identity": "queue only when no account token; existing account keeps own token",
+    "server_boundary": "get_client_id takes ProgressOwner lock before GuestClaim check; claim re-checks after same lock",
+    "queue_persistence": "merge stored records by record id; remove by id without deleting other records",
+    "stale_marker": "markers older than 60 seconds discarded before registration",
+    "single_send": "sendOnce keyed by record id shares immediate and retry sends",
+    "record_binding": "record keeps guest id and transition id; target token subject must match confirmed target"
+  },
+  "validation": {
+    "targeted_tests": {"files": 2, "passed": 28, "failed": 0},
+    "frontend_full": {"files": 73, "passed": 593, "failed": 0},
+    "backend_full": {"passed": 647, "failed": 0},
+    "typecheck": "pass",
+    "eslint": "pass",
+    "build_default_local": {
+      "status": "environment_failure",
+      "error": "[vite:worker-import-meta-url] remove ... Access is denied",
+      "file": "frontend/src/lib/localSpeech/moonshine.ts"
+    },
+    "build_workspace_temp": {
+      "status": "pass",
+      "modules": 2254,
+      "seconds": 7.43,
+      "temp": "D:\\personal_space\\spoken\\frontend\\.tmp-esbuild4",
+      "note": "Windows temp path; not a clean-CI proof"
+    }
+  },
+  "covered_cases": [
+    "guest save in flight blocks registration",
+    "save starting during registration is queued",
+    "unrelated account B is not queued under a guest transition",
+    "save 503 aborts registration",
+    "lost registration response retains record; guest-claim retry path",
+    "unknown outcome retains record",
+    "two module instances merge queue by id",
+    "concurrent retries send one POST per record in one page",
+    "24h stale marker is discarded"
+  ],
+  "not_accepted": [
+    "two normal browser tabs (pre-claim in-flight, simultaneous enqueue, B switch, close/reopen, >15s, lost response with queue)",
+    "refresh/relogin/another-browser ownership verification",
+    "cross-tab database-atomic dedupe for every write endpoint",
+    "clean-CI default npm run build",
+    "real Postgres claim/write concurrency test"
+  ],
+  "sanitization": "No tokens, signed URLs, passwords, raw audio, or private transcripts stored."
+}
