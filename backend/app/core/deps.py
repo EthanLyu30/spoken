@@ -63,6 +63,11 @@ def get_client_id(
         and guest.lower() != "anon"
         and request.method not in ("GET", "HEAD", "OPTIONS")
     ):
+        # Serialize this check with claim_device_data, which takes the same
+        # ProgressOwner lock before moving rows. Without the lock a request
+        # could pass the claim check, pause, and write after the claim commits.
+        from app.services import progress
+        progress.lock_owner(db, guest)
         claim = db.get(GuestClaim, guest)
         if claim is not None and owner != claim.owner_id:
             raise HTTPException(status_code=409, detail="guest_data_claimed")

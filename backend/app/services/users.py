@@ -58,12 +58,13 @@ def claim_device_data(db: Session, device_id: str, owner_id: str) -> None:
         return
     if device_id == owner_id:
         return
-    claim = db.get(GuestClaim, device_id)
-    if claim is not None and claim.owner_id != owner_id:
-        raise GuestAlreadyClaimed(device_id)
     try:
         for owner in sorted((device_id, owner_id)):
             progress.lock_owner(db, owner)
+        # Re-check after taking the same lock used by guest writes.
+        claim = db.get(GuestClaim, device_id)
+        if claim is not None and claim.owner_id != owner_id:
+            raise GuestAlreadyClaimed(device_id)
         request_receipts.claim(db, device_id, owner_id)
         progress.claim_progress(db, device_id, owner_id)
         for model in _OWNED:
