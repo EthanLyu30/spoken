@@ -164,3 +164,56 @@ def test_register_rolls_back_account_when_claim_fails(monkeypatch):
     # The rolled-back email can be registered again instead of returning 409.
     retry = client.post("/api/auth/register", json={"email": email, "password": "secret1"}, headers=device)
     assert retry.status_code == 201
+
+
+def test_guest_claim_blocks_late_guest_writes_and_allows_owner_retry():
+    dev = {"X-Client-Id": "late-write-guest"}
+    assert client.post("/api/words", json={"text": "early", "meaning": "m", "example": "e"}, headers=dev).status_code == 201
+    reg = client.post("/api/auth/register", json={"email": "late-write@b.com", "password": "secret1"}, headers=dev)
+    assert reg.status_code == 201
+    token = reg.json()["token"]
+    auth = {"Authorization": f"Bearer {token}"}
+
+    # The old guest id is now claimed. A late anonymous write must not recreate
+    # data under the guest owner.
+    late = client.post("/api/words", json={"text": "late", "meaning": "m", "example": "e"}, headers=dev)
+    assert late.status_code == 409
+    assert late.json()["detail"] == "guest_data_claimed"
+
+    # A retry carrying the owning account and the original guest id is allowed
+    # and lands under the account.
+    retry = client.post(
+        "/api/words",
+        json={"text": "late", "meaning": "m", "example": "e"},
+        headers={**dev, **auth},
+    )
+    assert retry.status_code == 201
+    words = client.get("/api/words", headers=auth).json()
+    assert any(x["text"] == "late" for x in words)
+    old = client.get("/api/words", headers=dev).json()
+    assert not any(x["text"] in ("early", "late") for x in old)
+
+
+def test_guest_claim_status_is_scoped_to_owning_account():
+    dev = {"X-Client-Id": "claim-status-guest"}
+    reg = client.post("/api/auth/register", json={"email": "claim-status@b.com", "password": "secret1"}, headers=dev)
+    assert reg.status_code == 201
+    auth = {"Authorization": f"Bearer {reg.json()["token"]}"}
+    mine = client.get("/api/auth/guest-claim", params={"guest_id": "claim-status-guest"}, headers=auth)
+    assert mine.status_code == 200 and mine.json() == {"claimed": True, "mine": True}
+
+    other = client.post("/api/auth/register", json={"email": "claim-other@b.com", "password": "secret1"})
+    other_auth = {"Authorization": f"Bearer {other.json()["token"]}"}
+    status = client.get("/api/auth/guest-claim", params={"guest_id": "claim-status-guest"}, headers=other_auth)
+    assert status.status_code == 200 and status.json() == {"claimed": True, "mine": False}
+
+
+def test_second_account_cannot_claim_an_already_claimed_guest():
+    dev = {"X-Client-Id": "one-owner-guest"}
+    first = client.post("/api/auth/register", json={"email": "owner-one@b.com", "password": "secret1"}, headers=dev)
+    assert first.status_code == 201
+    second = client.post("/api/auth/register", json={"email": "owner-two@b.com", "password": "secret1"}, headers=dev)
+    assert second.status_code == 409
+    assert second.json()["detail"] == "guest_data_claimed"
+    with SessionLocal() as db:
+        assert db.scalar(select(User).where(User.email == "owner-two@b.com")) is None

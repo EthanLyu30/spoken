@@ -7,7 +7,8 @@ const api = vi.hoisted(() => ({
   registerUser: vi.fn(),
   flushPendingWrites: vi.fn(),
   beginOwnerTransition: vi.fn(),
-  endOwnerTransition: vi.fn(),
+  completeOwnerTransition: vi.fn(),
+  retryPendingOwnerWrites: vi.fn(),
 }));
 vi.mock("./api", async (load) => ({ ...(await load<object>()), ...api }));
 const account = (id: number) => ({ id, email: `test${id}@example.test`, display_name: "", avatar_url: "", created_at: "" });
@@ -218,7 +219,7 @@ it("does not register or switch accounts when a pending guest save fails", async
     .rejects.toThrow("save unavailable");
 
   expect(api.beginOwnerTransition).toHaveBeenCalledTimes(1);
-  expect(api.endOwnerTransition).toHaveBeenCalledTimes(1);
+  expect(api.completeOwnerTransition).toHaveBeenCalledWith("failed", undefined, "save unavailable");
   expect(api.registerUser).not.toHaveBeenCalled();
   expect(token.getToken()).toBeNull();
 });

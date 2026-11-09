@@ -1,5 +1,10 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { beginOwnerTransition, endOwnerTransition, flushPendingWrites, postSession } from "./api";
+import { beginOwnerTransition, completeOwnerTransition, flushPendingWrites, postSession } from "./api";
+import { clearToken, setToken } from "./authToken";
+
+function accountToken(id: number): string {
+  return `header.${btoa(JSON.stringify({ sub: String(id) }))}.signature`;
+}
 
 const payload = {
   scenario_id: "cafe",
@@ -11,7 +16,9 @@ const payload = {
 };
 
 afterEach(() => {
-  endOwnerTransition();
+  completeOwnerTransition("failed");
+  clearToken();
+  localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -71,7 +78,8 @@ it("queues a save that starts after registration begins until identity is decide
   await Promise.resolve();
   expect(fetchMock).not.toHaveBeenCalled();
 
-  endOwnerTransition();
+  setToken(accountToken(7));
+  completeOwnerTransition("success", 7);
   await save;
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
@@ -82,14 +90,67 @@ it("waits for a registration transition started in another tab", async () => {
     headers: { "Content-Type": "application/json" },
   }));
   vi.stubGlobal("fetch", fetchMock);
-  localStorage.setItem("spoken-owner-transition", JSON.stringify({ id: "other-tab", startedAt: Date.now() }));
+  localStorage.setItem("spoken-owner-transition", JSON.stringify({
+    id: "other-tab", guestId: "guest-other-tab", startedAt: Date.now(),
+  }));
 
   const save = postSession({ ...payload });
   await Promise.resolve();
   expect(fetchMock).not.toHaveBeenCalled();
 
-  localStorage.removeItem("spoken-owner-transition");
-  window.dispatchEvent(new StorageEvent("storage", { key: "spoken-owner-transition", newValue: null }));
+  setToken(accountToken(8));
+  const outcome = JSON.stringify({ id: "other-tab", status: "success", targetUserId: 8 });
+  localStorage.setItem("spoken-owner-transition-outcome", outcome);
+  window.dispatchEvent(new StorageEvent("storage", {
+    key: "spoken-owner-transition-outcome", newValue: outcome,
+  }));
   await save;
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+
+it("does not send a queued save through an unrelated account token", async () => {
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: 44 }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+  beginOwnerTransition();
+  const save = postSession({ ...payload });
+  await Promise.resolve();
+
+  setToken(accountToken(9));
+  completeOwnerTransition("success", 7);
+  await expect(save).rejects.toThrow("当前登录账号不是该注册记录的目标账号");
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("keeps a queued save when the registration outcome is unknown", async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  beginOwnerTransition();
+  const save = postSession({ ...payload });
+  await Promise.resolve();
+
+  completeOwnerTransition("unknown", undefined, "response lost");
+  await expect(save).rejects.toThrow("response lost");
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("rejects a second registration transition in the same tab", () => {
+  beginOwnerTransition();
+  expect(() => beginOwnerTransition()).toThrow("正在进行");
+  completeOwnerTransition("failed");
+});
+
+
+it("retains a failed save for a later registration flush", async () => {
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ detail: "save unavailable" }), {
+    status: 503,
+    headers: { "Content-Type": "application/json" },
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+  const save = postSession({ ...payload }).catch((error) => error);
+  await save;
+  await expect(flushPendingWrites()).rejects.toThrow("save unavailable");
 });
