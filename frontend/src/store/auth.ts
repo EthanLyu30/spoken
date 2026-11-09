@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import {
   getMe, loginUser, registerUser, updateProfile as updateProfileApi,
-  type AuthUser, ApiError,
+  flushPendingWrites, type AuthUser, ApiError,
 } from "../lib/api";
 import { clearToken, setToken, getToken, getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
 import { useWords } from "./words";
@@ -88,6 +88,11 @@ export const useAuth = create<AuthState>((set, get) => ({
   register: async (email, password) => {
     const revision = ++operation;
     const generation = getAuthGeneration();
+    // A just-finished practice/word write must land while this browser is still
+    // the guest owner, otherwise the server claim can move it to the account
+    // and the late response would be orphaned under the old client id.
+    await flushPendingWrites();
+    if (revision !== operation || generation !== getAuthGeneration()) return;
     const { token, user } = await registerUser(email, password);
     if (revision !== operation || generation !== getAuthGeneration()) return;
     setToken(token);

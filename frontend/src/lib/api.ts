@@ -49,6 +49,27 @@ function authHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+const pendingWrites = new Set<Promise<unknown>>();
+
+function isOwnerWrite(path: string, init?: RequestInit): boolean {
+  return Boolean(init?.method && init.method !== "GET" && /^\/api\/(sessions|practice|words)(\/|$)/.test(path));
+}
+
+/**
+ * Wait until every owner-scoped write has reached the server.
+ *
+ * Registration must not change the bearer token while a just-finished
+ * practice/word write is still in flight: the backend claim could move the old
+ * data before the late request lands under the old guest owner.
+ */
+export async function flushPendingWrites(): Promise<void> {
+  // Give owner writes queued in the same turn a chance to register.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  while (pendingWrites.size > 0) {
+    await Promise.allSettled([...pendingWrites]);
+  }
+}
+
 export interface HealthResponse {
   status: string;
   app: string;
@@ -74,7 +95,12 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
     signal: withTimeout(init?.signal, timeoutMs),
   };
   checkGeneration();
-  const res = await fetch(`${BASE_URL}${path}`, requestInit);
+  const response = fetch(`${BASE_URL}${path}`, requestInit);
+  if (isOwnerWrite(path, init)) {
+    const tracked: Promise<unknown> = response.finally(() => pendingWrites.delete(tracked));
+    pendingWrites.add(tracked);
+  }
+  const res = await response;
   checkGeneration();
   if (!res.ok) {
     // Surface the backend's message (FastAPI `detail`) when present, e.g. the
