@@ -38,30 +38,32 @@ import { resetOnboarding } from "../lib/onboarding";
 import { tokens } from "../lib/tokens";
 import { cn } from "../lib/utils";
 import { useProfileData } from "../hooks/useProfileData";
+import AccountSettings from "../components/AccountSettings";
 
 export default function Profile() {
   const [search] = useSearchParams();
   const [allBadges, setAllBadges] = useState(false);
   const settings = search.get("tab") === "voice";
+  const accountSettings = search.get("tab") === "account";
   const words = useWords((s) => s.words);
   const wordsKnown = useWords((s) => s.fetchedOnce && !s.error);
   const ensureLoaded = useWords((s) => s.ensureLoaded);
   const userId = useAuth((s) => s.user?.id ?? null);
-  const { sessions, stats, practice, status, errors, pending, reload } = useProfileData(userId, !settings);
+  const { sessions, stats, practice, status, errors, pending, reload } = useProfileData(userId, !settings && !accountSettings);
   const { hash } = useLocation();
 
   // Re-fetch when the account changes (login/logout) so stats/history follow
   // the new owner; the word bag is reset+refetched by the auth store itself.
   useEffect(() => {
-    if (!settings) ensureLoaded();
-  }, [ensureLoaded, userId, settings]);
+    if (!settings && !accountSettings) ensureLoaded();
+  }, [ensureLoaded, userId, settings, accountSettings]);
 
   useEffect(() => {
-    if (hash && !settings && status === "ready")
+    if (hash && !settings && !accountSettings && status === "ready")
       document
         .getElementById(hash.slice(1))
         ?.scrollIntoView({ block: "start" });
-  }, [hash, settings, status]);
+  }, [hash, settings, accountSettings, status]);
 
   const sessionCount = stats?.total_sessions ?? sessions.length;
   const wordCount = words.length;
@@ -163,12 +165,12 @@ export default function Profile() {
           <div>
             <p className="eyebrow">MY SPOKEN</p>
             <h1>
-              {settings ? "让声音，适合你的节奏。" : "把进步，变成自己的习惯。"}
+              {settings ? "让声音，适合你的节奏。" : accountSettings ? "管理你的账号与数据。" : "把进步，变成自己的习惯。"}
             </h1>
             <p>
               {settings
                 ? "选择合适的播放方式，找到舒服的练习节奏。"
-                : "每次开口都算数，看看你已经走了多远。"}
+                : accountSettings ? "查看邮箱状态、导出学习记录或删除账号。" : "每次开口都算数，看看你已经走了多远。"}
             </p>
           </div>
           <Link to="/scenes" className="ui-secondary">
@@ -184,12 +186,13 @@ export default function Profile() {
               statsKnown={stats !== null}
             />
             <nav className="profile-tabs" aria-label="个人中心设置">
-              <Link to="/me" className={!settings ? "active" : ""}>
+              <Link to="/me" className={!settings && !accountSettings ? "active" : ""}>
                 资料与成就
               </Link>
               <Link to="/me?tab=voice" className={settings ? "active" : ""}>
                 语音设置
               </Link>
+              {userId && <Link to="/me?tab=account" className={accountSettings ? "active" : ""}>账号与数据</Link>}
               <Link to="/me#badges">成就徽章</Link>
               <Link to="/me#practice-history">练习记录</Link>
             </nav>
@@ -197,6 +200,8 @@ export default function Profile() {
           <div className="profile-main">
             {settings ? (
               <VoiceSettings />
+            ) : accountSettings ? (
+              <AccountSettings key={userId} />
             ) : status === "loading" ? (
               <p role="status" className="profile-load-state">
                 正在读取你的进度…

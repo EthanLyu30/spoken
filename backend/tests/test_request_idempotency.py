@@ -195,15 +195,15 @@ def test_old_review_retry_returns_current_schedule_without_repeating_review(clie
 
 
 def test_claim_collision_deduplicates_review_events_and_preserves_account_schedule(client):
-    from app.core.deps import get_client_id
-    account_id = "u:" + uuid4().hex
-    app.dependency_overrides[get_client_id] = lambda: account_id
-    try:
-        account_word = word(client)
-        account_review = client.post(f"/api/words/{account_word}/review",
-            json={"remembered": True, "client_request_id": "review"}).json()
-    finally:
-        app.dependency_overrides.pop(get_client_id, None)
+    account = TestClient(app)
+    registration = account.post("/api/auth/register", json={
+        "email": f"{uuid4().hex}@example.test", "password": "fixture-password",
+    }).json()
+    account_id = f"u:{registration['user']['id']}"
+    account.headers["Authorization"] = f"Bearer {registration['token']}"
+    account_word = word(account)
+    account_review = account.post(f"/api/words/{account_word}/review",
+        json={"remembered": True, "client_request_id": "review"}).json()
     guest_word = word(client)
     assert client.post(f"/api/words/{guest_word}/review",
         json={"remembered": True, "client_request_id": "review"}).status_code == 200
@@ -213,14 +213,10 @@ def test_claim_collision_deduplicates_review_events_and_preserves_account_schedu
         assert db.scalar(select(func.count()).select_from(LearningEvent).where(
             LearningEvent.client_id == account_id, LearningEvent.event_type == "word_reviewed")) == 1
         assert words.get_word(db, account_id, account_word).box == 1
-    app.dependency_overrides[get_client_id] = lambda: account_id
-    try:
-        assert client.post(f"/api/words/{account_word}/review",
-            json={"remembered": True, "client_request_id": "review"}).json() == account_review
-        assert client.post(f"/api/words/{guest_word}/review",
-            json={"remembered": True, "client_request_id": "review"}).status_code == 409
-    finally:
-        app.dependency_overrides.pop(get_client_id, None)
+    assert account.post(f"/api/words/{account_word}/review",
+        json={"remembered": True, "client_request_id": "review"}).json() == account_review
+    assert account.post(f"/api/words/{guest_word}/review",
+        json={"remembered": True, "client_request_id": "review"}).status_code == 409
 
 
 def test_receipts_roll_back_with_failed_awards_and_allow_retry(client, monkeypatch):

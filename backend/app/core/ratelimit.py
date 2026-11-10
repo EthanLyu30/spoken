@@ -48,7 +48,7 @@ _AI_PREFIXES = (
     "/api/dictionary/lookup",
 )
 _VOICE_PREFIXES = ("/api/asr", "/api/pronunciation")
-_AUTH_PREFIXES = ("/api/auth/login", "/api/auth/register")
+_AUTH_PREFIXES = ("/api/auth/login", "/api/auth/register", "/api/auth/password-reset", "/api/auth/email-verification")
 
 
 def limit_for(path: str) -> tuple[int, int] | None:

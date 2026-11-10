@@ -50,10 +50,11 @@ def _secret() -> str:
     return get_settings().jwt_secret or _DEV_SECRET
 
 
-def create_token(user_id: int) -> str:
+def create_token(user_id: int, auth_version: str = "") -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
+        "ver": auth_version,
         "iat": now,
         "exp": now + timedelta(days=get_settings().jwt_expire_days),
     }
@@ -62,10 +63,16 @@ def create_token(user_id: int) -> str:
 
 def decode_token(token: str) -> int | None:
     """Return the user id from a valid token, or None if missing/expired/forged."""
+    claims = decode_account_token(token)
+    return claims[0] if claims else None
+
+
+def decode_account_token(token: str) -> tuple[int, str] | None:
     try:
         payload = jwt.decode(token, _secret(), algorithms=[_ALGO])
-        return int(payload["sub"])
-    except (jwt.PyJWTError, KeyError, ValueError):
+        version = payload.get("ver", "")
+        return (int(payload["sub"]), version) if isinstance(version, str) else None
+    except (jwt.PyJWTError, KeyError, TypeError, ValueError):
         return None
 
 

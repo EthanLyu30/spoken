@@ -8,8 +8,9 @@ existing word/session/practice rows are scoped to the account instead.
 from __future__ import annotations
 
 from datetime import datetime
+import secrets
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -29,4 +30,17 @@ class User(Base):
     # devices without any external file storage.
     display_name: Mapped[str] = mapped_column(String(40), default="")
     avatar_url: Mapped[str] = mapped_column(Text, default="")
+    auth_version: Mapped[str] = mapped_column(String(32), default=lambda: secrets.token_hex(16))
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class AccountAction(Base):
+    __tablename__ = "account_actions"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True)
+    digest: Mapped[str] = mapped_column(String(64), unique=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
