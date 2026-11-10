@@ -1,86 +1,99 @@
-# Guest claim shadow protocol (0 / 1) — candidate review
+# Guest claim rollout verification
 
-Status: Draft PR candidate. Flag `0` is unchanged; flag `1` is a shadow
-protocol. This is not a production release decision.
+Draft PR #94 is based on production commit 42f10ba. The candidate product
+commit is 7538246. Tests used synthetic accounts and isolated databases.
 
-Product commits:
+## Behavior
 
-- `8aac01e` backend shadow capability, register decision, late guest writes
-- `889a3c7` frontend capability negotiation + claim-confirmed completion
-- `a557483` shadow fallback and late-write tests
+- GUEST_CLAIM_PROTOCOL accepts modes 0 and 1. The capability lookup has a
+  two-second deadline. The registration endpoint makes the final decision
+  using its current mode and the request header.
+- A normal registration moves committed guest sessions, practice and words
+  in the same transaction as account creation. An upgraded client uses the
+  explicit response to release writes queued for that registration.
+- A legacy browser can still save to the guest namespace after a claim or a
+  switch back to mode 0. A later legacy registration can create an account
+  without acquiring records from an already-claimed guest namespace.
+- A late write from an upgraded browser only queues for account replay if
+  that browser observed a matching claim complete after dispatch. Other
+  claim conflicts can retry once under the original anonymous identity.
+- Open 「学习进度」 and select 「查看本浏览器的游客记录」 to inspect retained
+  guest data. The panel makes read-only guest requests on demand. Guest
+  records remain separate from account statistics and history.
 
-## Server-side switch
+## Browser matrix
 
-`GUEST_CLAIM_PROTOCOL` is read per request:
+Edge 157.0.4341.42 loaded production builds of both frontends in independent
+two-tab contexts. Each row used UI registration and logout. The second tab
+seeded one session, practice and word through the real API, and held a
+legacy anonymous word request before network dispatch until registration
+completed. All registrations and word saves returned 201.
 
-| value | capability endpoint | register with `X-Claim-Protocol: 1` | old page (no header) | late anonymous guest write |
-|---|---|---|---|---|
-| 0 | `{protocol: 0}` | legacy | legacy | legacy |
-| 1 | `{protocol: 1}` | atomic account+claim, returns `claim.claimed=true` | legacy, `claim.claimed=false` | accepted into guest space |
+| Frontend | Backend | Account session / practice / word IDs | Late guest word ID | Word saved as guest after logout | Candidate page can find late word |
+| --- | --- | --- | --- | --- | --- |
+| 42f10ba | 42f10ba | 1 / 1 / 1 | 2 | 3, same guest | Baseline uses the old page |
+| 42f10ba | 7538246 mode 1 | 1 / 1 / 1 | 2 | 3, same guest | Yes, after loading the candidate |
+| 7538246 | 42f10ba | 2 / 2 / 4 | 5 | 6, new guest | Yes, in previous guest records |
+| 7538246 | 7538246 mode 1 | 2 / 2 / 4 | 5 | 6, new guest | Yes, in previous guest records |
 
-The capability endpoint is `GET /api/auth/guest-capabilities`. It is
-informational; the register endpoint decides from the flag and the request
-header at the time the request arrives.
+Each row made one registration request and one delayed word request.
+Post-logout saves remained invisible to the original account.
 
-## Frontend behavior
+## Browser rollback
 
-`getGuestClaimCapability()` uses a 2 s timeout. It returns `1` only for an
-explicit `protocol: 1`; 404, timeout, unknown values and protocol `0` all use
-legacy. Registration sends `X-Claim-Protocol: 1` only after that check.
+The server committed a mode 1 registration, but the browser lost its
+response. The other tab queued one word through the vocabulary page.
+While registration was pending the submit button stayed disabled, and a
+second click left the request count at one. The backend then switched to
+mode 0 and the browser loaded the original frontend. A successful login
+left one record in the browser queue and zero in the account.
 
-The pending-write transition completes with success only when the register
-response contains `claim.claimed === true`. A legacy response completes the
-transition as failed, preserving queued records. No "已同步" badge exists in
-this candidate, so there is no false success label to dismiss.
+Loading the candidate frontend again reduced the queue to zero and made
+word ID 1 visible only in the account. The vocabulary page sent one DELETE
+and received 204. The account had zero words after deletion.
 
-## Tests and observed evidence
+## Browser account switch
 
-- Backend full: **651 passed**
-- Frontend full: **609 passed** (74 files)
-- Shadow targeted: **2 passed** (`test_shadow_protocol_allows_late_guest_word_without_claiming_it`, `test_shadow_protocol_keeps_old_page_registration_legacy`)
-- Capability fallback: **4 passed** (protocol 1, old-backend 404, timeout, unknown value)
-- Frontend ownership targeted: **31 passed**
-- Typecheck: pass
-- Production build on this Windows host: not rerun after the final shadow edit;
-  previous candidate build passed with a workspace `TMP`/`TEMP`. Clean-CI build
-  remains required.
+The second tab started a protocol-aware word save before account A
+registered. The browser then logged out of A and logged into B before the
+held request reached the server. The original request returned 409 and
+left one local queued record. Account B had zero words from the request.
+Logging back into A sent one successful replay and cleared the queue.
+Only account A could read word ID 1. The original guest scope was empty.
 
-Observed backend behavior at flag `1`:
+## PostgreSQL 16.15
 
-- New header registration returns `claim.claimed=true`; pre-claim word is
-  visible to the new account.
-- Late anonymous word after claim returns 201 and is **not** visible to the new
-  account.
-- Old-page registration (no header) returns `claim.claimed=false`; its late
-  anonymous word remains guest-visible and is not visible to the account.
+Two independent request workers used a local PostgreSQL instance. A
+before-commit barrier held the first transaction while the second requested
+the same guest owner lock. PostgreSQL reported a transactionid lock wait in
+all three orders. Each test reconciled the final business record IDs by
+reading both the account and guest scopes.
 
-This is the intended shadow separation. It does not provide a user-facing
-recovery list; that remains a release blocker.
+| First commit | Other request | Result | Final account IDs | Final guest IDs |
+| --- | --- | --- | --- | --- |
+| Guest word save | Claim | Save and registration 201 | 1 | Empty |
+| Claim | Legacy guest word save | Save and registration 201 | Empty | 2 |
+| Claim | Upgraded guest word save | Save 409, two authenticated attempts returned the same ID | 3 | Empty |
 
-## Version matrix status
+## Verification commands
 
-| old/new | result | evidence |
-|---|---|---|
-| old FE + old BE | baseline: late 201 guest, account cannot see | prior review |
-| old FE + new BE flag 1 | old page legacy; late 201 guest; account cannot see | backend test `old_page` |
-| new FE + old BE | capability 404 -> legacy; no claim confirmation | capability tests |
-| new FE + new BE flag 1 | new page atomic claim; late guest remains guest | backend + frontend tests |
-| new FE + new BE flag 0 | legacy; `claim.claimed=false`; no success badge | capability/legacy path |
-| rollback | no browser-queue rollback run yet | **not verified** |
+From the backend run pytest -q. From the frontend run npm test,
+npm run typecheck, npm run lint and npm run build. The local suite returned
+654 backend passes and 613 frontend passes across 75 files. The normal
+minified build completed with a temporary output directory.
 
-## Not satisfied / release blockers
+[GitHub Actions for the candidate](https://github.com/EthanLyu30/spoken/actions/runs/42830060996)
 
-1. No user-facing recovery entry for guest records retained after a late write;
-   they are currently only visible as guest data, not as a pending card.
-2. Real two-tab browser matrix, real PostgreSQL concurrency ordering, and
-   registration-response-loss during a queued write were not run in this
-   candidate.
-3. Capability-query then flag-change race is unit-tested only as a fallback
-   function; it was not exercised against a live flag flip.
-4. Default clean-CI `npm run build` result is pending; local Windows build path
-   is not a clean-CI claim.
-5. Flag `1` intentionally accepts late guest writes. It does not merge them into
-   the new account; without the recovery UI this is a minimum compatibility
-   mode, not a full product acceptance.
+## Deployment boundary
 
-No merge or production deployment is requested.
+Deploy the compatible backend in mode 0 and confirm the capability before
+enabling mode 1. Use mode 0 on that same backend for rollback. Keep the
+claim table and claim-status route so existing queued records can resolve
+after the frontend is restored. The original backend binary does not
+recognize a reserved guest namespace and must not be the rollback target
+after mode 1 creates claims.
+
+An old backend has no claim receipt for a registration response the client
+never received. This path preserves the local queue without assuming an
+account owner. The mode 1 recovery guarantee applies to registrations that
+recorded a server claim.
