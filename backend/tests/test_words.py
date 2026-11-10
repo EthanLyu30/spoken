@@ -92,3 +92,30 @@ def test_add_is_idempotent_and_stores_kind():
     assert a.status_code == 201 and b.status_code == 201
     assert a.json()["id"] == b.json()["id"]  # no duplicate row
     assert a.json()["kind"] == "sentence"
+
+
+def test_word_definition_happens_before_guest_write_lock(monkeypatch):
+    from app.services import words as repo
+
+    calls = []
+
+    async def fake_define(text, deepseek):
+        calls.append("define")
+        return "延迟释义", "This definition came from an external call."
+
+    real_lock = repo.progress.lock_owner
+
+    def recording_lock(db, owner):
+        calls.append("lock")
+        return real_lock(db, owner)
+
+    monkeypatch.setattr(repo, "define_word", fake_define)
+    monkeypatch.setattr(repo.progress, "lock_owner", recording_lock)
+
+    response = client.post(
+        "/api/words",
+        json={"text": "definition-before-lock", "scenario_id": "cafe"},
+    )
+
+    assert response.status_code == 201
+    assert calls[:2] == ["define", "lock"]

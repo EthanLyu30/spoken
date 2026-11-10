@@ -217,3 +217,25 @@ def test_second_account_cannot_claim_an_already_claimed_guest():
     assert second.json()["detail"] == "guest_data_claimed"
     with SessionLocal() as db:
         assert db.scalar(select(User).where(User.email == "owner-two@b.com")) is None
+
+
+def test_authenticated_account_write_with_claimed_device_id_is_allowed():
+    guest = {"X-Client-Id": "cross-account-device"}
+    first = client.post("/api/auth/register", json={"email": "device-owner@b.com", "password": "secret1"}, headers=guest)
+    assert first.status_code == 201
+    owner_auth = {"Authorization": f"Bearer {first.json()['token']}"}
+
+    other = client.post("/api/auth/register", json={"email": "device-other@b.com", "password": "secret1"})
+    assert other.status_code == 201
+    other_auth = {"Authorization": f"Bearer {other.json()['token']}"}
+
+    # An authenticated account may still use a browser that carries a device id
+    # claimed by another account; only anonymous guest writes are migration-bound.
+    written = client.post(
+        "/api/words",
+        json={"text": "account-b-word", "meaning": "m", "example": "e"},
+        headers={**guest, **other_auth},
+    )
+    assert written.status_code == 201
+    assert any(x["text"] == "account-b-word" for x in client.get("/api/words", headers=other_auth).json())
+    assert not any(x["text"] == "account-b-word" for x in client.get("/api/words", headers=owner_auth).json())

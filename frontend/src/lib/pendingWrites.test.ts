@@ -90,6 +90,7 @@ it("waits for a registration transition started in another tab", async () => {
     headers: { "Content-Type": "application/json" },
   }));
   vi.stubGlobal("fetch", fetchMock);
+  localStorage.setItem("spoken-client-id", "guest-other-tab");
   localStorage.setItem("spoken-owner-transition", JSON.stringify({
     id: "other-tab", guestId: "guest-other-tab", startedAt: Date.now(),
   }));
@@ -221,4 +222,62 @@ it("sends the same queued record only once when retries race", async () => {
   const saves = fetchMock.mock.calls.filter(([url, init]) =>
     String(url).endsWith("/api/sessions") && init?.method === "POST");
   expect(saves).toHaveLength(1);
+});
+
+
+it("does not let a different guest adopt another guest's registration", async () => {
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ id: 47 }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+  localStorage.setItem("spoken-client-id", "guest-B");
+  localStorage.setItem("spoken-owner-transition", JSON.stringify({
+    id: "guest-A-transition", guestId: "guest-A", startedAt: Date.now(),
+  }));
+
+  await postSession({ ...payload });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const headers = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers as Record<string, string>;
+  expect(headers["X-Client-Id"]).toBe("guest-B");
+});
+
+it("does not let an old registration completion clear a newer marker", () => {
+  const old = beginOwnerTransition();
+  localStorage.setItem("spoken-owner-transition", JSON.stringify({
+    id: "newer", guestId: "guest-newer", startedAt: Date.now(),
+  }));
+  completeOwnerTransition("success", 5, undefined, old.id);
+  expect(JSON.parse(localStorage.getItem("spoken-owner-transition")!).id).toBe("newer");
+  completeOwnerTransition("failed");
+});
+
+it("does not resurrect a record removed by another module", async () => {
+  beginOwnerTransition();
+  const save = postSession({ ...payload }).catch(() => undefined);
+  await Promise.resolve();
+  const before = JSON.parse(localStorage.getItem("spoken-owner-pending-writes")!) as Array<{ id: string }>;
+  const oldId = before[before.length - 1].id;
+  // Simulate another tab confirming and removing that record.
+  localStorage.setItem("spoken-owner-pending-writes", JSON.stringify(before.filter((row) => row.id !== oldId)));
+
+  const save2 = postSession({ ...payload }).catch(() => undefined);
+  await Promise.resolve();
+  const after = JSON.parse(localStorage.getItem("spoken-owner-pending-writes")!) as Array<{ id: string }>;
+  expect(after.some((row) => row.id === oldId)).toBe(false);
+  completeOwnerTransition("failed");
+  await Promise.all([save, save2]);
+});
+
+it("retains a late 409 guest-claimed write for claim recovery", async () => {
+  localStorage.setItem("spoken-client-id", "guest-late");
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ detail: "guest_data_claimed" }), {
+    status: 409,
+    headers: { "Content-Type": "application/json" },
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  await expect(postSession({ ...payload })).rejects.toThrow("guest_data_claimed");
+  const queued = JSON.parse(localStorage.getItem("spoken-owner-pending-writes")!) as Array<{ id: string; guestId: string }>;
+  expect(queued.some((row) => row.guestId === "guest-late")).toBe(true);
 });
