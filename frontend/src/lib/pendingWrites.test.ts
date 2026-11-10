@@ -372,3 +372,24 @@ it("continues after a missing delete instead of blocking later saves", async () 
   expect(rows.map((row) => row.id)).toEqual(["missing-delete"]);
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
+
+it("does not count a record held by another tab's send lease", async () => {
+  const token = accountToken(14);
+  const record = {
+    id: "lease-held", transitionId: "t14", guestId: "guest-14",
+    path: "/api/sessions", method: "POST", body: JSON.stringify(payload), headers: {}, createdAt: Date.now(),
+  };
+  localStorage.setItem("spoken-owner-pending-writes", JSON.stringify([record]));
+  localStorage.setItem("spoken-owner-transition-outcome", JSON.stringify({
+    id: "t14", status: "success", targetUserId: 14,
+  }));
+  localStorage.setItem("spoken-owner-write-send:lease-held", JSON.stringify({ token: "other-tab", at: Date.now() }));
+  setToken(token);
+  const fetcher = vi.fn();
+  vi.stubGlobal("fetch", fetcher);
+
+  const sent = await retryPendingOwnerWrites();
+  expect(sent).toBe(0);
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(JSON.parse(localStorage.getItem("spoken-owner-pending-writes") || "[]")).toHaveLength(1);
+});
