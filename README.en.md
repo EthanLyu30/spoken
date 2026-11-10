@@ -1,126 +1,64 @@
-<div align="center">
+# Spoken · Practice English with Pip
 
-# 🗣️ Spoken — AI English Speaking Coach
+Spoken is an AI English speaking coach for Chinese learners. Practice everyday conversations, build a custom role-play, or try **Take an Interview** for the current TOEFL speaking format. Both text and voice are available.
 
-**Practice spoken English with an AI partner in real-life scenarios, and get quantified feedback on pronunciation, grammar and expression.**
+[![CI](https://github.com/EthanLyu30/spoken/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/EthanLyu30/spoken/actions/workflows/ci.yml) · [Live demo](https://www.spokenai.org/) · [中文](README.md) · [Roadmap](docs/ROADMAP.md)
 
-[![Backend](https://img.shields.io/badge/backend-FastAPI-009688)]()
-[![Frontend](https://img.shields.io/badge/frontend-React%2BTS-61dafb)]()
-[![Voice](https://img.shields.io/badge/voice-iFlytek-blue)]()
-[![LLM](https://img.shields.io/badge/LLM-DeepSeek-7c3aed)]()
-[![License](https://img.shields.io/badge/license-MIT-blue)]()
+## What you can practice
 
-English · [中文](README.md)
+| Area | How it works |
+| --- | --- |
+| Home | Start from the daily recommendation, refresh it for a new idea, and see the daily goal and quote |
+| Scenario practice | Pick a chapter and stop on the journey map, or describe a custom role-play in one sentence |
+| Conversation | Talk or type with Pip and get streaming replies. Open corrections, the dictionary, or pronunciation practice when needed. Print the session debrief or save it as a PDF |
+| Take an Interview | Choose practice or simulation. Answer four questions on one topic with 45 seconds per question. The results include a 0–5 practice score for answer content, feedback, and written samples. Older records retain their original six-point scale |
+| Learning tools | Browse daily quotes and save words, phrases, and sentences for spaced review |
+| Progress | Review history, goals, and trends. Sign up from your profile to keep saved guest progress and continue on another device |
 
-</div>
+Replies use the browser's device voice by default. iFlytek handles speech recognition and pronunciation scoring. Moonshine and Kokoro are optional local models. Incomplete recognition stays editable for confirmation. Records retained under a guest identity can be opened from Learning Progress on the same browser.
 
----
+## Current interface
 
-## Overview
+| Home and daily recommendation | Scenario journey map |
+| --- | --- |
+| ![Spoken homepage with Pip and the daily recommendation](docs/screenshots/home.jpg) | ![Scenario practice with chapters and a journey map](docs/screenshots/scenes.jpg) |
+| **Take an Interview** | **Learning progress** |
+| ![Take an Interview practice and simulation modes](docs/screenshots/interview.jpg) | ![Progress overview and practice trends](docs/screenshots/progress.jpg) |
 
-Spoken is an **AI English speaking coach** for Chinese learners. Pick a real-life
-scenario (job interview, a business negotiation, ordering coffee, a doctor's
-visit…) and talk — by voice
-or text — with the AI buddy **Pip**. During and after the chat, the app scores
-your **pronunciation, grammar and expression**, and turns every session into a
-growth curve.
-
-## Highlights
-
-### Recent updates (Nov 2026)
-
-- **Interview answers are text-first**: 174 reviewed sets, 696 questions and 2,074 answer options are stored in the app; no YouTube player or region-dependent playback.
-- **Voice pipeline**: device voice by default; a silent online voice can recover once through a local English voice; Moonshine/Kokoro remain experimental.
-- **Operations**: registered-user list, semantic model/type labels, failure diagnostics, and recovered starts no longer counted as failures.
-- **Safety/reliability**: rate limits and security headers; incomplete ASR is kept editable instead of auto-submitted.
-
-- **Fast/slow dual-path architecture** with **streaming chat replies** — the
-  conversation stays snappy while assessment runs asynchronously.
-- **Browser-first voice pipeline** — iFlytek streaming ASR and pronunciation
-  scoring, with the device voice as the default read-aloud engine. Local
-  Moonshine/Kokoro models are experimental opt-ins and download only after
-  selection; failures fall back to the device voice/cloud ASR.
-  Call mode provides live captions and preserves the beginning of barge-in
-  speech. AudioWorklet capture has a compatibility fallback. Alternatively,
-  tap to record, tap again to finish, and send the transcription automatically.
-- **Instant feedback on every learner turn** — Pip replies first, then the learner
-  can open grammar / expression correction, a natural rewrite and explanation;
-  voice turns can also request pronunciation feedback without persisting audio.
-- **Dictionary in context** — click an English word or select a two-to-six-word
-  phrase for a Chinese definition, example and translation, then collect it
-  directly. Desktop uses an anchored card; mobile uses a bottom sheet.
-- **Take an Interview practice** — four 45-second answers covering experiences,
-  reasons and opinions, with transcript-based practice scores, suggestions and
-  written sample answers. The reviewed video answers are stored as **2,074 text
-  options across 174 sets**, switchable in the results page with no YouTube
-  player or region-dependent playback. Failed recognition can be recorded again.
-- **Quotes you can actually use** — movies / speeches·TED / literature / people /
-  proverbs, each with a **verified source** (checked against Wikiquote, apocryphal
-  ones removed) and a **"when to use it"** note.
-- **Custom & daily-generated scenarios** — describe an English-practice scene in one line, or play
-  the daily AI recommendation.
-- **Speaking-only boundaries** — unrelated coding, debugging, homework and
-  long-form writing tasks are declined, with a short invitation back to English
-  practice. Technical vocabulary and normal workplace conversation remain
-  available. Explicit tasks are rejected locally; other inputs use the shared
-  dialogue policy, without an extra AI classification call.
-- **Real progress data** — streak / level / XP / daily goal, pronunciation & Q&A
-  history charts, and a **cross-session insight** that points at your weakest
-  dimension and whether each skill is climbing — all driven by real activity.
-  Each post-session debrief exports to **PDF in one tap**.
-- **Resilient and observable** — request timeouts, streaming fallback, voice-call
-  auto-reconnect, and an admin telemetry dashboard with request/browser timings,
-  cost references and error diagnostics; 600+ backend / 500+ frontend tests.
+Desktop browser captures use the current app with synthetic local practice data. The gallery also includes conversation, custom scenes, daily quotes, and vocabulary. [Screenshot gallery](docs/screenshots/README.md)
 
 ## Architecture
 
-A **cascaded pipeline** (not an end-to-end speech model), because pronunciation
-scoring and grammar correction need the intermediate structured data (transcript,
-phoneme-level scores). The key idea is decoupling a low-latency path from an
-asynchronous assessment path:
+Streaming chat and read-aloud form the interactive path. Corrections, pronunciation scoring, and debriefs run when requested using the transcript and structured scoring data.
 
-```
-            ┌──────── fast path (low latency) ────────┐
- 🎤 mic ─VAD─► ASR (live) ──► chat LLM (streamed) ──► TTS (device/Kokoro) ─► 🔊
-                 │
-                 └─► transcript ─┐
-                                 ├─► slow path (async, non-blocking)
- end of chat ─────────────────────┴─► pronunciation + grammar + debrief ─► 📊
-```
-
-> Current state: chat uses explicit streaming delta, completion and error events. Read-aloud defaults to the device voice; choosing the experimental local model uses Kokoro and falls back to the device voice. Unique practice IDs make retries idempotent; long conversations retain their transcript while model context stays bounded. Full design in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
-
-### Stack
-
-- **Frontend:** React 18 · TypeScript · Vite · Tailwind CSS · Zustand · ECharts.
-- **Backend:** Python 3.11 · FastAPI · WebSocket · SQLAlchemy · SQLite.
-- **ASR / pronunciation:** iFlytek (IAT + ISE). **TTS:** device voices by
-  default; local Kokoro is experimental. **LLM:** DeepSeek (`deepseek-flash`,
-  follows the latest Flash release, thinking disabled, streamed; Pro is disallowed).
+- React, TypeScript, Vite, Tailwind CSS, Zustand, and ECharts on the frontend.
+- Python, FastAPI, and SQLAlchemy on the backend, with SQLite locally and PostgreSQL in production.
+- DeepSeek for conversation and text feedback, iFlytek IAT / ISE for recognition and pronunciation scoring, and device speech for read-aloud. [Architecture](docs/ARCHITECTURE.md) · [Deployment](docs/DEPLOY.md)
 
 ## Quick start
 
-Requires **Python 3.11+** and **Node.js 18+**.
+Use Python 3.11+ and Node.js 20+. Start the backend first. These commands are for macOS and Linux.
 
 ```bash
-# Backend (http://127.0.0.1:8000)
 cd backend
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env                                 # set DEEPSEEK_API_KEY (required), XF_* (voice)
-uvicorn app.main:app --reload
+python -m venv .venv
+cp .env.example .env
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m uvicorn app.main:app --reload
+```
 
-# Frontend (http://localhost:5173), in another terminal
+On Windows, use `Copy-Item .env.example .env` and `.\.venv\Scripts\python.exe`. Fill in `DEEPSEEK_API_KEY` in `backend/.env` before using AI conversation and scoring. Add the `XF_*` credentials for recognition and pronunciation assessment.
+
+Start the frontend in a separate terminal from the repository root.
+
+```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-With **only `DEEPSEEK_API_KEY`** you get text chat, timed Q&A scoring, quotes and
-custom scenarios. Device speech is the default read-aloud path; configure `XF_*`
-for streaming ASR and pronunciation scoring. Local speech models are optional.
-Set a private, stable `JWT_SECRET` for production and multi-worker deployments.
+Open <http://localhost:5173>. The API docs are at <http://127.0.0.1:8000/docs>. Production uses a stable `JWT_SECRET` and a PostgreSQL `DATABASE_URL`. The guest claim rollout defaults to mode `0`. [Guest claim verification and rollback](docs/performance/2026-11-10-shadow-claim-protocol.md)
 
-## License
+The original demo shows an earlier UI. [Short demo](docs/demo.mp4) · [Full walkthrough on Bilibili](https://www.bilibili.com/video/BV1yZEW6xEta/)
 
-[MIT](LICENSE) © 2026 Xiaoyang Lyu (EthanLyu30)
+[MIT License](LICENSE)

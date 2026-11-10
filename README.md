@@ -1,189 +1,79 @@
-<div align="center">
+# Spoken · 和 Pip 一起练英语口语
 
-# 🗣️ Spoken — AI 英语口语陪练
+Spoken 是面向中文学习者的 AI 英语口语陪练。在咖啡馆点单、和同事讨论工作，或用 **Take an Interview** 练习新托福口语。可以开麦对话，也可以打字练习。
 
-**在真实场景下用语音和 AI 对话练口语，并获得发音、语法与表达的量化反馈。**
+[![CI](https://github.com/EthanLyu30/spoken/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/EthanLyu30/spoken/actions/workflows/ci.yml) · [在线体验](https://www.spokenai.org/) · [English](README.en.md) · [开发路线图](docs/ROADMAP.md)
 
-[![CI](https://github.com/EthanLyu30/spoken/actions/workflows/ci.yml/badge.svg)](https://github.com/EthanLyu30/spoken/actions/workflows/ci.yml)
-[![Backend](https://img.shields.io/badge/backend-FastAPI-009688)]()
-[![Frontend](https://img.shields.io/badge/frontend-React%2BTS-61dafb)]()
-[![Voice](https://img.shields.io/badge/voice-iFlytek-blue)]()
-[![LLM](https://img.shields.io/badge/LLM-DeepSeek-7c3aed)]()
-[![License](https://img.shields.io/badge/license-MIT-blue)]()
+## 可以练什么
 
-🔗 **在线体验 / Live demo**：<https://spokenai.org> · 备用 <https://spoken-gamma.vercel.app>（国内访问可能稍慢）
+| 模块 | 用法 |
+| --- | --- |
+| 首页 | 从「今日推荐」直接开练，点「换一个」刷新推荐，也可以查看今日目标和每日金句 |
+| 场景练习 | 在闯关地图里按章节选场景，或用一句话创建自己的角色扮演 |
+| 场景对话 | 与 Pip 进行流式文字或语音对话，按需查看即时纠错、词典和跟读评分。结束后可生成小结，并打印或保存为 PDF |
+| Take an Interview | 默认练习模式，另有模拟模式。同一主题四题，每题 45 秒。答完后查看单题 0–5 分的内容参考分、反馈与文字参考答案。旧历史保留原来的 `/6` 分制 |
+| 学习工具 | 阅读每日金句，收藏单词、短语和句子，使用间隔复习 |
+| 学习进度 | 查看练习历史、每日目标和成长趋势。可在「我的」注册账号，同步本浏览器已保存的游客进度，在其他设备登录续练 |
 
-中文 · [English](README.en.md)
+对话回复默认使用浏览器提供的设备语音朗读。讯飞提供录音识别和发音评测。本地 Moonshine / Kokoro 可在语音设置中选用。识别不完整时，可先编辑并确认转写。已保留在游客身份下的记录，可以在「学习进度 → 查看本浏览器的游客记录」查看。
 
-</div>
+## 当前界面
 
-> 独立项目，按 [开发路线图](docs/ROADMAP.md) 分 PR 持续交付；README 随功能同步更新。
+| 首页 · 今日推荐 | 场景练习 · 闯关地图 |
+| --- | --- |
+| ![首页展示 Pip、今日推荐和今日目标](docs/screenshots/home.jpg) | ![场景练习展示章节和关卡地图](docs/screenshots/scenes.jpg) |
+| **场景对话 · 咖啡馆** | **Take an Interview · 练习与模拟** |
+| ![咖啡馆文字练习和 Pip 的回复](docs/screenshots/chat.jpg) | ![Take an Interview 的主题选择、练习模式与模拟模式](docs/screenshots/interview.jpg) |
+| **学习进度 · 历史与趋势** | **生词本 · 收藏与复习** |
+| ![学习进度概览和能力趋势](docs/screenshots/progress.jpg) | ![生词本里的示例收藏和复习入口](docs/screenshots/wordbag.jpg) |
 
----
+截图来自当前代码的桌面浏览器实拍，练习记录和对话为本地演示数据。每日金句和自定义场景也有截图。 [截图索引](docs/screenshots/README.md)
 
-## 📖 项目简介
+## 技术架构
 
-Spoken 是面向中文母语者的 **AI 英语口语陪练**。挑一个真实场景（求职面试、咖啡馆点单、看医生…），就能和 AI 伙伴 **Pip** 进行**语音 / 文字对话**；过程中和结束后，系统从**发音、语法、表达**三个维度给出量化评测与纠错，并把每次练习沉淀为**成长曲线**。
+对话流式生成和朗读走快路。发音评测、纠错与课后小结按需运行，使用转写和音素等结构化数据。
 
-四个口语训练核心诉求贯穿设计：
-
-- **对话自然度** —— Pip 稳定扮演角色，会追问、会引导，回复**逐字流式**返回。
-- **语音流畅与低延迟** —— 默认使用浏览器设备语音；讯飞用于实时识别与发音评测，设备语音和本地模型可按需选择。通话模式默认使用流式 ASR 与实时字幕，支持保留开头音频的**插话打断**；录音优先由 AudioWorklet 采集。
-- **纠错精准与时机** —— 每个用户回合都可单独打开「即时纠错」，按需查看语法、表达、正确改写；语音回合还能看发音反馈，分析不阻塞 Pip 回复。
-- **可量化的成长** —— 跟读分、对话分、限时问答成绩全部入库，生成趋势与课后报告。
-
----
-
-## ⭐ 亮点
-
-### 最近更新（2026-11）
-
-- **Interview 答案文字化**：174 组已核对视频、696 道题、2,074 个参考答案选项全部转为文字；结果页可切换阅读，不再依赖 YouTube。
-- **语音链路**：默认设备语音；在线自然音色启动失败时最多恢复一次本机英语音色；本地 Moonshine/Kokoro 保持实验性质。
-- **运行看板**：新增注册用户列表、模型/类型语义、失败诊断与恢复失败的准确区分。
-- **安全与稳定**：AI/语音接口限流、CSP/安全响应头、流式识别不完整时不自动提交。
-
-- **快慢双路架构** + **流式对话回复**：对话即时跟手，评测异步不阻塞。
-- **浏览器优先的语音链路**：默认使用设备语音朗读；讯飞提供流式识别（ASR）与发音评测（ISE）；本地 Moonshine / Kokoro 为实验功能，只有主动选择后才下载，性能不足或失败时回退设备语音/云端识别。
-- **每句话都能即时纠错**：Pip 先正常接话，用户再按需展开语法 / 表达 / 发音反馈，查看自然改写、解释，并可复制、朗读或一键放回输入框。
-- **对话内即点即查**：点击英文单词或选中 2–6 个词的短语，立即显示中文释义、例句与翻译；桌面端为锚点卡片，手机端为底部抽屉，并可直接收藏。
-- **Take an Interview 专项训练**：4 题 × 45 秒，练习经历描述、原因说明和观点表达，按转写内容给出练习参考分、表达建议和参考答案。已把 174 组已核对视频的 **2,074 个参考答案选项**转成文字，结果页可直接切换阅读，不依赖 YouTube。
-- **会用而非死背的金句**：电影 / 演讲·TED / 文学 / 名人 / 谚语，**标注真实出处**（经 Wikiquote 核实、剔除误传名言）+ **应用场景** + 一键去搜原声。
-- **自定义 & 每日生成场景**：一句话生成英语口语角色扮演；每天推荐一个新场景。
-- **专注英语练习**：编程、调试、解题、长文代写等无关任务会被拒绝并引导回口语练习；技术词汇的翻译、表达与正常职场闲聊仍可使用。明确任务本地拦截，其余由对话规则约束，不增加 AI 分类调用。
-- **真实成长数据**：连续天数 / 等级 / XP / 今日目标 + 跟读与问答历史曲线 + **跨会话成长洞察**（指出最该练的维度、每个维度在进步还是回落），全部由真实活动驱动。
-- **顺手不卡顿**：生词本本地缓存 + 乐观更新——切页秒开、收藏 / 加词即时生效，弱网下后台同步、失败自动回滚。
-- **健壮与可观测**：请求超时兜底、流式失败自动回退、通话断流自动重连；管理员运行看板含请求、浏览器体验、成本参考和错误诊断；600+ 后端 / 500+ 前端测试。
-
----
-
-## ✨ 核心功能
-
-| 模块 | 说明 |
-|---|---|
-| 🗺️ 闯关地图首页 | 18 个场景分 5 章（生活 / 出行 / 职场 / 商务进阶 / 社交）的蜿蜒地图；首页成长数据为真实统计 |
-| 💬 场景对话 | 与 Pip 角色扮演，回复**逐字流式**显示（失败自动回退） |
-| 🧩 自定义场景 | 一句话描述任意场景 → DeepSeek 即时生成人设并角色扮演 |
-| ✨ 今日新场景 | 每日 DeepSeek 推荐一个新鲜场景，点开即玩（带「灵感」主题标签，每日缓存） |
-| 🎙️ 实时语音对话 | 通话模式（自动断句、实时字幕、保留开头的插话打断、断流重连）或点击录音、再次点击结束后自动发送；支持切换文字练习 |
-| 🔊 朗读引擎 | 默认浏览器设备语音；可选实验性本地模型；支持试听和语音设置 |
-| 📊 发音评测 | 讯飞 ISE「跟读评分」词级打分（准确 / 流利 / 完整），逐词上色，可展开看**逐音素**对错 |
-| ⏱️ 限时问答 | Take an Interview 专项：4 题 × 45 秒，按 ETS 文本适用标准给 0–5 内容参考分（旧记录保留 /6）；每题可切换最多 3 个文字参考答案；识别失败可重录 |
-| ✍️ 即时纠错 | 每个用户回合可单独展开语法 / 表达纠错、自然改写与解释；语音回合按需附加发音反馈，课后仍保留汇总 |
-| 📈 能力趋势 & 成长洞察 | 会话趋势（ECharts 雷达 + 曲线）+ **跨会话成长洞察**（最该练的维度 + 每维度进步/回落趋势）+ 跟读 / 限时问答历史曲线 |
-| 📝 课后总结 | 对话结束生成综合报告（评分 / 纠错 / 好用表达 / 建议），**一键下载 PDF / 打印**留存或分享 |
-| 💡 卡壳提示 | 一键让 Pip 给 2-3 句可参考的回答 |
-| 📚 实时词典 & 生词本 | 对话、纠错、每日内容和报告中可点击单词或选中 2–6 词短语即时查中文释义 / 例句；可直接收藏，并支持单词 / 句子分栏、**间隔重复（SRS）复习** |
-| 📖 每日金句 | 分类（电影/演讲/文学/名人/谚语）+ 真实出处 + **应用场景** + 去搜索；可 AI 生成新句 |
-| 🏅 成长体系 | 真实统计的等级 / XP / 连续天数 / 今日目标 + 成就徽章 |
-
----
-
-## 🖼️ 截图
-
-| 首页 · 成长数据 | 蜿蜒闯关地图 |
-|---|---|
-| ![首页](docs/screenshots/home.png) | ![闯关地图](docs/screenshots/journey.png) |
-| **实时场景对话（流式回复）** | **限时问答 · 评分 + 高分范例** |
-| ![对话](docs/screenshots/chat.png) | ![限时问答](docs/screenshots/interview.png) |
-| **每日金句 · 真实出处 + 应用场景** | **自定义场景** |
-| ![金句](docs/screenshots/daily.png) | ![自定义场景](docs/screenshots/custom.png) |
-| **生词本** | **我的 · 练习记录成长曲线** |
-| ![生词本](docs/screenshots/wordbag.png) | ![成长曲线](docs/screenshots/profile.png) |
-
----
-
-## 🏗️ 技术架构
-
-采用**级联管线（Cascaded Pipeline）**而非纯端到端语音模型，因为发音评测与语法纠错都依赖中间结构化数据（转写文本、音素级打分）。核心是**快慢双路解耦**：
-
-```
-              ┌──────────── 快路（低延迟，保证对话流畅） ───────────┐
- 🎤 麦克风 ─VAD断句─► ASR 实时转写 ──► 对话 LLM(流式) ──► 朗读(设备语音/本地 Kokoro) ─► 🔊
-                      │
-                      └─► 转写文本 ─┐
-                                    ├─► 慢路（异步，不阻塞对话）
- 对话结束 ───────────────────────────┴─► 发音评测 + 语法纠错 + 课后总结 ─► 📊
+```text
+麦克风 → 浏览器 VAD → 流式 ASR → 对话模型 → 设备语音 / 本地朗读
+                         └→ 转写 → 即时纠错、课后小结与训练记录
+录音评测 → 讯飞 ISE → 词级与音素级反馈
 ```
 
-> 当前实现：LLM 回复采用带完成 / 错误事件的流式协议；默认朗读使用浏览器设备语音；显式选择本地模型时由 Kokoro 合成，未就绪或失败时回退设备语音。长对话保留完整练习记录，并限制模型上下文；每次练习使用独立标识避免重复保存。完整设计见 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**。
+- 前端使用 React、TypeScript、Vite、Tailwind CSS、Zustand 和 ECharts。
+- 后端使用 Python、FastAPI 和 SQLAlchemy，本地可用 SQLite，生产支持 PostgreSQL。
+- DeepSeek 提供对话和文本反馈。讯飞 IAT / ISE 提供语音识别与发音评分。
+- 管理员可在私有运行看板查看请求、浏览器体验、错误诊断及成本参考。 [架构说明](docs/ARCHITECTURE.md) · [部署指南](docs/DEPLOY.md)
 
-### 技术栈
+## 本地运行
 
-| 层 | 选型 |
-|---|---|
-| 前端 | React 18 · TypeScript · Vite · Tailwind CSS · Zustand（持久化状态）· ECharts · 自研「Pip」设计系统（Fredoka / Nunito） |
-| 后端 | Python 3.11 · FastAPI · WebSocket · SQLAlchemy · SQLite / Postgres |
-| 语音识别 / 发音评测 | 科大讯飞（语音听写 IAT + 语音评测 ISE） |
-| 语音合成 | Web Speech 设备语音（默认）/ Kokoro 本地模型（可选） |
-| 对话 / 纠错 / 总结 / 出题 | DeepSeek（`deepseek-flash`，跟随最新 Flash，关闭 thinking，对话走流式；禁用 Pro） |
-| 语音活动检测 | 浏览器端能量 VAD（通话模式自动断句 + 断流重连） |
-| 部署 | Docker Compose · Render（后端）· Vercel（前端）· Neon/Supabase（Postgres 持久化） |
+需要 Python 3.11+ 和 Node.js 20+。先启动后端，在 Windows PowerShell 中运行以下命令。
 
----
+```powershell
+cd backend
+python -m venv .venv
+Copy-Item .env.example .env
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+```
 
-## 🚀 快速开始
+macOS / Linux 可用 `cp .env.example .env`，并将上述 Python 路径换成 `.venv/bin/python`。需要 AI 对话和评分时，在启动前填写 `backend/.env` 中的 `DEEPSEEK_API_KEY`。需要录音识别和发音评分时，再填写 `XF_APP_ID`、`XF_API_KEY` 和 `XF_API_SECRET`。
 
-需要 **Python 3.11+** 与 **Node.js 18+**。
+在仓库根目录另开一个终端启动前端。
 
 ```bash
-# 后端（默认 http://127.0.0.1:8000）
-cd backend
-python -m venv .venv && .venv\Scripts\activate    # Windows；macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-copy .env.example .env                              # 填入 DEEPSEEK_API_KEY（对话必需）、XF_*（语音）
-uvicorn app.main:app --reload
-
-# 前端（默认 http://localhost:5173），另开一个终端
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-打开 <http://localhost:5173> 即可使用。仅配 `DEEPSEEK_API_KEY` 可使用文字对话、限时问答评分、金句和自定义场景；配上 `XF_*` 后可使用流式 ASR 与发音评测。朗读默认走设备语音，没有英语音色时会给出提示；实验性本地模型需要首次下载。生产环境还应配置稳定的 `JWT_SECRET`。后端测试：`cd backend && pip install -r requirements-dev.txt && pytest`。
+前端默认在 <http://localhost:5173>，API 文档在 <http://127.0.0.1:8000/docs>。也可从仓库根目录运行 `docker compose up --build`，启动前先准备好 `backend/.env`。
 
-### 🐳 Docker 一键启动
+生产部署使用稳定的 `JWT_SECRET` 和 PostgreSQL `DATABASE_URL`。游客认领协议由 `GUEST_CLAIM_PROTOCOL` 控制，默认 `0`。 [认领验收与回滚](docs/performance/2026-11-10-shadow-claim-protocol.md)
 
-```bash
-copy backend\.env.example backend\.env   # Windows；macOS/Linux: cp backend/.env.example backend/.env
-docker compose up --build
-```
+## 项目资料
 
-- 前端 <http://localhost:5173>（nginx 托管 + `/api` 反代后端）
-- 后端文档 <http://localhost:8000/docs>
-- SQLite 持久化在 `backend-data` 卷
+- [当前待办与交付历史](docs/ROADMAP.md)
+- [语音可靠性](docs/VOICE_RELIABILITY.md)
+- 早期演示记录了旧界面。 [仓库短版视频](docs/demo.mp4) · [Bilibili 完整讲解](https://www.bilibili.com/video/BV1yZEW6xEta/)
 
-> 云端托管（Render 后端 + Vercel 前端，含一键 Blueprint `render.yaml`）见 **[docs/DEPLOY.md](docs/DEPLOY.md)**。
->
-> 数据默认按**设备隔离**（免登录，每个浏览器各自的生词本 / 记录），也可在「我的」页用邮箱**注册账号跨设备续进度**；是否持久取决于是否接了 Postgres（不接则用临时 SQLite，重启重置）—— 详见部署指南。
-
-### 🔑 环境变量
-
-写入 `backend/.env`（**切勿提交**）：
-
-| 变量 | 用途 |
-|---|---|
-| `DEEPSEEK_API_KEY` | DeepSeek：对话 / 纠错 / 总结 / 出题（核心，必需） |
-| `XF_APP_ID` / `XF_API_KEY` / `XF_API_SECRET` | 科大讯飞：流式识别、发音评测（使用语音识别/评分时需要；朗读默认走设备语音） |
-
----
-
-## 🎬 Demo 视频
-
-**快速版**（约 4.5 分钟，可直接在此播放）：
-
-<video src="https://github.com/EthanLyu30/spoken/raw/main/docs/demo.mp4" controls width="720"></video>
-
-> 若上方播放器未显示（部分环境会折叠 HTML），点 [这里](https://github.com/EthanLyu30/spoken/blob/main/docs/demo.mp4) 用 GitHub 内置播放器观看。
-
-**完整版**（更详细的讲解）：**[▶️ 在 Bilibili 观看](https://www.bilibili.com/video/BV1yZEW6xEta/)**
-
----
-
-## 🗺️ 开发路线图
-
-按"每个 PR 只做一件事"的原则分步交付，详见 **[docs/ROADMAP.md](docs/ROADMAP.md)**。
-
-## 📄 License
-
-[MIT](LICENSE) © 2026 Xiaoyang Lyu (EthanLyu30)
+[MIT 许可证](LICENSE)

@@ -93,8 +93,10 @@
 
 图片使用内置 `image_gen` 生成，没有调用项目AI提供商或新增运行时依赖。参考文件为原批准首页和地图；以下为最终提示要求及保存路径：
 
-- `frontend/public/images/cafe-hero.png`：从批准首页重建纯咖啡馆插画，保留阳光、Pip身份、咖啡和笔记本；角色与咖啡在右，左侧留奶油纸色空间；移除所有UI、文字、按钮和导航。
-- `frontend/public/images/journey-map.png`：从地图参考重建纯水彩微缩地图，四周咖啡馆、餐厅、商店、诊所与树木长椅，中央留白与浅色弯曲小路；移除数字、关卡按钮、标签和全部UI文字；真实关卡用React覆盖。
-- `frontend/public/images/pip.png`：从批准品牌形象提取独立珊瑚红绿芽Pip，全身、透明alpha，保留眼睛、笑容和小手脚；无文字、无咖啡馆背景。
+- 首页咖啡馆原画保留阳光、Pip、咖啡和笔记本，左侧为标题留白。 [咖啡馆原图](../design/spoken-ui-2026-10-27/assets/source/cafe-hero.png)
+- 水彩闯关地图原画保留街区和小路，关卡与按钮由 React 渲染。 [地图原图](../design/spoken-ui-2026-10-27/assets/source/journey-map.png)
+- Pip 原画为独立透明角色，可用于设计迭代。 [Pip 原图](../design/spoken-ui-2026-10-27/assets/source/pip.png)
+
+前端构建使用 `frontend/src/assets` 中的响应式 WebP。
 
 最终资产已复制进项目，原批准图保持原样。推荐接口没有图片字段，使用统一品牌插画。

@@ -22,7 +22,8 @@ pip install -r requirements.txt
 # 3) 配置环境变量
 copy .env.example .env            # Windows
 # cp .env.example .env            # macOS / Linux
-#   然后按需填入 XF_* 与 DEEPSEEK_API_KEY（骨架阶段可留空）
+#   需要文字对话与评分时填入 DEEPSEEK_API_KEY
+#   需要语音识别与发音评测时填入 XF_*
 
 # 4) 启动服务
 uvicorn app.main:app --reload
@@ -40,19 +41,23 @@ uvicorn app.main:app --reload
 | 方法 | 路径 | 作用 |
 |---|---|---|
 | `GET` | `/api/health` | 健康检查 |
+| `GET` | `/api/ready` | 就绪检查，验证数据库连通 |
 | `GET` | `/api/scenarios` | 场景列表（后端为唯一数据源） |
 | `GET` | `/api/scenarios/{id}` | 单个场景详情（含开场白） |
 | `POST` | `/api/chat` | 一轮场景化角色扮演对话（DeepSeek 驱动） |
+| `POST` | `/api/chat/stream` | 流式场景对话 |
 | `POST` | `/api/feedback` | 课后小结：结构化评分 / 纠错 / 建议（DeepSeek 驱动） |
 | `POST` | `/api/sessions` | 保存一次完成的对话（含评分） |
 | `GET` | `/api/sessions` | 历史会话列表 |
 | `GET` | `/api/sessions/{id}` | 单次会话详情（对话 + 评分） |
-| `POST` | `/api/tts` | 文本转语音（讯飞），返回 mp3，让 Pip 朗读 |
 | `POST` | `/api/asr` | 语音转文本（讯飞），上传 16k 单声道 PCM，返回转写 |
 | `POST` | `/api/pronunciation` | 发音评测（讯飞 ISE）：16k PCM + 参考文本 `?text=`，返回词级打分 |
 | `POST` | `/api/hint` | 卡壳提示：根据对话给 2-3 句可参考的回答（DeepSeek） |
 | `POST` `GET` | `/api/words` | 生词本：保存 / 列出收藏的词（缺释义时 DeepSeek 补全） |
 | `PATCH` `DELETE` | `/api/words/{id}` | 标记掌握 / 删除 |
+| `GET` | `/api/auth/guest-capabilities` | 查询游客认领协议，模式 `1` 可为当前注册签发短期凭证 |
+
+前端默认使用设备语音。旧 `/api/tts` 路径保留 `410 Gone` 兼容响应。
 
 `POST /api/chat` 接收场景 id 与历史消息，返回 AI 陪练的下一句话。历史为空时直接返回脚本化开场白（不调用模型）；有用户消息时调用 DeepSeek，因此需要在 `.env` 中配置 `DEEPSEEK_API_KEY`。
 
@@ -68,7 +73,7 @@ curl -s http://127.0.0.1:8000/api/chat \
   -d '{"scenario_id":"cafe","messages":[{"role":"user","content":"Can I get a latte?"}]}'
 ```
 
-设计上对话走**快路径**：系统提示要求 AI 全程角色扮演、回复简短口语化、不在对话中纠错（纠错与评测属于后续里程碑的慢路径）。
+对话走快路径，Pip 专注角色扮演和口语回复。即时纠错、发音评测和课后小结由独立接口按需处理。
 
 会话持久化使用 SQLite（默认 `spoken.db`，可用 `DATABASE_URL` 覆盖）；`/api/sessions` 用于保存与回看历史，是能力趋势的基础。
 
@@ -95,7 +100,7 @@ backend/
 │   │   ├── chat.py        # 对话接口
 │   │   ├── feedback.py    # 课后小结接口
 │   │   ├── sessions.py    # 会话历史接口
-│   │   ├── tts.py         # 语音合成接口
+│   │   ├── auth.py        # 注册、登录与游客认领
 │   │   ├── asr.py         # 语音识别接口
 │   │   └── pronunciation.py  # 发音评测接口
 │   ├── data/
@@ -109,7 +114,6 @@ backend/
 │       ├── feedback.py    # 课后小结提示与结构化解析
 │       ├── sessions.py    # 会话持久化
 │       ├── xf_auth.py     # 讯飞 WebSocket 鉴权
-│       ├── xf_tts.py      # 讯飞语音合成 (TTS)
 │       ├── xf_asr.py      # 讯飞语音听写 (ASR)
 │       ├── xf_ise.py      # 讯飞语音评测 (ISE)
 │       └── pronunciation.py  # ISE 结果解析
@@ -119,4 +123,4 @@ backend/
 └── .env.example
 ```
 
-> 语音链路（ASR/TTS）、发音评测与报告等功能随后续 PR 加入，详见根目录 `docs/ROADMAP.md`。
+当前交付状态与待办见 [开发路线图](../docs/ROADMAP.md)。
