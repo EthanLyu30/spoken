@@ -40,6 +40,27 @@ def test_me_requires_valid_token():
     assert client.get("/api/auth/me", headers={"Authorization": "Bearer garbage"}).status_code == 401
 
 
+def test_production_claim_rollout_requires_durable_auth_and_preserves_override(monkeypatch):
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.delenv("GUEST_CLAIM_PROTOCOL", raising=False)
+    monkeypatch.setenv("RENDER_EXTERNAL_HOSTNAME", "spoken-backend-sg.onrender.com")
+    monkeypatch.setenv("RENDER_GIT_BRANCH", "main")
+    monkeypatch.setattr(settings, "database_url", "sqlite:///temporary.db")
+    monkeypatch.setattr(settings, "jwt_secret", "")
+    assert auth_api.guest_claim_protocol() == 0
+    monkeypatch.setattr(settings, "database_url", "postgresql://local.test/spoken")
+    assert auth_api.guest_claim_protocol() == 0
+    monkeypatch.setattr(settings, "jwt_secret", "fixture-stable-secret")
+    assert auth_api.guest_claim_protocol() == 1
+    monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", "0")
+    assert auth_api.guest_claim_protocol() == 0
+    monkeypatch.delenv("GUEST_CLAIM_PROTOCOL")
+    monkeypatch.setenv("RENDER_GIT_BRANCH", "preview")
+    assert auth_api.guest_claim_protocol() == 0
+
+
 def test_duplicate_email_rejected():
     client.post("/api/auth/register", json={"email": "dup@b.com", "password": "secret1"})
     r = client.post("/api/auth/register", json={"email": "DUP@b.com", "password": "secret1"})

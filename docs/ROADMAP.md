@@ -2,12 +2,13 @@
 
 ## 当前进度
 
-2026-11-10 核对。游客进度迁移已随 PR #94 合并，线上前端已加载合并版本，后端就绪，线上认领协议为模式 `0`。双标签页、PostgreSQL 并发、旧后端丢响应和模式切换恢复已经在隔离环境通过。 [PR #94](https://github.com/EthanLyu30/spoken/pull/94) · [认领验收](performance/2026-11-10-shadow-claim-protocol.md)
+2026-11-10 核对。游客进度迁移已随 PR #94 合并。双标签页、PostgreSQL 并发、旧后端丢响应和模式切换恢复已经在隔离环境通过。 [PR #94](https://github.com/EthanLyu30/spoken/pull/94) · [认领验收](performance/2026-11-10-shadow-claim-protocol.md)
 
-- [ ] **游客认领模式 `1` 的线上启用与验收**。用隔离测试账号核对注册前后记录 ID、跨设备登录，以及重试和回滚。发布时保持兼容后端和签名密钥一致。 [部署指南](DEPLOY.md)
+- [ ] **游客认领模式 `1` 的线上验收**。生产发布后，用隔离测试账号核对注册前后记录 ID、独立会话登录和迟到保存。 [发布 PR](https://github.com/EthanLyu30/spoken/pull/98) · [部署指南](DEPLOY.md)
 - [ ] **真实设备语音与手机验收**。补齐 Windows Chrome / Edge 和 iPhone Safari 的实际麦克风、句中停顿、完整转写、真实首声和自然断网恢复。浏览器回调、固定音频和系统回录证据分别保留。 [语音可靠性](VOICE_RELIABILITY.md) · [Chrome 声学记录](performance/2026-11-08-chrome-five-round-acoustic.md)
-- [ ] **运行看板区分测试流量**。现有遥测已能记录 `test_run_id`。继续补上按测试批次筛选，以及查询触及上限时的提示，让报错统计能明确区分真实用户样本和验收样本。 [看板说明](admin-observability.md)
-- [ ] **账号管理功能**。密码重置、邮箱验证、账号删除和数据导出仍在后续产品范围。
+- [x] **运行看板区分测试流量**。线上支持未标记、仅测试及全部流量，支持按批次 ID 查询，浏览器和后端保留上限分别显示。 [看板说明](admin-observability.md)
+- [x] **账号管理实现**。新增数据导出、密码确认后删除、邮箱验证和密码重置，核心链路已通过 SQLite 和 PostgreSQL 测试。 [PR #97](https://github.com/EthanLyu30/spoken/pull/97)
+- [ ] **生产邮件配置与收件验收**。配置发信凭据和验证过的发件人，分别验收邮箱验证与密码重置的真实收件。 [部署指南](DEPLOY.md)
 
 ## 早期交付历史
 
