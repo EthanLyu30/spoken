@@ -239,3 +239,54 @@ def test_authenticated_account_write_with_claimed_device_id_is_allowed():
     assert written.status_code == 201
     assert any(x["text"] == "account-b-word" for x in client.get("/api/words", headers=other_auth).json())
     assert not any(x["text"] == "account-b-word" for x in client.get("/api/words", headers=owner_auth).json())
+
+
+def test_shadow_protocol_allows_late_guest_word_without_claiming_it(monkeypatch):
+    monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", "1")
+    assert client.get("/api/auth/guest-capabilities").json() == {"protocol": 1}
+    guest = {"X-Client-Id": "shadow-device"}
+    early = client.post(
+        "/api/words",
+        json={"text": "earlyword", "meaning": "m", "example": "e"},
+        headers=guest,
+    )
+    assert early.status_code == 201
+    reg = client.post(
+        "/api/auth/register",
+        json={"email": "shadow@b.com", "password": "secret1"},
+        headers={**guest, "X-Claim-Protocol": "1"},
+    )
+    assert reg.status_code == 201
+    assert reg.json()["claim"]["claimed"] is True
+    late = client.post(
+        "/api/words",
+        json={"text": "lateword", "meaning": "m", "example": "e"},
+        headers=guest,
+    )
+    assert late.status_code == 201
+    auth = {"Authorization": f"Bearer {reg.json()['token']}"}
+    account_words = client.get("/api/words", headers=auth).json()
+    assert any(x["text"] == "earlyword" for x in account_words)
+    assert not any(x["text"] == "lateword" for x in account_words)
+
+
+def test_shadow_protocol_keeps_old_page_registration_legacy(monkeypatch):
+    monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", "1")
+    guest = {"X-Client-Id": "old-page-device"}
+    reg = client.post(
+        "/api/auth/register",
+        json={"email": "oldpage@b.com", "password": "secret1"},
+        headers=guest,
+    )
+    assert reg.status_code == 201
+    assert reg.json()["claim"]["claimed"] is False
+    late = client.post(
+        "/api/words",
+        json={"text": "oldpagelate", "meaning": "m", "example": "e"},
+        headers=guest,
+    )
+    assert late.status_code == 201
+    auth = {"Authorization": f"Bearer {reg.json()['token']}"}
+    assert not any(
+        x["text"] == "oldpagelate" for x in client.get("/api/words", headers=auth).json()
+    )
