@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   getGuestClaimCapability: vi.fn(),
   flushPendingWrites: vi.fn(),
   beginOwnerTransition: vi.fn(),
+  enableOwnerWriteQueue: vi.fn(),
   completeOwnerTransition: vi.fn(),
   retryPendingOwnerWrites: vi.fn(),
 }));
@@ -222,6 +223,7 @@ it("does not register or switch accounts when a pending guest save fails", async
     .rejects.toThrow("save unavailable");
 
   expect(api.beginOwnerTransition).toHaveBeenCalledTimes(1);
+  expect(api.enableOwnerWriteQueue).not.toHaveBeenCalled();
   expect(api.completeOwnerTransition).toHaveBeenCalledWith("failed", undefined, "save unavailable", "test-transition");
   expect(api.registerUser).not.toHaveBeenCalled();
   expect(token.getToken()).toBeNull();
@@ -261,6 +263,7 @@ it("releases this registration's pending writes after a confirmed legacy migrati
   await useAuth.getState().register("legacy@example.test", "secret123");
 
   expect(api.completeOwnerTransition).toHaveBeenCalledWith("success", 1, undefined, "legacy", false);
+  expect(api.enableOwnerWriteQueue).toHaveBeenCalledWith("legacy");
 });
 
 it("does not finish registration after switching accounts during capability discovery", async () => {

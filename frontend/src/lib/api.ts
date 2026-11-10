@@ -72,9 +72,11 @@ type OwnerTransition = {
   id: string;
   guestId: string;
   startedAt: number;
+  queueWrites: boolean;
   outcome: Promise<OwnerTransitionOutcome>;
   settle: (outcome: OwnerTransitionOutcome) => void;
 };
+type TransitionDescriptor = Pick<OwnerTransition, "id" | "guestId" | "startedAt" | "queueWrites">;
 type StoredOwnerWrite = {
   id: string;
   transitionId: string;
@@ -112,16 +114,21 @@ function tokenSubject(token: string | null): string | null {
   }
 }
 
-function transitionDescriptor(): { id: string; guestId: string; startedAt: number } | null {
+function transitionDescriptor(): TransitionDescriptor | null {
   try {
     const raw = localStorage.getItem(OWNER_TRANSITION_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { id?: unknown; guestId?: unknown; startedAt?: unknown };
+    const parsed = JSON.parse(raw) as Partial<TransitionDescriptor>;
     if (typeof parsed.id !== "string" || typeof parsed.guestId !== "string" || typeof parsed.startedAt !== "number") return null;
-    return { id: parsed.id, guestId: parsed.guestId, startedAt: parsed.startedAt };
+    return { id: parsed.id, guestId: parsed.guestId, startedAt: parsed.startedAt, queueWrites: parsed.queueWrites !== false };
   } catch {
     return null;
   }
+}
+
+function publishTransitionDescriptor({ id, guestId, startedAt, queueWrites }: TransitionDescriptor): void {
+  try { localStorage.setItem(OWNER_TRANSITION_KEY, JSON.stringify({ id, guestId, startedAt, queueWrites })); }
+  catch { /* the in-memory transition still protects this tab */ }
 }
 
 function latestTransitionOutcome(): OwnerTransitionOutcome | null {
@@ -391,16 +398,16 @@ function discardStaleTransition(): void {
 }
 
 function currentTransition(): { id: string; guestId: string; outcome: Promise<OwnerTransitionOutcome> } | null {
-  if (localTransition) return { id: localTransition.id, guestId: localTransition.guestId, outcome: localTransition.outcome };
+  if (localTransition) return localTransition.queueWrites ? localTransition : null;
   discardStaleTransition();
   const descriptor = transitionDescriptor();
-  if (!descriptor) return null;
+  if (!descriptor?.queueWrites) return null;
   const outcome = waitExternalOutcome(descriptor.id);
   return { id: descriptor.id, guestId: descriptor.guestId, outcome };
 }
 
-/** Stop new owner writes from using the old identity while registration runs. */
-export function beginOwnerTransition(): { id: string; guestId: string } {
+/** Block concurrent registration before deciding whether its writes can be queued. */
+export function beginOwnerTransition(queueWrites = true): { id: string; guestId: string } {
   discardStaleTransition();
   if (localTransition) {
     throw new OwnerTransitionError("已有注册正在进行，请等待当前注册完成");
@@ -412,11 +419,19 @@ export function beginOwnerTransition(): { id: string; guestId: string } {
   const guestId = getClientId();
   let settle!: (outcome: OwnerTransitionOutcome) => void;
   const outcome = new Promise<OwnerTransitionOutcome>((resolve) => { settle = resolve; });
-  localTransition = { id, guestId, startedAt: Date.now(), outcome, settle };
-  try {
-    localStorage.setItem(OWNER_TRANSITION_KEY, JSON.stringify({ id, guestId, startedAt: Date.now() }));
-  } catch { /* the in-memory transition still protects this tab */ }
+  localTransition = { id, guestId, startedAt: Date.now(), queueWrites, outcome, settle };
+  publishTransitionDescriptor(localTransition);
   return { id, guestId };
+}
+
+export function enableOwnerWriteQueue(transitionId: string): void {
+  const active = localTransition;
+  const stored = transitionDescriptor();
+  if (active?.id !== transitionId || (stored && stored.id !== transitionId)) {
+    throw new OwnerTransitionError("注册操作已变化，请重试");
+  }
+  active.queueWrites = true;
+  publishTransitionDescriptor(active);
 }
 
 /** Record the outcome of the specific registration transaction. */
@@ -608,8 +623,8 @@ function isOwnerWrite(path: string, init?: RequestInit): boolean {
 
 /**
  * Wait until every owner-scoped write that started before registration has
- * reached the server and succeeded. Writes starting after the transition are
- * queued separately and are released only by a confirmed transition outcome.
+ * reached the server and succeeded. When the claim protocol is available,
+ * subsequent writes are queued until their registration outcome is confirmed.
  */
 export async function flushPendingWrites(): Promise<void> {
   while (pendingWrites.size > 0) {

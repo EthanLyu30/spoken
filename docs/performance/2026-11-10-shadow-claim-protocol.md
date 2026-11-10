@@ -1,7 +1,8 @@
 # Guest claim rollout verification
 
-Draft PR #94 is based on production commit 42f10ba. The candidate product
-commit is 7538246. Tests used synthetic accounts and isolated databases.
+Draft PR #94 is based on production commit 42f10ba. This report covers
+compatibility commit 7538246 and the legacy response-loss follow-up.
+Tests used synthetic accounts and isolated databases.
 
 ## Behavior
 
@@ -11,6 +12,10 @@ commit is 7538246. Tests used synthetic accounts and isolated databases.
 - A normal registration moves committed guest sessions, practice and words
   in the same transaction as account creation. An upgraded client uses the
   explicit response to release writes queued for that registration.
+- The browser blocks a second registration while it checks capability. It
+  enables the account queue only after the backend advertises mode 1.
+  A legacy registration continues saving new activity under the original
+  guest identity.
 - A legacy browser can still save to the guest namespace after a claim or a
   switch back to mode 0. A later legacy registration can create an account
   without acquiring records from an already-claimed guest namespace.
@@ -61,6 +66,24 @@ left one local queued record. Account B had zero words from the request.
 Logging back into A sent one successful replay and cleared the queue.
 Only account A could read word ID 1. The original guest scope was empty.
 
+## Legacy response loss
+
+Edge 157.0.4341.42 ran two tabs against three isolated backends using the
+candidate frontend's minified build. The first tab registered through the
+UI. The server committed the account and the test held its 201 response
+while the other tab saved a word through the vocabulary page. The test
+then dropped the registration response and logged into the account.
+
+| Backend | Word POST count and owner | Account word IDs after login | Original guest word IDs | Queue after login |
+| --- | --- | --- | --- | --- |
+| 42f10ba, capability endpoint 404 | One 201, guest | 1 | 2 | 0 |
+| Compatible backend, mode 0 | One 201, guest | 1 | 2 | 0 |
+| Compatible backend, mode 1 | One 201 after login, account | 2, 1 | Empty | 0 |
+
+On the two legacy paths, the learning progress page's guest history panel
+showed the word that the API returned as ID 2. In mode 1, the word stayed queued until
+the server confirmed the account's claim.
+
 ## PostgreSQL 16.15
 
 Two independent request workers used a local PostgreSQL instance. A
@@ -79,7 +102,8 @@ reading both the account and guest scopes.
 
 From the backend run pytest -q. From the frontend run npm test,
 npm run typecheck, npm run lint and npm run build. The local suite returned
-654 backend passes and 613 frontend passes across 75 files. The normal
+654 backend passes for the compatibility candidate and 616 frontend
+passes across 76 files after the response-loss follow-up. The normal
 minified build completed with a temporary output directory.
 
 [GitHub Actions for the candidate](https://github.com/EthanLyu30/spoken/actions/runs/42830060996)
@@ -93,7 +117,9 @@ after the frontend is restored. The original backend binary does not
 recognize a reserved guest namespace and must not be the rollback target
 after mode 1 creates claims.
 
-An old backend has no claim receipt for a registration response the client
-never received. This path preserves the local queue without assuming an
-account owner. The mode 1 recovery guarantee applies to registrations that
-recorded a server claim.
+A legacy backend cannot prove which account should receive queued writes
+from an earlier frontend build. The current frontend keeps new legacy
+writes guest-visible. Automatic replay of already queued writes still
+requires proof of the account owner. Drain in-flight mode 1 registrations
+before changing the flag. A simultaneous capability downgrade and lost
+registration response was outside this browser run.

@@ -110,6 +110,23 @@ it("waits for a registration transition started in another tab", async () => {
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
+it("keeps other tabs saving as guests while legacy registration still blocks a second registration", async () => {
+  localStorage.setItem("spoken-client-id", "guest-legacy-tab");
+  localStorage.setItem("spoken-owner-transition", JSON.stringify({
+    id: "legacy-registration", guestId: "guest-legacy-tab", startedAt: Date.now(), queueWrites: false,
+  }));
+  const fetcher = vi.fn(async (_path: string, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    expect(headers.get("X-Client-Id")).toBe("guest-legacy-tab");
+    expect(headers.has("Authorization")).toBe(false);
+    return Response.json({ id: 14 }, { status: 201 });
+  });
+  vi.stubGlobal("fetch", fetcher);
+
+  expect(() => beginOwnerTransition()).toThrow("另一个标签页正在注册");
+  await expect(postSession(payload)).resolves.toMatchObject({ id: 14 });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
 
 it("does not send a queued save through an unrelated account token", async () => {
   const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: 44 }), {

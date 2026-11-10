@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import {
   getGuestClaimCapability, getMe, loginUser, registerUser, updateProfile as updateProfileApi,
-  beginOwnerTransition, completeOwnerTransition, flushPendingWrites, retryPendingOwnerWrites,
+  beginOwnerTransition, completeOwnerTransition, enableOwnerWriteQueue, flushPendingWrites, retryPendingOwnerWrites,
   type AuthUser, ApiError,
 } from "../lib/api";
 import { clearToken, setToken, getToken, getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
@@ -92,17 +92,22 @@ export const useAuth = create<AuthState>((set, get) => ({
     // A duplicate click must not advance the operation counter before the
     // transition gate rejects it; otherwise the first successful response is
     // treated as stale and its token is discarded.
-    const transition = beginOwnerTransition();
+    const transition = beginOwnerTransition(false);
     const revision = ++operation;
     const generation = getAuthGeneration();
+    const isCurrent = () => revision === operation && generation === getAuthGeneration();
     try {
-      // A just-finished practice/word write must land while this browser is still
-      // the guest owner. A failed write aborts registration rather than silently
-      // switching ownership; writes that start after this point are queued and
-      // remain bound to this transition.
+      // Until the backend can prove a claim after a lost response, new writes
+      // must stay guest-visible rather than waiting for an unverifiable owner.
       const claimProtocol = await getGuestClaimCapability();
+      if (!isCurrent()) {
+        completeOwnerTransition("unknown", undefined, "registration was superseded", transition.id);
+        return;
+      }
+      if (claimProtocol === 1) enableOwnerWriteQueue(transition.id);
+      // Save completed practice and words before moving the guest history.
       await flushPendingWrites();
-      if (revision !== operation || generation !== getAuthGeneration()) {
+      if (!isCurrent()) {
         completeOwnerTransition("unknown", undefined, "registration was superseded", transition.id);
         return;
       }
@@ -113,7 +118,7 @@ export const useAuth = create<AuthState>((set, get) => ({
         claimProtocol,
       );
       const { token, user } = response;
-      if (revision !== operation || generation !== getAuthGeneration()) {
+      if (!isCurrent()) {
         completeOwnerTransition("unknown", undefined, "registration was superseded", transition.id);
         return;
       }
