@@ -60,7 +60,7 @@ app/
 │   ├── chat.py             # HTTP 流式 / 非流式场景对话
 │   ├── asr.py              # 缓冲与 WebSocket 流式语音识别
 │   ├── pronunciation.py    # POST /api/pronunciation：发音评测
-│   ├── tts.py              # POST /api/tts/stream：PCM 中继；/api/tts：兼容 WAV
+│   ├── auth.py             # 注册、登录、游客认领与状态查询
 │   ├── turn_correction.py  # POST /api/turn-correction：单回合语法 / 表达纠错
 │   ├── dictionary.py       # POST /api/dictionary/lookup：单词 / 短语释义
 │   └── sessions.py         # 会话记录、报告与成长洞察
@@ -69,7 +69,7 @@ app/
 │   ├── dialogue.py         # 对话提示与流式编排
 │   ├── turn_correction.py  # 单回合结构化纠错
 │   ├── dictionary.py       # 词典查询与有界 TTL LRU
-│   └── xf_*.py             # 讯飞 ASR / ISE / TTS 与鉴权
+│   └── xf_*.py             # 讯飞 ASR / ISE 与鉴权
 ├── models/                 # SQLAlchemy ORM（User / Session / Practice / Word）
 └── schemas/                # Pydantic 请求/响应模型
 ```
@@ -79,7 +79,8 @@ app/
 ```
 src/
 ├── pages/
-│   ├── Home.tsx            # 场景地图与成长概览
+│   ├── Home.tsx            # 今日推荐与目标
+│   ├── Scenes.tsx          # 场景地图与章节导航
 │   ├── Conversation.tsx    # 实时对话（录音、播放、字幕）
 │   ├── Report.tsx          # 课后报告 / 趋势
 │   └── WordBag.tsx         # 生词本与 SRS
@@ -107,29 +108,30 @@ src/
 - `POST /api/turn-correction` 接收当前用户句子、场景和可选上文，返回自然改写、中文说明以及最多 6 条结构化问题。它和聊天请求完全隔离，因此不会延迟 Pip 接话。
 - `POST /api/dictionary/lookup` 接收 1–6 个英文词。前端对查询做规范化、会话级缓存和并发请求合并；后端使用最多 512 条、24 小时 TTL 的 LRU 内存缓存，避免重复调用 LLM。
 - 页面英文内容由统一的交互文本组件处理：单击单词查询；存在有效短语选择时，选择优先于单击。每段文本只占一个 Tab 焦点，可用左右方向键选词。桌面端显示锚点卡片，移动端显示带安全区适配的底部抽屉。
-- 云端播放不等待设备音色发现；明确选择设备语音时才等待最多 500 ms 的 `voiceschanged`，不可用时回退云端。本地模式使用已就绪的 Kokoro，并在播放当前句时预合成下一句。
-- 只有用户明确选择本地模型后，才在空闲时段串行预热 Moonshine / Kokoro。推理与下载在独立 Worker 中，缓存复用后续访问；默认云端模式不下载模型。
+- 默认设备语音等待英语音色发现。在线音色启动失败时，可以恢复一次本机英语音色。本地模式使用 Kokoro，未就绪或失败时回退设备语音。
+- 用户明确选择本地模型后，才在空闲时段串行预热 Moonshine / Kokoro。推理与下载在独立 Worker 中，缓存复用后续访问。
 - 开启省流量、设备内存不超过 2 GB、仅 2 个逻辑核心、无 Worker 或无 Cache Storage 时不下载模型。两个模型都会执行第二次稳态基准：Moonshine 慢于实时、Kokoro 慢于音频时长的 1.25 倍即禁用，防止本地免费方案拖慢对话。
-- 讯飞 PCM 流通过 `/api/tts/stream` 逐帧返回，前端处理网络块跨采样边界、连续调度和取消。兼容接口 `/api/tts` 继续返回单个 WAV；旧后端或缺少 Web Audio 的环境保留缓冲播放路径。
+- 旧讯飞朗读接口保留 `410 Gone` 兼容响应，当前朗读由前端处理。
 
 ### 5.2 取消、完整性与记录身份
 
 - 新前端通过 `Accept: text/event-stream` 请求聊天的 `delta / done / error` 事件；上游缺少完成标志时不会把半句认证为成功。旧前端仍可接收纯文本协议。
 - 每个通话回合有独立取消信号；插话、挂断、离开页面会取消旧生成和播放。插话检测保留最近音频，麦克风重连或音频图异步加载完成时会再次检查生命周期，避免挂断后重新开启采集。
 - 每次练习分配 `client_session_id`，后端以 `(client_id, client_session_id)` 唯一约束保证重试幂等；旧会话的空标识保持原样。模型只使用最近 40 条上下文，保存接口最多保留每次练习 1000 条消息。
-- 账号身份只来自有效 Bearer 凭证，设备请求不能使用保留的 `u:` 命名空间。生产及多进程部署需配置稳定私有的 `JWT_SECRET`；未配置时使用随机进程密钥，重启后需要重新登录。
+- 账号身份只来自有效 Bearer 凭证，设备请求不能使用保留的 `u:` 命名空间。生产和多进程部署使用稳定私有的 `JWT_SECRET`。注册时可迁移已保存的游客进度，待保存队列按认领凭据恢复。 [游客认领验收](performance/2026-11-10-shadow-claim-protocol.md)
 
 ## 6. 数据模型（量化反馈的基础）
 
 ```
-User   (id, name, created_at)
-Session(id, user_id, scenario, started_at, ended_at, summary)
-Turn   (id, session_id, role, text, audio_path, created_at)
-Score  (id, turn_id, pron_accuracy, pron_fluency, pron_completeness,
-        grammar_error_count, details_json)
+User             账号
+PracticeSession  会话、转写和课后小结
+PracticeRecord   跟读评分与 Interview 等专项记录
+WordEntry        收藏与复习状态
+LearningEvent   用于目标、连续学习与成就的活动事件
+GuestClaim      游客身份与目标账号的认领记录
 ```
 
-历次 `Score` 聚合即可得到能力趋势；`Session.summary` 为课后报告。
+能力趋势按会话和专项记录汇总。原始录音只在浏览器内存中短暂保留。
 
 ## 7. 关键技术决策小结
 
@@ -145,7 +147,7 @@ Score  (id, turn_id, pron_accuracy, pron_fluency, pron_completeness,
 | 发音评测 | 科大讯飞 | 音素级准确度 / 流利度仍需成熟的专项评测服务 |
 | 对话 / 纠错 / 总结 | DeepSeek | 国内可达，结构化输出能力强，性价比高 |
 | 后端 | FastAPI | 原生异步 + WebSocket，AI/音频生态完善 |
-| 存储 | SQLite | 零配置，评委可一键复现 |
+| 存储 | 本地 SQLite，生产 PostgreSQL | 本地零配置，部署后支持跨设备持久化 |
 
 ## 8. 当前实现状态
 
@@ -159,4 +161,4 @@ Score  (id, turn_id, pron_accuracy, pron_fluency, pron_completeness,
 | 连贯朗读 | 默认设备语音整段朗读；Kokoro 可选，本地未就绪或失败回退设备语音 |
 | 课后与成长 | 会话保存、综合报告、趋势、成长洞察、PDF / 打印、生词本与 SRS |
 
-本地模型不需要 API Key；`XF_*` 仍用于发音评测和所有本地模型不可用时的 ASR/TTS 兜底，不引入新的必需环境变量。
+本地模型可直接在设备上运行。`XF_*` 用于讯飞录音识别与发音评测。
