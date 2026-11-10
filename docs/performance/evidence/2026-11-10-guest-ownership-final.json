@@ -36,15 +36,15 @@
   },
   "tests": {
     "targeted": {
-      "pendingWrites": 20,
+      "pendingWrites": 21,
       "authSync": 17,
       "apiProgress": 6,
-      "total": 43,
+      "total": 44,
       "result": "passed"
     },
     "frontend_full": {
       "files": 73,
-      "tests": 603,
+      "tests": 604,
       "result": "passed"
     },
     "backend_full": {
