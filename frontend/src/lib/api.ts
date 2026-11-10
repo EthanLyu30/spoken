@@ -54,6 +54,7 @@ const OWNER_TRANSITION_KEY = "spoken-owner-transition";
 const OWNER_OUTCOME_KEY = "spoken-owner-transition-outcome";
 const OWNER_QUEUE_KEY = "spoken-owner-pending-writes";
 let localTransition: OwnerTransition | null = null;
+let lateClaimRetryScheduled = false;
 const externalTransitions = new Map<string, Promise<OwnerTransitionOutcome>>();
 const queuedWrites = new Map<string, StoredOwnerWrite>();
 const inflightWrites = new Map<string, Promise<unknown>>();
@@ -219,6 +220,38 @@ function withQueueLock(work: () => void | Promise<void>): Promise<void> {
   return Promise.resolve().then(work);
 }
 
+/**
+ * Cross-tab send lease. Web Locks is authoritative where available; the
+ * localStorage fallback prevents a second module from starting the same
+ * record while the first send is still in flight.
+ */
+function withRecordSendLock<T>(id: string, work: () => Promise<T>): Promise<T | undefined> {
+  const locks = (globalThis.navigator as unknown as { locks?: { request: (name: string, options: { mode: string }, cb: () => Promise<T>) => Promise<T> } }).locks;
+  if (locks?.request) {
+    return locks.request(`spoken-owner-write-send:${id}`, { mode: "exclusive" }, work);
+  }
+  const key = `spoken-owner-write-send:${id}`;
+  const token = randomId();
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const lease = JSON.parse(raw) as { at?: number };
+      if (Date.now() - (lease.at ?? 0) < 120_000) return Promise.resolve(undefined);
+    }
+    localStorage.setItem(key, JSON.stringify({ token, at: Date.now() }));
+    const verified = JSON.parse(localStorage.getItem(key) || "{}") as { token?: string };
+    if (verified.token !== token) return Promise.resolve(undefined);
+  } catch {
+    return Promise.resolve(undefined);
+  }
+  return work().finally(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw && (JSON.parse(raw) as { token?: string }).token === token) localStorage.removeItem(key);
+    } catch { /* lease expires */ }
+  });
+}
+
 async function persistQueuedWrites(): Promise<void> {
   await withQueueLock(mergeQueuedWrites);
 }
@@ -353,7 +386,10 @@ async function sendStoredWrite<T>(record: StoredOwnerWrite, token: string): Prom
     } catch { /* non-JSON error body */ }
     throw new ApiError(detail || `${record.method} ${record.path} failed: ${response.status}`, response.status);
   }
-  if (response.status === 204) return undefined as T;
+  if (response.status === 204) {
+    if (/^\/api\/(sessions|practice|words)(\/|$)/.test(record.path)) invalidateProgress();
+    return undefined as T;
+  }
   const data = await response.json() as T;
   if (/^\/api\/(sessions|practice|words)(\/|$)/.test(record.path)) invalidateProgress();
   return data;
@@ -394,9 +430,16 @@ async function sendOnce<T>(record: StoredOwnerWrite, token: string): Promise<T> 
   const existing = inflightWrites.get(record.id) as Promise<T> | undefined;
   if (existing) return existing;
   const promise = (async () => {
-    const data = await sendStoredWrite<T>(record, token);
-    await removeQueuedWrite(record.id);
-    return data;
+    // A different tab may have confirmed and removed this record while this
+    // tab was waiting for the send lease. Re-read after taking the lease.
+    const result = await withRecordSendLock(record.id, async () => {
+      loadQueuedWrites();
+      if (!queuedWrites.has(record.id)) return undefined;
+      const data = await sendStoredWrite<T>(record, token);
+      await removeQueuedWrite(record.id);
+      return data;
+    });
+    return result as T;
   })();
   inflightWrites.set(record.id, promise);
   try {
@@ -406,9 +449,17 @@ async function sendOnce<T>(record: StoredOwnerWrite, token: string): Promise<T> 
   }
 }
 
+function scheduleLateClaimRetry(): void {
+  if (lateClaimRetryScheduled) return;
+  lateClaimRetryScheduled = true;
+  void Promise.resolve()
+    .then(() => retryPendingOwnerWrites())
+    .catch(() => 0)
+    .finally(() => { lateClaimRetryScheduled = false; });
+}
+
 /** Retry records that can be proven to belong to the currently signed-in account. */
-export async function retryPendingOwnerWrites(): Promise<number> {
-  const token = getToken();
+export async function retryPendingOwnerWrites(): Promise<number> {  const token = getToken();
   if (!token) return 0;
   const subject = tokenSubject(token);
   const outcome = (() => {
@@ -438,8 +489,13 @@ export async function retryPendingOwnerWrites(): Promise<number> {
       } catch { /* keep queued */ }
     }
     if (!allowed) continue;
-    await sendOnce(record, token);
-    sent++;
+    try {
+      await sendOnce(record, token);
+      sent++;
+    } catch {
+      // Keep this record recoverable and continue with later records. A missing
+      // delete (404) must not block unrelated saves behind it.
+    }
   }
   return sent;
 }
@@ -560,6 +616,7 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
         // the page has already switched accounts. The record must survive the
         // identity check below and be retryable after login.
         await retainLateClaimedWrite(path, init, requestGuestId);
+        scheduleLateClaimRetry();
         checkGeneration();
         throw new ApiError(detail, res.status);
       }
@@ -568,6 +625,7 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
     }
     if (res.status === 204) {
       checkGeneration();
+      if (init?.method && init.method !== "GET" && /^\/api\/(sessions|practice|words)(\/|$)/.test(path)) invalidateProgress();
       settlePending?.();
       return undefined as T;
     }

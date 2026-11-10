@@ -158,6 +158,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       if (generation !== getAuthGeneration() || revision !== refreshRevision) return;
       writeCachedUser(token, user);
       set({ user, resolving: false, resolutionError: false });
+      void retryPendingOwnerWrites();
     } catch (error) {
       if (generation !== getAuthGeneration() || revision !== refreshRevision) return;
       if (error instanceof ApiError && error.status === 401) {
