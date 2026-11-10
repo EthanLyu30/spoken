@@ -219,10 +219,11 @@ it("sends the same queued record only once when retries race", async () => {
   }));
   vi.stubGlobal("fetch", fetchMock);
 
-  await Promise.all([retryPendingOwnerWrites(), retryPendingOwnerWrites()]);
+  const counts = await Promise.all([retryPendingOwnerWrites(), retryPendingOwnerWrites()]);
   const saves = fetchMock.mock.calls.filter(([url, init]) =>
     String(url).endsWith("/api/sessions") && init?.method === "POST");
   expect(saves).toHaveLength(1);
+  expect(counts[0] + counts[1]).toBe(1);
 });
 
 
@@ -392,4 +393,24 @@ it("does not count a record held by another tab's send lease", async () => {
   expect(sent).toBe(0);
   expect(fetcher).not.toHaveBeenCalled();
   expect(JSON.parse(localStorage.getItem("spoken-owner-pending-writes") || "[]")).toHaveLength(1);
+});
+
+
+it("rejects a queued save that another tab is sending instead of reporting success", async () => {
+  const transition = beginOwnerTransition();
+  const save = postSession(payload);
+  let record: { id: string } | undefined;
+  for (let attempt = 0; attempt < 20 && !record; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const rows = JSON.parse(localStorage.getItem("spoken-owner-pending-writes") || "[]") as Array<{ id: string }>;
+    record = rows.find((row) => row.id !== "lease-held" && row.id !== "queued-delete" && row.id !== "missing-delete");
+  }
+  expect(record).toBeDefined();
+  setToken(accountToken(21));
+  localStorage.setItem(`spoken-owner-write-send:${record!.id}`, JSON.stringify({ token: "other-tab", at: Date.now() }));
+  completeOwnerTransition("success", 21, undefined, transition.id);
+
+  await expect(save).rejects.toThrow(/另一标签/);
+  const rows = JSON.parse(localStorage.getItem("spoken-owner-pending-writes") || "[]") as Array<{ id: string }>;
+  expect(rows.some((row) => row.id === record!.id)).toBe(true);
 });
