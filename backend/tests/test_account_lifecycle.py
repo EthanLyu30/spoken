@@ -1,5 +1,8 @@
+import json
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
+import httpx
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
@@ -43,28 +46,47 @@ def test_export_and_delete_account_progress():
 
 
 def test_email_links_are_one_use_and_reset_invalidates_all_old_tokens(monkeypatch):
-    from app.api import account
-
     settings = get_settings()
     monkeypatch.setattr(settings, "resend_api_key", "fixture-key")
     monkeypatch.setattr(settings, "account_mail_from", "spoken@example.test")
     monkeypatch.setattr(settings, "account_public_origin", "https://spoken.example.test")
+    def capture_mail(request):
+        messages.append(request)
+        return httpx.Response(200, json={"id": "test-email"})
+
+    def mail_post(url, **kwargs):
+        with httpx.Client(transport=httpx.MockTransport(capture_mail)) as client:
+            return client.post(url, **kwargs)
+
+    def received_token(email, action):
+        assert len(messages) == 1
+        request = messages.pop()
+        assert request.method == "POST"
+        assert str(request.url) == "https://api.resend.com/emails"
+        assert request.headers["Authorization"] == "Bearer fixture-key"
+        body = json.loads(request.content)
+        assert body["from"] == "spoken@example.test"
+        assert body["to"] == [email]
+        link = urlsplit(next(line for line in body["text"].splitlines() if line.startswith("https://")))
+        assert (link.scheme, link.netloc, link.path, link.query) == ("https", "spoken.example.test", "/account-action", "")
+        fragment = parse_qs(link.fragment)
+        assert fragment["action"] == [action]
+        return fragment["token"][0]
+
     messages = []
-    monkeypatch.setattr(account, "send_account_mail", lambda email, kind, token: messages.append((email, kind, token)))
+    monkeypatch.setattr("app.services.account_mail.httpx.post", mail_post)
     with TestClient(app) as client:
         credentials, headers = register(client)
         assert client.post("/api/auth/email-verification", headers=headers).status_code == 202
         assert client.post("/api/auth/email-verification", headers=headers).status_code == 202
-        assert len(messages) == 1
-        verify_token = messages.pop()[2]
+        verify_token = received_token(credentials["email"], "verify")
         assert client.post("/api/auth/email-verification/confirm", json={"token": verify_token}).status_code == 204
         assert client.post("/api/auth/email-verification/confirm", json={"token": verify_token}).status_code == 400
         assert client.get("/api/auth/me", headers=headers).json()["email_verified"] is True
         public = client.post("/api/auth/password-reset", json={"email": "unknown@example.test"})
         known = client.post("/api/auth/password-reset", json={"email": credentials["email"]})
         assert public.status_code == known.status_code == 202
-        assert len(messages) == 1
-        reset = {"token": messages.pop()[2], "password": "replacement-password"}
+        reset = {"token": received_token(credentials["email"], "reset"), "password": "replacement-password"}
         assert client.post("/api/auth/password-reset/confirm", json=reset).status_code == 204
         assert client.post("/api/auth/password-reset/confirm", json=reset).status_code == 400
         assert client.get("/api/auth/me", headers=headers).status_code == 401

@@ -64,6 +64,10 @@ Render Web Service 部署或重启时，会先在旁边启动新实例；只有�
 
 邮箱验证和密码重置只有三项邮件配置齐全时才显示入口。配置后用测试邮箱各验证一次真实收信、链接打开、超时与单次使用。旧用户可以继续登录和练习，密码重置完成后旧登录会话失效。数据导出和删除账号独立于发信配置。 [Resend 发送邮件接口](https://resend.com/docs/api-reference/emails/send-email)
 
+1. 在 Resend 添加项目控制的发件域。可以使用 `auth.spokenai.org` 这样的独立子域。在 DNS 控制台添加 Resend 给出的记录，等待域名显示已验证。 [Resend 发件域](https://resend.com/docs/dashboard/domains/introduction)
+2. 为已验证的发件域创建仅可发送的 API 密钥。在 Render 的 `spoken-backend-sg` 服务中，打开 **Environment**，设置 `RESEND_API_KEY`、`ACCOUNT_MAIL_FROM`（例如 `Spoken <no-reply@auth.spokenai.org>`）和 `ACCOUNT_PUBLIC_ORIGIN=https://www.spokenai.org`，然后保存并部署。密钥只在 Render 中保存。 [Resend 密钥权限](https://resend.com/docs/dashboard/api-keys/introduction) · [Render 环境变量](https://render.com/docs/configure-environment-variables)
+3. 部署后访问 `https://spoken-backend-sg.onrender.com/api/auth/account-capabilities`，确认 `email_actions` 为 `true`。用自己控制的测试邮箱分别验证两封邮件到达、链接落在正式站点，以及链接使用后无法再次使用。能力接口只确认配置已加载，实际收信以邮箱为准。
+
 > 仅配 `DEEPSEEK_API_KEY` 即可跑通文字对话、Interview 评分、金句和自定义场景。朗读默认使用设备语音，Moonshine / Kokoro 由用户主动选用。讯飞提供实时识别、字幕和发音评测。
 > 生成一个强 `JWT_SECRET`：`python -c "import secrets; print(secrets.token_urlsafe(48))"`。
 
