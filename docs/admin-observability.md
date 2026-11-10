@@ -44,6 +44,8 @@ python scripts/admin_user.py --email YOUR_EXISTING_ACCOUNT_EMAIL --grant
 
 概览与列表分别加载，单项失败不会遮挡另一项已成功数据。相同筛选刷新失败时会明确标示保留的上次结果；改筛选、换账号或服务器拒绝权限时清除不适用的数据。权限拒绝还会取消其他在途私有请求。
 
+「流量范围」默认查看没有 `test_run_id` 的未标记记录。旧测试也可能没有标记，分析历史数据时仍需结合时间、版本和交互编号。「仅测试流量」可查看所有已标记记录，或输入完整批次 ID 精确排查。「全部流量」包含两者。运行概览、语音卡片和钻取后的调用列表使用同一流量条件，用户运营数据保持独立。当后端或浏览器任一来源达到保留配额时，相应视图会提示时间窗可能不完整。
+
 ## 数据库连接与错误线索
 
 托管 PostgreSQL 可能主动终止空闲连接，日志表现为 `OperationalError` / `AdminShutdown`。引擎使用 [SQLAlchemy pre-ping](https://docs.sqlalchemy.org/en/20/core/pooling.html#disconnect-handling-pessimistic)，在取用旧连接时检测并替换。它不会重放业务写入，也不能掩盖数据库整体不可用或执行中的事务中断。

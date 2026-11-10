@@ -67,6 +67,45 @@ def test_usage_without_model_metadata_is_reported_as_unpriced():
     assert data['min_cny'] is None
 
 
+def test_test_traffic_filter_matches_cards_and_drilldown(client):
+    from app.models.telemetry import TelemetryRecord
+
+    owner = account(client, admin=True)
+    release = uuid.uuid4().hex
+    with SessionLocal() as db:
+        for run, outcome in [(None, "ok"), ("smoke-a", "error"), ("smoke-b", "ok")]:
+            db.add_all([
+                TelemetryRecord(trace_id=uuid.uuid4().hex, started_at=utcnow(), release=release, source="server",
+                                operation="POST /api/chat/stream", outcome=outcome,
+                                duration_ms=100, ttft_ms=50, test_run_id=run),
+                TelemetryRecord(trace_id=uuid.uuid4().hex, started_at=utcnow(), release=release, source="browser",
+                                operation="speech.complete", outcome=outcome,
+                                duration_ms=100, test_run_id=run),
+            ])
+        db.commit()
+
+    try:
+        for filters, total, errors in [({}, 3, 1), ({"traffic": "unmarked"}, 1, 0),
+                                       ({"traffic": "test"}, 2, 1), ({"test_run_id": "smoke-a"}, 1, 1)]:
+            base = {"release": release, **filters}
+            data = client.get("/api/admin/overview", headers=owner, params={**base, "include_experience": True}).json()
+            assert (data["count"], data["errors"]) == (total, errors)
+            assert data["experience"]["stages"][0]["samples"] == total - errors
+            assert data["experience"]["playback"]["failed"] == errors
+            rows = client.get("/api/admin/traces", headers=owner, params={**base, "source": "browser"}).json()
+            assert rows["total"] == total
+            if filters.get("test_run_id"):
+                assert [row["test_run_id"] for row in rows["items"]] == ["smoke-a"]
+
+        capacity = data["collection"]["sources"]
+        assert capacity["server"]["source_budget"] == 15000
+        assert capacity["browser"]["source_budget"] == 5000
+    finally:
+        with SessionLocal() as db:
+            db.execute(delete(TelemetryRecord).where(TelemetryRecord.release == release))
+            db.commit()
+
+
 def test_out_of_order_visit_updates_preserve_first_and_last_seen(client):
     from app.services.monitoring import record_visit
     from app.models.monitoring import SiteVisit

@@ -27,8 +27,10 @@ def get_admin_user(response: Response, user: User = Depends(get_current_user), d
 
 def filters(hours: int = Query(24, ge=1, le=336), source: Literal["server", "browser"] = "server",
             operation: str | None = Query(None, max_length=120), model: str | None = Query(None, max_length=100),
-            release: str | None = Query(None, max_length=80), outcome: Literal["ok", "error", "timeout", "cancelled"] | None = None):
-    return dict(hours=hours, source=source, operation=operation, model=model, release=release, outcome=outcome)
+            release: str | None = Query(None, max_length=80), outcome: Literal["ok", "error", "timeout", "cancelled"] | None = None,
+            traffic: Literal["all", "unmarked", "test"] = "all", test_run_id: str | None = Query(None, min_length=1, max_length=64)):
+    return dict(hours=hours, source=source, operation=operation, model=model, release=release, outcome=outcome,
+                traffic=traffic, test_run_id=test_run_id)
 
 
 async def flush(request):
@@ -52,21 +54,25 @@ def _overview(request, options, db, include_experience=False,
     from app.services.monitoring import visitor_summary, state_time
     data = overview(db, **options)
     data["server_release"] = current_release()
+    data["traffic_filter"] = True
     data['visitors'] = visitor_summary(db, hours=options['hours'])
     if include_experience:
         data["experience"] = experience_summary(
             db, hours=options["hours"], release=options["release"],
             server_release=experience_server_release,
             browser_release=experience_browser_release,
+            traffic=options["traffic"], test_run_id=options["test_run_id"],
         )
     sink = getattr(request.app.state, "telemetry_sink", None)
     oldest = db.scalar(select(func.min(TelemetryRecord.started_at)))
-    source_count = db.scalar(select(func.count()).select_from(TelemetryRecord).where(TelemetryRecord.source == options["source"]))
-    server_budget = get_settings().telemetry_max_records * 3 // 4
-    source_budget = server_budget if options["source"] == "server" else get_settings().telemetry_max_records - server_budget
+    counts = dict(db.execute(select(TelemetryRecord.source, func.count()).group_by(TelemetryRecord.source)).all())
+    max_records = get_settings().telemetry_max_records
+    server_budget = max_records * 3 // 4
+    sources = {source: {"source_budget": budget, "at_capacity": counts.get(source, 0) >= budget}
+               for source, budget in (("server", server_budget), ("browser", max_records - server_budget))}
     data["collection"] = {"retention_days": get_settings().telemetry_retention_days,
-        "max_records": get_settings().telemetry_max_records,
-        "source_budget": source_budget, "at_capacity": source_count >= source_budget,
+        "max_records": max_records,
+        **sources[options["source"]], "sources": sources,
         "oldest_at": oldest.isoformat() + "Z" if oldest else None,
         "dropped_since_restart": sink.dropped if sink else 0,
         "write_errors_since_restart": sink.write_errors if sink else 0,
