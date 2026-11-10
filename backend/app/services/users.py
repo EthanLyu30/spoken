@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models.practice import PracticeRecord
+from app.models.progress import GuestClaim
 from app.models.session import PracticeSession
 from app.models.user import User
 from app.models.word import WordEntry
@@ -15,31 +18,59 @@ from app.services import progress, request_receipts
 _OWNED = (WordEntry, PracticeSession, PracticeRecord)
 
 
+class GuestAlreadyClaimed(Exception):
+    """The guest owner was already claimed by a different account."""
+
+
 def get_by_email(db: Session, email: str) -> User | None:
     return db.scalars(select(User).where(User.email == email)).first()
 
 
-def create_user(db: Session, email: str, password_hash: str, display_name: str = "") -> User:
+def create_user(
+    db: Session,
+    email: str,
+    password_hash: str,
+    display_name: str = "",
+    *,
+    commit: bool = True,
+) -> User:
+    """Create an account.
+
+    Callers that must make account creation and the anonymous-data claim atomic
+    pass ``commit=False``.  The claim then commits both rows, or rolls both back.
+    """
     user = User(email=email, password_hash=password_hash, display_name=display_name)
     db.add(user)
-    db.commit()
-    db.refresh(user)
+    db.flush()
+    if commit:
+        db.commit()
+        db.refresh(user)
     return user
 
 
-def claim_device_data(db: Session, device_id: str, owner_id: str) -> None:
+def claim_device_data(
+    db: Session, device_id: str, owner_id: str, *, mark_claim: bool = True
+) -> bool:
     """Move a device's anonymous rows to the account on first sign-up.
 
     Skips when there is no real device id (``anon``) or it is already an
     account id, so we never merge one account's data into another.
     """
     if not device_id or device_id == "anon" or device_id.startswith("u:"):
-        return
+        return False
     if device_id == owner_id:
-        return
+        return False
     try:
         for owner in sorted((device_id, owner_id)):
             progress.lock_owner(db, owner)
+        # Re-check after taking the same lock used by guest writes.
+        claim = db.get(GuestClaim, device_id)
+        if claim is not None and claim.owner_id != owner_id:
+            if mark_claim:
+                raise GuestAlreadyClaimed(device_id)
+            # A legacy page can register a new account, but cannot take the
+            # ambiguous guest history left after someone else's claim.
+            return False
         request_receipts.claim(db, device_id, owner_id)
         progress.claim_progress(db, device_id, owner_id)
         for model in _OWNED:
@@ -47,7 +78,14 @@ def claim_device_data(db: Session, device_id: str, owner_id: str) -> None:
                 update(model).where(model.client_id == device_id).values(client_id=owner_id)
             )
         progress.stats_and_awards(db, owner_id)
+        if mark_claim and claim is None:
+            db.add(GuestClaim(
+                client_id=device_id,
+                owner_id=owner_id,
+                claimed_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            ))
         db.commit()
+        return True
     except Exception:
         db.rollback()
         raise

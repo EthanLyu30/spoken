@@ -1,0 +1,45 @@
+{
+  "date": "2026-11-09",
+  "base_commit": "42f10ba9532d259d8231b9b9c29ec0a867251780",
+  "branch": "review/three-workstreams-20261109",
+  "scope": "guest practice progress to newly registered account",
+  "environment": {
+    "backend": "local FastAPI 127.0.0.1:8011, sqlite test database",
+    "frontend": "Vite 127.0.0.1:5174",
+    "browser": "Chrome 156.0.8078.75",
+    "cors_workaround": "test-only Chrome --disable-web-security; product CORS unchanged"
+  },
+  "scenario": {
+    "guest_records": ["scenario session", "interview practice", "word", "word review"],
+    "delayed_write_ms": 1200,
+    "register_while_save_in_flight": true
+  },
+  "result": {
+    "order": {
+      "registerStarted": 3190.4,
+      "saveStarted": 3190.7,
+      "saveFinished": 4426.0,
+      "registerFinished": 4508.1,
+      "saveAfterRegister": false
+    },
+    "sessionVisible": true,
+    "lateSessionVisible": true,
+    "practiceVisible": true,
+    "wordVisible": true,
+    "stats": {"sessions": 2, "practice": 1, "words": 1},
+    "oldGuestSessions": []
+  },
+  "automated_tests": {
+    "backend_full": "644 passed",
+    "backend_auth_targeted": "12 passed",
+    "frontend_full": "73 files / 581 tests passed",
+    "typecheck": "passed"
+  },
+  "limitations": [
+    "browser run used temporary same-module debug exposure, removed before commit; debug exposure did not alter request timing",
+    "no live claim-failure injection in browser",
+    "no lost-registration-response recovery UI",
+    "no two-tab / double-click / logout-relogin browser acceptance",
+    "no full page-by-page history walkthrough"
+  ]
+}

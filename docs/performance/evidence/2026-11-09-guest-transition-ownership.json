@@ -1,0 +1,66 @@
+{
+  "date": "2026-11-09",
+  "branch": "review/three-workstreams-20261109",
+  "scope": "guest to registered ownership transition, local browser",
+  "browser": "Chrome 156.0.8078.75",
+  "environment": {
+    "web": "http://127.0.0.1:5173",
+    "api": "http://127.0.0.1:8011",
+    "cors": "normal, no disable-web-security",
+    "profile": "fresh per scenario"
+  },
+  "scenarios": [
+    {
+      "name": "late_save_after_register_post",
+      "measured": true,
+      "register_started": true,
+      "late_save_id": 2,
+      "new_account_session_ids": [2, 1],
+      "old_guest_session_ids": [],
+      "old_guest_status": "ok",
+      "token_present": true,
+      "result": "pass"
+    },
+    {
+      "name": "save_503_aborts_registration",
+      "measured": true,
+      "save_error": "ApiError: save unavailable",
+      "register_calls": 0,
+      "register_error": "ApiError: save unavailable",
+      "token": null,
+      "transition": null,
+      "result": "pass"
+    },
+    {
+      "name": "lost_registration_response_with_queue",
+      "measured": true,
+      "register_started": true,
+      "register_error": "TypeError: network lost after request",
+      "queued_error": "OwnerTransitionError: network lost after request",
+      "queue_after_error_nonempty": true,
+      "login": "ok",
+      "retried": 1,
+      "new_account_session_ids": [5, 4],
+      "result": "pass"
+    }
+  ],
+  "not_accepted": {
+    "two_tab_browser": "not run after the second guard; unit test only",
+    "repeat_click_registration": "not collected",
+    "over_15s_cross_tab_wait": "unit test only",
+    "real_network_fault": "local harness only"
+  },
+  "tests": {
+    "frontend_ownership_targeted": "24 passed",
+    "frontend_full": "73 files / 589 passed",
+    "backend_full": "647 passed",
+    "typecheck": "pass",
+    "eslint": "pass",
+    "production_build": "default minified build blocked by Windows esbuild worker temp deletion; vite build --minify=false passed 2254 modules in 11.83s"
+  },
+  "code": {
+    "backend": ["backend/app/models/progress.py", "backend/app/services/users.py", "backend/app/api/auth.py", "backend/app/core/deps.py"],
+    "frontend": ["frontend/src/lib/api.ts", "frontend/src/store/auth.ts", "frontend/src/lib/clientId.ts"],
+    "tests": ["backend/tests/test_auth.py", "frontend/src/lib/pendingWrites.test.ts", "frontend/src/lib/authSync.test.ts"]
+  }
+}

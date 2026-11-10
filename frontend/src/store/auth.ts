@@ -1,9 +1,11 @@
 import { create } from "zustand";
 import {
-  getMe, loginUser, registerUser, updateProfile as updateProfileApi,
+  getGuestClaimCapability, getMe, loginUser, registerUser, updateProfile as updateProfileApi,
+  beginOwnerTransition, completeOwnerTransition, enableOwnerWriteQueue, flushPendingWrites, retryPendingOwnerWrites,
   type AuthUser, ApiError,
 } from "../lib/api";
 import { clearToken, setToken, getToken, getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
+import { rotateClientId } from "../lib/clientId";
 import { useWords } from "./words";
 import { useSession } from "./session";
 import { invalidateProgress } from "../lib/progressCache";
@@ -84,16 +86,65 @@ export const useAuth = create<AuthState>((set, get) => ({
     writeCachedUser(token, user);
     set({ user, resolving: false, resolutionError: false });
     void useWords.getState().refresh();
+    void retryPendingOwnerWrites();
   },
   register: async (email, password) => {
+    // A duplicate click must not advance the operation counter before the
+    // transition gate rejects it; otherwise the first successful response is
+    // treated as stale and its token is discarded.
+    const transition = beginOwnerTransition(false);
     const revision = ++operation;
     const generation = getAuthGeneration();
-    const { token, user } = await registerUser(email, password);
-    if (revision !== operation || generation !== getAuthGeneration()) return;
-    setToken(token);
-    writeCachedUser(token, user);
-    set({ user, resolving: false, resolutionError: false });
-    void useWords.getState().refresh();
+    const isCurrent = () => revision === operation && generation === getAuthGeneration();
+    try {
+      // Until the backend can prove a claim after a lost response, new writes
+      // must stay guest-visible rather than waiting for an unverifiable owner.
+      const claim = await getGuestClaimCapability(transition.id);
+      if (!isCurrent()) {
+        completeOwnerTransition("unknown", undefined, "registration was superseded", transition.id);
+        return;
+      }
+      if (claim) enableOwnerWriteQueue(transition.id);
+      // Save completed practice and words before moving the guest history.
+      await flushPendingWrites();
+      if (!isCurrent()) {
+        completeOwnerTransition("unknown", undefined, "registration was superseded", transition.id);
+        return;
+      }
+      const response = await registerUser(
+        email,
+        password,
+        undefined,
+        claim,
+      );
+      const { token, user } = response;
+      if (!isCurrent()) {
+        completeOwnerTransition("unknown", undefined, "registration was superseded", transition.id);
+        return;
+      }
+      setToken(token);
+      writeCachedUser(token, user);
+      set({ user, resolving: false, resolutionError: false });
+      // A received 201 identifies this exact registration. On a compatible
+      // backend respect an explicit refusal to move an already-claimed guest.
+      const claimConfirmed = response.claim == null
+        || response.claim.claimed
+        || response.claim.migrated === true;
+      completeOwnerTransition(
+        claimConfirmed ? "success" : "failed",
+        claimConfirmed ? user.id : undefined,
+        claimConfirmed
+          ? undefined
+          : "server did not confirm the guest claim",
+        transition.id,
+        response.claim?.claimed === true,
+      );
+      void useWords.getState().refresh();
+      void retryPendingOwnerWrites();
+    } catch (error) {
+      completeOwnerTransition("failed", undefined, error instanceof Error ? error.message : "registration failed", transition.id);
+      throw error;
+    }
   },
   logout: () => {
     operation++;
@@ -101,6 +152,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     writeCachedUser(null, null);
     set({ user: null, resolving: false, resolutionError: false });
     resetOwner();
+    rotateClientId();
     void useWords.getState().refresh();
   },
   refresh: async () => {
@@ -131,6 +183,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       if (generation !== getAuthGeneration() || revision !== refreshRevision) return;
       writeCachedUser(token, user);
       set({ user, resolving: false, resolutionError: false });
+      void retryPendingOwnerWrites();
     } catch (error) {
       if (generation !== getAuthGeneration() || revision !== refreshRevision) return;
       if (error instanceof ApiError && error.status === 401) {
