@@ -50,3 +50,10 @@ it("does not dispatch an old request if identity changes while constructing head
   expect(fetcher).not.toHaveBeenCalled();
   spy.mockRestore();
 });
+
+it("accepts an empty 204 response when deleting a word", async () => {
+  const fetcher = vi.fn().mockResolvedValue({ ok: true, status: 204, json: async () => { throw new SyntaxError("no body"); } });
+  vi.stubGlobal("fetch", fetcher);
+  await expect(deleteWord(9)).resolves.toBeUndefined();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});

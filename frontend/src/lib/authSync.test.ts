@@ -224,3 +224,23 @@ it("does not register or switch accounts when a pending guest save fails", async
   expect(api.registerUser).not.toHaveBeenCalled();
   expect(token.getToken()).toBeNull();
 });
+
+it("keeps the first successful registration when a duplicate click is rejected", async () => {
+  const { token, useAuth } = await setup();
+  api.beginOwnerTransition
+    .mockReturnValueOnce({ id: "first", guestId: "guest" })
+    .mockImplementationOnce(() => { throw new Error("registration already in progress"); });
+  api.flushPendingWrites.mockResolvedValue(undefined);
+  let finish!: (value: { token: string; user: ReturnType<typeof account> }) => void;
+  api.registerUser.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+
+  const first = useAuth.getState().register("first@example.test", "secret123");
+  await expect(useAuth.getState().register("second@example.test", "secret123"))
+    .rejects.toThrow("already in progress");
+  finish({ token: "first-token", user: account(1) });
+  await first;
+
+  expect(token.getToken()).toBe("first-token");
+  expect(useAuth.getState().user?.id).toBe(1);
+  expect(api.registerUser).toHaveBeenCalledTimes(1);
+});

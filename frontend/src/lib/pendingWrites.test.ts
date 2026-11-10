@@ -281,3 +281,61 @@ it("retains a late 409 guest-claimed write for claim recovery", async () => {
   const queued = JSON.parse(localStorage.getItem("spoken-owner-pending-writes")!) as Array<{ id: string; guestId: string }>;
   expect(queued.some((row) => row.guestId === "guest-late")).toBe(true);
 });
+
+it("replays a queued 204 delete without parsing a body", async () => {
+  const token = accountToken(11);
+  const record = {
+    id: "queued-delete", transitionId: "delete-transition", guestId: "guest-delete",
+    path: "/api/words/9", method: "DELETE", body: null, headers: {}, createdAt: Date.now(),
+  };
+  localStorage.setItem("spoken-owner-pending-writes", JSON.stringify([record]));
+  localStorage.setItem("spoken-owner-transition-outcome", JSON.stringify({
+    id: "delete-transition", status: "success", targetUserId: 11,
+  }));
+  setToken(token);
+  const fetcher = vi.fn(async () => ({ ok: true, status: 204, json: async () => { throw new SyntaxError("no body"); } }));
+  vi.stubGlobal("fetch", fetcher);
+
+  await retryPendingOwnerWrites();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(localStorage.getItem("spoken-owner-pending-writes") || "[]")).toHaveLength(0);
+});
+
+it("retains a late 409 against the original guest after the page switches account", async () => {
+  localStorage.setItem("spoken-client-id", "guest-late-a");
+  let release!: (response: Response) => void;
+  const pending = new Promise<Response>((resolve) => { release = resolve; });
+  const fetcher = vi.fn(() => pending);
+  vi.stubGlobal("fetch", fetcher);
+
+  const save = postSession({ ...payload });
+  setToken(accountToken(12));
+  release(new Response(JSON.stringify({ detail: "guest_data_claimed" }), {
+    status: 409,
+    headers: { "Content-Type": "application/json" },
+  }));
+  await expect(save).rejects.toBeInstanceOf(DOMException);
+
+  const rows = JSON.parse(localStorage.getItem("spoken-owner-pending-writes") || "[]") as Array<{ guestId: string; id: string }>;
+  expect(rows).toHaveLength(1);
+  expect(rows[0].guestId).toBe("guest-late-a");
+  expect(rows[0].id).toContain("late-");
+});
+
+it("keeps identical content from different guests as separate recovery records", async () => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify({ detail: "guest_data_claimed" }), {
+    status: 409,
+    headers: { "Content-Type": "application/json" },
+  }));
+  vi.stubGlobal("fetch", fetcher);
+
+  localStorage.setItem("spoken-client-id", "guest-one");
+  await expect(postSession({ ...payload })).rejects.toMatchObject({ status: 409 });
+  localStorage.setItem("spoken-client-id", "guest-two");
+  await expect(postSession({ ...payload })).rejects.toMatchObject({ status: 409 });
+
+  const rows = JSON.parse(localStorage.getItem("spoken-owner-pending-writes") || "[]") as Array<{ id: string; guestId: string }>;
+  expect(rows).toHaveLength(2);
+  expect(new Set(rows.map((row) => row.id)).size).toBe(2);
+  expect(new Set(rows.map((row) => row.guestId))).toEqual(new Set(["guest-one", "guest-two"]));
+});
