@@ -17,6 +17,8 @@ Spoken is an AI English speaking coach for Chinese learners. Practice everyday c
 
 Replies use the browser's device voice by default. iFlytek handles speech recognition and pronunciation scoring. Moonshine and Kokoro are optional local models. Incomplete recognition stays editable for confirmation. Records retained under a guest identity can be opened from Learning Progress on the same browser.
 
+Signed-in learners can export their data or confirm account deletion with their password under **My Spoken → Account and data**. Email verification and password reset require a configured mail sender.
+
 ## Current interface
 
 | Home and daily recommendation | Scenario journey map |
@@ -57,7 +59,7 @@ npm ci
 npm run dev
 ```
 
-Open <http://localhost:5173>. The API docs are at <http://127.0.0.1:8000/docs>. Production uses a stable `JWT_SECRET` and a PostgreSQL `DATABASE_URL`. The guest claim rollout defaults to mode `0`. [Guest claim verification and rollback](docs/performance/2026-11-10-shadow-claim-protocol.md)
+Open <http://localhost:5173>. The API docs are at <http://127.0.0.1:8000/docs>. Production uses a stable `JWT_SECRET` and a PostgreSQL `DATABASE_URL`. Use `GUEST_CLAIM_PROTOCOL` to control the guest rollout and rollback. [Deployment configuration](docs/DEPLOY.md) · [Guest claim verification](docs/performance/2026-11-10-shadow-claim-protocol.md)
 
 The original demo shows an earlier UI. [Short demo](docs/demo.mp4) · [Full walkthrough on Bilibili](https://www.bilibili.com/video/BV1yZEW6xEta/)
 

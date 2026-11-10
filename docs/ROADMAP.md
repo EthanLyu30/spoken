@@ -4,11 +4,13 @@
 
 2026-11-10 核对。游客进度迁移已随 PR #94 合并。双标签页、PostgreSQL 并发、旧后端丢响应和模式切换恢复已经在隔离环境通过。 [PR #94](https://github.com/EthanLyu30/spoken/pull/94) · [认领验收](performance/2026-11-10-shadow-claim-protocol.md)
 
-- [ ] **游客认领模式 `1` 的线上验收**。生产发布后，用隔离测试账号核对注册前后记录 ID、独立会话登录和迟到保存。 [发布 PR](https://github.com/EthanLyu30/spoken/pull/98) · [部署指南](DEPLOY.md)
+- [x] **游客认领模式 `1` 的线上冒烟**。用独立测试账号核对了注册前后相同的会话和收藏 ID，旧游客查询为空。迟到匿名写入返回 409，带新账号令牌重试成功。独立 HTTP 会话重新登录后能导出这些数据。测试账号已删除。 [发布 PR](https://github.com/EthanLyu30/spoken/pull/98) · [部署指南](DEPLOY.md)
 - [ ] **真实设备语音与手机验收**。补齐 Windows Chrome / Edge 和 iPhone Safari 的实际麦克风、句中停顿、完整转写、真实首声和自然断网恢复。浏览器回调、固定音频和系统回录证据分别保留。 [语音可靠性](VOICE_RELIABILITY.md) · [Chrome 声学记录](performance/2026-11-08-chrome-five-round-acoustic.md)
 - [x] **运行看板区分测试流量**。线上支持未标记、仅测试及全部流量，支持按批次 ID 查询，浏览器和后端保留上限分别显示。 [看板说明](admin-observability.md)
-- [x] **账号管理实现**。新增数据导出、密码确认后删除、邮箱验证和密码重置，核心链路已通过 SQLite 和 PostgreSQL 测试。 [PR #97](https://github.com/EthanLyu30/spoken/pull/97)
+- [x] **账号管理实现**。新增数据导出、密码确认后删除、邮箱验证和密码重置，核心链路已通过 SQLite 和 PostgreSQL 测试。线上已用测试账号验证导出、密码确认删除和删除后旧令牌失效。 [PR #97](https://github.com/EthanLyu30/spoken/pull/97)
 - [ ] **生产邮件配置与收件验收**。配置发信凭据和验证过的发件人，分别验收邮箱验证与密码重置的真实收件。 [部署指南](DEPLOY.md)
+
+语音线上冒烟 `qa-voice-followup-b424de831492` 使用合成固定音频。完整转写约 3.66 秒，随后聊天首段 376 ms、全文 654 ms。该样本只覆盖接口，不含物理麦克风或实际朗读首声。
 
 ## 早期交付历史
 
