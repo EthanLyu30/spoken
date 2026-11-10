@@ -210,13 +210,20 @@ def percentiles(values):
             for p in (50, 95, 99)}
 
 
-def conditions(hours=24, source="server", operation=None, model=None, release=None, outcome=None):
+def conditions(hours=24, source="server", operation=None, model=None, release=None, outcome=None,
+               traffic="all", test_run_id=None):
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
     filters = [TelemetryRecord.started_at >= cutoff, TelemetryRecord.source == source]
     for column, value in [(TelemetryRecord.operation, operation), (TelemetryRecord.model, model),
                           (TelemetryRecord.release, release), (TelemetryRecord.outcome, outcome)]:
         if value:
             filters.append(column == value)
+    if test_run_id:
+        filters.append(TelemetryRecord.test_run_id == test_run_id)
+    elif traffic == "unmarked":
+        filters.append(TelemetryRecord.test_run_id.is_(None))
+    elif traffic == "test":
+        filters.append(TelemetryRecord.test_run_id.is_not(None))
     return filters
 
 
@@ -228,7 +235,8 @@ def _read_spans(raw):
     return parsed if isinstance(parsed, list) else []
 
 
-def experience_summary(db, *, hours, release=None, server_release=None, browser_release=None):
+def experience_summary(db, *, hours, release=None, server_release=None, browser_release=None,
+                       traffic="all", test_run_id=None):
     # A current-release view can span two independently deployed versions:
     # server-side model timing and browser-side playback timing. "__all" means
     # the caller knows that side's current version is unknown; it must not
@@ -240,7 +248,7 @@ def experience_summary(db, *, hours, release=None, server_release=None, browser_
     )}
     stages["model.first_text"] = list(db.scalars(select(TelemetryRecord.ttft_ms).where(
         *conditions(hours=hours, source="server", release=server_release,
-                    operation="POST /api/chat/stream", outcome="ok"),
+                    operation="POST /api/chat/stream", outcome="ok", traffic=traffic, test_run_id=test_run_id),
         TelemetryRecord.ttft_ms.is_not(None),
     )))
     playback = dict(completed=0, failed=0, cancelled=0, classified=0, never_started=0,
@@ -248,7 +256,8 @@ def experience_summary(db, *, hours, release=None, server_release=None, browser_
     timings = ("chat.first_text", "chat.complete", "speech.request_to_audio")
     for row in db.execute(select(TelemetryRecord.operation, TelemetryRecord.duration_ms,
         TelemetryRecord.outcome, TelemetryRecord.spans_json).where(
-        *conditions(hours=hours, source="browser", release=browser_release),
+        *conditions(hours=hours, source="browser", release=browser_release,
+                    traffic=traffic, test_run_id=test_run_id),
         TelemetryRecord.operation.in_((*timings, "speech.complete")),
     )):
         if row.operation != "speech.complete":
@@ -313,7 +322,8 @@ def overview(db, **filters):
         key = row.started_at.replace(minute=0, second=0, microsecond=0).isoformat() + "Z"
         bucket = buckets.setdefault((key, row.operation), [])
         bucket.append(row)
-    facet_filters = conditions(hours=filters.get("hours", 24), source=filters.get("source", "server"))
+    facet_filters = conditions(hours=filters.get("hours", 24), source=filters.get("source", "server"),
+                               traffic=filters.get("traffic", "all"), test_run_id=filters.get("test_run_id"))
     facets = {name: list(db.scalars(select(column).where(*facet_filters, column.is_not(None))
                                   .distinct().order_by(column).limit(100)).all())
               for name, column in (("operations", TelemetryRecord.operation), ("models", TelemetryRecord.model), ("releases", TelemetryRecord.release))}

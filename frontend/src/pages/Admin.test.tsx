@@ -48,6 +48,26 @@ it("does not load private data for guests or ordinary accounts", () => {
   expect(fetcher).not.toHaveBeenCalled();
 });
 
+it("filters unmarked traffic by default and carries an exact test batch into playback diagnostics", async () => {
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes("/overview")
+    ? { ...overview, experience: modelExperience(0, 0), traffic_filter: true,
+        collection: { ...overview.collection, sources: { browser: { source_budget: 5000, at_capacity: true } } } }
+    : { items: [], total: 0 })));
+  show("overview");
+  expect(await screen.findByText(/浏览器体验已达到 5,000 条保留上限/)).toBeVisible();
+  const filter = screen.getByLabelText("流量范围");
+  expect(filter).toHaveValue("unmarked");
+  fireEvent.change(filter, { target: { value: "test" } });
+  fireEvent.change(screen.getByLabelText("测试批次 ID"), { target: { value: "smoke-a" } });
+  fireEvent.click(screen.getByRole("button", { name: "筛选批次" }));
+  fireEvent.click(await screen.findByRole("button", { name: "查看记录" }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => {
+    const query = new URL(String(url), "http://localhost");
+    return query.pathname.endsWith("/traces") && query.searchParams.get("operation") === "speech.complete"
+      && query.searchParams.get("traffic") === "test" && query.searchParams.get("test_run_id") === "smoke-a";
+  })).toBe(true));
+});
+
 it('shows the configured model, rates and honest cost coverage', async () => {
   fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes('/overview')
     ? { ...overview, ...monitoring } : { items: [], total: 0 })));

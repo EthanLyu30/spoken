@@ -5,10 +5,10 @@ import { useAuth } from "../store/auth";
 import { EChart } from "../components/EChart";
 import { AdminUsers } from "../components/AdminUsers";
 import { modelLabel, referenceCost } from '../lib/adminFormatting';
-import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, type AdminExperience, type AdminFilters, type AdminOverview, type AdminTrace } from "../lib/adminApi";
+import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, type AdminExperience, type AdminFilters, type AdminOverview, type AdminTrace, type AdminTraffic } from "../lib/adminApi";
 import "../admin.css";
 
-const defaults: AdminFilters = { hours: 24, source: "server", operation: "", model: "", release: "", outcome: "" };
+const defaults: AdminFilters = { hours: 24, source: "server", operation: "", model: "", release: "", outcome: "", traffic: "unmarked", testRunId: "" };
 const frontendRelease = () => import.meta.env.VITE_RELEASE ?? "unknown";
 type ReleaseMode = "current" | "all" | "history";
 const isTestRelease = (release: string) => /^(development|test|qa)([-_]|$)/i.test(release);
@@ -50,6 +50,17 @@ const ms = (n: number | null | undefined) => n == null ? "—" : n >= 1000 ? `${
 const number = (n: number | null) => n == null ? "—" : n.toLocaleString("zh-CN");
 const date = (s: string) => new Date(s).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const forbidden = (err: unknown) => err instanceof AdminApiError && (err.status === 401 || err.status === 403);
+
+function TestRunFilter({ value, onApply }: { value: string; onApply: (value: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  return <form className="admin-trace-lookup" onSubmit={event => { event.preventDefault(); onApply(draft.trim()); }}>
+    <label htmlFor="admin-test-run-id">测试批次 ID</label>
+    <input id="admin-test-run-id" value={draft} onChange={event => setDraft(event.target.value)}
+      maxLength={64} autoComplete="off" spellCheck={false} placeholder="留空显示全部测试批次" />
+    <button type="submit">筛选批次</button>
+  </form>;
+}
+
 export default function Admin() {
   const user = useAuth(s => s.user);
   const [params, setParams] = useSearchParams();
@@ -137,7 +148,7 @@ export default function Admin() {
     let live = true;
     const inspectFirst = openFirstFailure.current;
     openFirstFailure.current = false;
-    const scope = JSON.stringify([userId, view, releaseMode, filters.hours, filters.source, filters.operation, filters.model, filters.release]);
+    const scope = JSON.stringify([userId, view, releaseMode, filters.hours, filters.source, filters.operation, filters.model, filters.release, filters.traffic, filters.testRunId]);
     const listScope = JSON.stringify([scope, filters.outcome, offset, slow]);
     const keepOverview = previousScope.current === scope && hasOverview.current;
     const keepList = previousList.current === listScope && hasList.current;
@@ -245,6 +256,10 @@ export default function Admin() {
   </select></label>;
   const releaseOptions = [...new Set([...(data?.facets?.releases ?? []), ...(filters.release ? [filters.release] : [])])];
   const versionSelect = <label>发布版本<select aria-label="发布版本" value={versionValue} onChange={e => changeRelease(e.target.value)}><option value="__current">当前发布</option><option value="__all">全部保留</option>{releaseOptions.map(r => <option key={r} value={r}>{releaseLabel(r)}</option>)}</select></label>;
+  const trafficSelect = <label>流量范围<select value={filters.traffic}
+    onChange={event => update({ traffic: event.target.value as AdminTraffic, testRunId: "" })}>
+    <option value="unmarked">未标记流量</option><option value="test">仅测试流量</option><option value="all">全部流量</option>
+  </select></label>;
   const chart = useMemo(() => {
     const points = data?.trend ?? [];
     const operations = [...new Set(points.map(p => p.operation))];
@@ -287,18 +302,20 @@ export default function Admin() {
         {views.map(({ id, label, icon: Icon }) => <button key={id} type="button"
           aria-current={view === id ? "page" : undefined} onClick={() => setView(id)}><Icon size={16} />{label}</button>)}
       </nav>
-      {view === "overview" && <>{timeRange}{versionSelect}</>}
+      {view === "overview" && <>{timeRange}{versionSelect}{trafficSelect}</>}
     </div>
     {view === "users" ? <AdminUsers key={userId} revision={revision} onForbidden={rejectAccess} /> : <>
     {diagnostics && <div className="admin-toolbar">
       <div role="tablist" aria-label="采集来源" className="admin-tabs">{(["server", "browser"] as const).map(source =>
         <button key={source} role="tab" aria-selected={filters.source === source} onClick={() => changeSource(source)}>{source === "server" ? "后端调用" : "浏览器体验"}</button>)}</div>
-      {timeRange}{versionSelect}
+      {timeRange}{versionSelect}{trafficSelect}
       <label className="admin-operation">业务操作<select value={filters.operation} onChange={e => update({ operation: e.target.value })}><option value="">所有操作（混合样本）</option>{operationOptions.map(op => <option key={op} value={op}>{names[op] ?? op}</option>)}</select></label>
       {filters.source === "server" && <label>模型<select aria-label="模型" value={filters.model} onChange={e => update({ model: e.target.value })}><option value="">全部</option>{(data?.facets?.models ?? []).map(m => <option key={m}>{m}</option>)}</select></label>}
       <span className={`admin-release-state ${releaseMode}`}>{versionLabel}</span>
     </div>}
-    <div className="admin-scope-caption"><span>{filters.operation ? names[filters.operation] ?? filters.operation : "全部业务概览"}{diagnostics && !filters.operation && " · 性能比较请先选同一种操作"} · {versionLabel}</span><span>{updatedAt ? `概览更新于 ${date(updatedAt)}` : "仅展示已采集的真实记录"}</span></div>
+    {filters.traffic === "test" && <TestRunFilter key={`${view}:${filters.testRunId}`} value={filters.testRunId}
+      onApply={testRunId => update({ testRunId })} />}
+    <div className="admin-scope-caption"><span>{filters.operation ? names[filters.operation] ?? filters.operation : "全部业务概览"}{diagnostics && !filters.operation && " · 性能比较请先选同一种操作"} · {versionLabel}{filters.testRunId && ` · 批次 ${filters.testRunId}`}</span><span>{updatedAt ? `概览更新于 ${date(updatedAt)}` : "仅展示已采集的真实记录"}</span></div>
     {!diagnostics && data?.count === 0 && releaseMode === "current" && <p className="admin-notice admin-empty-current" role="status">当前发布暂无可比较样本。可切换到「全部保留」或单个历史版本排障。</p>}
     {releaseMode === "current" && filters.source === "server" && serverRelease === "unknown" && <p className="admin-notice" role="status">后端当前版本未知，无法按「当前发布」比较；当前显示全部保留样本。</p>}
     {diagnostics && <p className="admin-perspective">{filters.source === 'server'
@@ -308,9 +325,12 @@ export default function Admin() {
     {overviewError && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{overviewError}</span><button onClick={() => setRevision(v => v + 1)}>重试</button></p>}
     {overviewLoading && !data && <p className="admin-loading" role="status">正在读取运行概览…</p>}
     {data && <>
+      {filters.traffic !== "all" && !data.traffic_filter && <p className="admin-notice" role="status">此后端尚不支持流量筛选，当前展示全部流量。</p>}
+      {filters.traffic === "unmarked" && data.traffic_filter && <p className="admin-scope-caption">未标记流量也可能包含历史测试。已标记的测试批次可在「仅测试流量」下查看。</p>}
       {filters.source === "browser" && <p className="admin-notice">浏览器上报可能缺失或被修改，独立于后端成功率与 Token 计量。朗读任务首声含等待文字与音频准备，不含之前的识别；整轮首声从检测到说话结束起计。</p>}
       {(!data.collection.active || data.collection.dropped_since_restart > 0 || data.collection.write_errors_since_restart > 0) && <p className="admin-notice" role="status">采集存在缺口：本进程启动后丢弃 {data.collection.dropped_since_restart} 条，写入失败 {data.collection.write_errors_since_restart} 次。{!data.collection.active && "采集未启用。"}</p>}
       {data.collection.at_capacity && <p className="admin-notice">此来源已达到 {data.collection.source_budget?.toLocaleString()} 条保留上限，时间窗可能不完整。以下统计基于当前保留记录。</p>}
+      {!diagnostics && data.collection.sources?.browser?.at_capacity && <p className="admin-notice">浏览器体验已达到 {number(data.collection.sources.browser.source_budget)} 条保留上限，语音体验的时间窗可能不完整。</p>}
       <section className="admin-metrics" aria-label="运行指标">
         <article><span><Activity size={16} />{filters.source === "server" ? "保留请求数" : "上报样本"}</span><strong>{number(data.count)}</strong><small>保留 {data.collection.retention_days} 天 · {data.collection.cleanup?.active ? '自动清理' : '写入时清理'}</small></article>
         <article><span><ShieldCheck size={16} />{filters.source === "server" ? "请求成功率" : "正常上报样本"}</span><strong>{filters.source === "browser" ? number(data.count - data.errors - data.timeouts - data.cancelled) : data.success_rate == null ? "—" : `${(data.success_rate * 100).toFixed(1)}%`}</strong><small>{filters.source === "server" ? `取消 ${data.cancelled} 次排除` : "端侧自报，独立于后端成功数"}</small></article>
@@ -420,7 +440,7 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
     <code className="admin-trace-id">{detail.trace_id}</code>
     <div className="admin-trace-root"><div><span>总耗时</span><strong>{ms(detail.duration_ms)}</strong></div>{detail.source === "server" && <div><span>模型 / 类型</span><b>{modelLabel(detail)}</b></div>}</div>
     {detail.source === "server" && <p className="admin-detail-cost">费用参考：{referenceCost(detail.cost_min_cny, detail.cost_max_cny)}<small>依据当前公开价与已知用量区间，未计价不代表零费用。</small></p>}
-    <dl className="admin-detail-meta"><div><dt>采集来源</dt><dd>{detail.source === "browser" ? "浏览器上报" : "后端请求"}</dd></div><div><dt>响应</dt><dd>{detail.source === "browser" ? "不适用 HTTP 状态" : detail.http_status == null ? "HTTP 状态未采集" : `HTTP ${detail.http_status}`}</dd></div><div><dt>发布版本</dt><dd>{releaseLabel(detail.release)}{isTestRelease(detail.release) && "（测试样本）"}</dd></div>{detail.source === "server" && <div><dt>模型首文本</dt><dd>{ms(detail.ttft_ms)}</dd></div>}</dl>
+    <dl className="admin-detail-meta"><div><dt>采集来源</dt><dd>{detail.source === "browser" ? "浏览器上报" : "后端请求"}</dd></div><div><dt>响应</dt><dd>{detail.source === "browser" ? "不适用 HTTP 状态" : detail.http_status == null ? "HTTP 状态未采集" : `HTTP ${detail.http_status}`}</dd></div><div><dt>发布版本</dt><dd>{releaseLabel(detail.release)}{isTestRelease(detail.release) && "（测试样本）"}</dd></div>{detail.test_run_id && <div><dt>测试批次</dt><dd>{detail.test_run_id}</dd></div>}{detail.source === "server" && <div><dt>模型首文本</dt><dd>{ms(detail.ttft_ms)}</dd></div>}</dl>
     {failed && <section className="admin-failure-context"><h3><TriangleAlert size={16} />失败线索</h3>
       {detail.source === "browser" ? <p>此失败由浏览器上报，请结合关联的后端调用排查；上报可能缺失或被修改。</p>
         : detail.error_type ? <><div className="admin-error-types"><code>{detail.error_type}</code>{detail.error_cause_type && <><ArrowRight size={13} /><code>{detail.error_cause_type}</code></>}</div><p>已采集异常类名；可按调用时间和编号核对服务端日志。</p></>

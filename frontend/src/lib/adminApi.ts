@@ -1,8 +1,10 @@
 import { getToken } from "./authToken";
 import { withTimeout } from "./requestTimeout";
 
+export type AdminTraffic = "unmarked" | "test" | "all";
 export interface AdminFilters {
   hours: number; source: "server" | "browser"; operation: string; model: string; release: string; outcome: string;
+  traffic: AdminTraffic; testRunId: string;
 }
 type Percentiles = { p50: number | null; p95: number | null; p99: number | null };
 export interface AdminPricing {
@@ -26,12 +28,13 @@ export interface AdminOverview {
   visitors?: AdminVisitors;
   experience?: AdminExperience;
   pricing?: AdminPricing;
-  source: "server" | "browser"; server_release?: string; count: number; success_rate: number | null;
+  source: "server" | "browser"; server_release?: string; traffic_filter?: boolean; count: number; success_rate: number | null;
   errors: number; timeouts: number; cancelled: number;
   latency: Percentiles; ttft: Percentiles; ttft_known?: number; input_tokens: number | null; output_tokens: number | null; usage_known: number;
   operations: string[]; facets?: { operations: string[]; models: string[]; releases: string[] };
   trend: { time: string; operation: string; count: number; p95: number | null }[];
   collection: { active: boolean; retention_days: number; max_records: number; source_budget?: number; at_capacity?: boolean; oldest_at: string | null; dropped_since_restart: number; write_errors_since_restart: number;
+    sources?: Partial<Record<"server" | "browser", { source_budget: number; at_capacity: boolean }>>;
     cleanup?: { active: boolean; interval_seconds: number; last_success_at: string | null; failures_since_restart: number } };
 }
 export interface AdminUser {
@@ -48,7 +51,7 @@ export interface AdminTrace {
   interaction_id?: string | null; related?: AdminTrace[];
   trace_id: string; started_at: string; operation: string; source: string; outcome: string;
   duration_ms: number; http_status: number | null; ttft_ms: number | null; model: string | null;
-  error_type?: string | null; error_cause_type?: string | null;
+  error_type?: string | null; error_cause_type?: string | null; test_run_id?: string | null;
   cost_min_cny?: number | null; cost_max_cny?: number | null;
   input_tokens: number | null; output_tokens: number | null; release: string;
   spans?: { id: string; parent_id: string | null; name: string; offset_ms: number; duration_ms: number;
@@ -71,6 +74,8 @@ async function read<T>(path: string, signal?: AbortSignal): Promise<T> {
 export function query(filters: AdminFilters): URLSearchParams {
   const params = new URLSearchParams({ hours: String(filters.hours), source: filters.source });
   for (const key of ["operation", "model", "release", "outcome"] as const) if (filters[key]) params.set(key, filters[key]);
+  if (filters.traffic !== "all") params.set("traffic", filters.traffic);
+  if (filters.testRunId) params.set("test_run_id", filters.testRunId);
   return params;
 }
 export function getAdminOverview(filters: AdminFilters, signal?: AbortSignal, includeExperience = false,
