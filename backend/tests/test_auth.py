@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.core import security
 from app.db import SessionLocal
 from app.main import app
 from app.models.user import User
@@ -338,3 +339,66 @@ def test_legacy_registration_rolls_back_on_failed_migration(monkeypatch):
         with pytest.raises(RuntimeError, match="claim unavailable"):
             client.post("/api/auth/register", headers=guest, json=registration)
     assert client.post("/api/auth/register", headers=guest, json=registration).status_code == 201
+
+
+def test_issued_claim_authorization_preserves_recovery_when_mode_changes(monkeypatch):
+    monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", "1")
+    guest = {"X-Client-Id": "guest-before-mode-change", "X-Claim-Transition": "registration-1"}
+    capability = client.get("/api/auth/guest-capabilities", headers=guest)
+    assert capability.headers.get("Cache-Control") == "no-store"
+    ticket = capability.json()["ticket"]
+    assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {ticket}"}).status_code == 401
+
+    monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", "0")
+    assert client.get("/api/auth/guest-capabilities", headers=guest).json() == {"protocol": 0}
+    registration = {"email": "mode-change@b.com", "password": "secret1"}
+    response = client.post("/api/auth/register", json=registration, headers={
+        **guest, "X-Claim-Protocol": "1", "X-Claim-Ticket": ticket,
+    })
+    assert response.status_code == 201
+    assert response.json()["claim"]["claimed"] is True
+
+    # Ignore the 201 body, as the original browser would after losing it.
+    login = client.post("/api/auth/login", json=registration)
+    assert login.status_code == 200
+    auth = {"Authorization": f"Bearer {login.json()['token']}"}
+    assert client.get("/api/auth/guest-claim", params={"guest_id": guest["X-Client-Id"]},
+                      headers=auth).json() == {"claimed": True, "mine": True}
+    unrelated = client.post("/api/auth/register", json={
+        "email": "unrelated-mode-change@b.com", "password": "secret1",
+    })
+    other_auth = {"Authorization": f"Bearer {unrelated.json()['token']}"}
+    assert client.get("/api/auth/guest-claim", params={"guest_id": guest["X-Client-Id"]},
+                      headers=other_auth).json() == {"claimed": True, "mine": False}
+    replay = {"email": "mode-change-replay@b.com", "password": "secret1"}
+    assert client.post("/api/auth/register", json=replay, headers={
+        **guest, "X-Claim-Protocol": "1", "X-Claim-Ticket": ticket,
+    }).status_code == 409
+    assert client.post("/api/auth/login", json=replay).status_code == 401
+
+
+@pytest.mark.parametrize("failure", ["missing", "forged", "expired", "other_guest", "other_transition"])
+def test_disabled_claim_protocol_rejects_unauthorized_upgrade_before_creating_account(monkeypatch, failure):
+    monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", "1")
+    headers = {"X-Client-Id": f"claim-ticket-{failure}", "X-Claim-Transition": "registration-1"}
+    if failure == "expired":
+        monkeypatch.setattr(security, "_GUEST_CLAIM_TTL_SECONDS", 0)
+    if failure not in {"missing", "forged"}:
+        headers["X-Claim-Ticket"] = client.get("/api/auth/guest-capabilities", headers=headers).json()["ticket"]
+    if failure == "missing":
+        del headers["X-Claim-Transition"]
+    elif failure == "forged":
+        headers["X-Claim-Ticket"] = security.create_token(99)
+    elif failure == "other_guest":
+        headers["X-Client-Id"] += "-replacement"
+    elif failure == "other_transition":
+        headers["X-Claim-Transition"] = "registration-2"
+
+    monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", "0")
+    registration = {"email": f"claim-ticket-{failure}@b.com", "password": "secret1"}
+    refused = client.post("/api/auth/register", json=registration, headers={**headers, "X-Claim-Protocol": "1"})
+    assert refused.status_code == 409
+    assert client.post("/api/auth/login", json=registration).status_code == 401
+    legacy = client.post("/api/auth/register", json=registration, headers={"X-Client-Id": headers["X-Client-Id"]})
+    assert legacy.status_code == 201
+    assert legacy.json()["claim"]["claimed"] is False

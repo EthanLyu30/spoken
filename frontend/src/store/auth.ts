@@ -99,12 +99,12 @@ export const useAuth = create<AuthState>((set, get) => ({
     try {
       // Until the backend can prove a claim after a lost response, new writes
       // must stay guest-visible rather than waiting for an unverifiable owner.
-      const claimProtocol = await getGuestClaimCapability();
+      const claim = await getGuestClaimCapability(transition.id);
       if (!isCurrent()) {
         completeOwnerTransition("unknown", undefined, "registration was superseded", transition.id);
         return;
       }
-      if (claimProtocol === 1) enableOwnerWriteQueue(transition.id);
+      if (claim) enableOwnerWriteQueue(transition.id);
       // Save completed practice and words before moving the guest history.
       await flushPendingWrites();
       if (!isCurrent()) {
@@ -115,7 +115,7 @@ export const useAuth = create<AuthState>((set, get) => ({
         email,
         password,
         undefined,
-        claimProtocol,
+        claim,
       );
       const { token, user } = response;
       if (!isCurrent()) {

@@ -1444,17 +1444,24 @@ export interface AuthResponse {
   claim?: { protocol: number; claimed: boolean; migrated?: boolean } | null;
 }
 
-/** 1 = shadow claim protocol, 0 = legacy/old backend. */
-export async function getGuestClaimCapability(): Promise<number> {
+export interface GuestClaimCapability {
+  transitionId: string;
+  ticket: string;
+}
+
+/** Only a ticket for this registration allows writes to enter the account queue. */
+export async function getGuestClaimCapability(transitionId: string): Promise<GuestClaimCapability | null> {
   try {
-    const data = await request<{ protocol?: number }>(
+    const data = await request<{ protocol?: number; ticket?: unknown }>(
       "/api/auth/guest-capabilities",
-      { cache: "no-store" },
+      { cache: "no-store", headers: { "X-Claim-Transition": transitionId } },
       2000,
     );
-    return data.protocol === 1 ? 1 : 0;
+    return data.protocol === 1 && typeof data.ticket === "string" && data.ticket
+      ? { transitionId, ticket: data.ticket }
+      : null;
   } catch {
-    return 0;
+    return null;
   }
 }
 
@@ -1463,13 +1470,16 @@ export function registerUser(
   email: string,
   password: string,
   signal?: AbortSignal,
-  claimProtocol?: number,
+  claim?: GuestClaimCapability | null,
 ): Promise<AuthResponse> {
   return request<AuthResponse>("/api/auth/register", {
     method: "POST",
     body: JSON.stringify({ email, password }),
-    headers:
-      claimProtocol === 1 ? { "X-Claim-Protocol": "1" } : undefined,
+    headers: claim ? {
+      "X-Claim-Protocol": "1",
+      "X-Claim-Transition": claim.transitionId,
+      "X-Claim-Ticket": claim.ticket,
+    } : undefined,
     signal,
   });
 }

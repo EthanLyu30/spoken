@@ -8,11 +8,13 @@ other changes.
 
 import os
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_optional_client_id, get_current_user
-from app.core.security import create_token, hash_password, verify_password
+from app.core.security import (
+    create_guest_claim_ticket, create_token, hash_password, verify_guest_claim_ticket, verify_password,
+)
 from app.db import get_db
 from app.models.progress import GuestClaim
 from app.models.user import User
@@ -29,8 +31,17 @@ def guest_claim_protocol() -> int:
 
 
 @router.get("/guest-capabilities")
-def guest_capabilities() -> dict[str, int]:
-    return {"protocol": guest_claim_protocol()}
+def guest_capabilities(
+    response: Response,
+    device_id: str = Depends(get_optional_client_id),
+    x_claim_transition: str | None = Header(default=None, alias="X-Claim-Transition", max_length=64),
+) -> dict[str, int | str]:
+    response.headers["Cache-Control"] = "no-store"
+    protocol = guest_claim_protocol()
+    capability: dict[str, int | str] = {"protocol": protocol}
+    if protocol == 1 and x_claim_transition and device_id and not device_id.startswith("u:"):
+        capability["ticket"] = create_guest_claim_ticket(device_id, x_claim_transition)
+    return capability
 
 
 def _user_out(user: User, db: Session) -> UserOut:
@@ -43,13 +54,21 @@ def register(
     db: Session = Depends(get_db),
     device_id: str = Depends(get_optional_client_id),
     x_claim_protocol: int | None = Header(default=None, alias="X-Claim-Protocol"),
+    x_claim_transition: str | None = Header(default=None, alias="X-Claim-Transition", max_length=64),
+    x_claim_ticket: str | None = Header(default=None, alias="X-Claim-Ticket", max_length=1024),
 ) -> AuthResponse:
     if repo.get_by_email(db, payload.email) is not None:
         raise HTTPException(status_code=409, detail="该邮箱已注册，去登录吧")
     # A friendly starting name from the email's local part; user can rename later.
     default_name = payload.email.split("@", 1)[0][:40]
     protocol = guest_claim_protocol()
-    use_shadow = protocol == 1 and x_claim_protocol == 1
+    use_shadow = x_claim_protocol == 1
+    if x_claim_transition is not None or x_claim_ticket is not None or (use_shadow and protocol == 0):
+        if not (use_shadow and x_claim_transition and x_claim_ticket
+                and verify_guest_claim_ticket(x_claim_ticket, device_id, x_claim_transition)):
+            raise HTTPException(status_code=409, detail="进度认领授权已失效，请重新注册")
+        # Mode 0 stops issuing tickets, while an admitted registration can
+        # still commit its recovery marker if the response never reaches the browser.
     user = repo.create_user(
         db, payload.email, hash_password(payload.password), display_name=default_name,
         commit=False,

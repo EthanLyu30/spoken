@@ -20,7 +20,7 @@ beforeEach(() => {
   vi.stubGlobal("BroadcastChannel", undefined);
   api.getWords.mockResolvedValue([]);
   api.getMe.mockResolvedValue(account(2));
-  api.getGuestClaimCapability.mockResolvedValue(0);
+  api.getGuestClaimCapability.mockResolvedValue(null);
 });
 afterEach(() => { stop?.(); stop = undefined; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
@@ -250,31 +250,33 @@ it("keeps the first successful registration when a duplicate click is rejected",
   expect(api.registerUser).toHaveBeenCalledTimes(1);
 });
 
-it("releases this registration's pending writes after a confirmed legacy migration", async () => {
+it("releases this registration's pending writes when the issued claim completes in mode zero", async () => {
   const { useAuth } = await setup();
   api.beginOwnerTransition.mockReturnValue({ id: "legacy", guestId: "guest" });
-  api.getGuestClaimCapability.mockResolvedValue(1);
+  const authorization = { transitionId: "legacy", ticket: "server-ticket" };
+  api.getGuestClaimCapability.mockResolvedValue(authorization);
   api.registerUser.mockResolvedValue({
     token: "legacy-token",
     user: account(1),
-    claim: { protocol: 0, claimed: false, migrated: true },
+    claim: { protocol: 0, claimed: true, migrated: true },
   });
 
   await useAuth.getState().register("legacy@example.test", "secret123");
 
-  expect(api.completeOwnerTransition).toHaveBeenCalledWith("success", 1, undefined, "legacy", false);
+  expect(api.registerUser).toHaveBeenCalledWith("legacy@example.test", "secret123", undefined, authorization);
+  expect(api.completeOwnerTransition).toHaveBeenCalledWith("success", 1, undefined, "legacy", true);
   expect(api.enableOwnerWriteQueue).toHaveBeenCalledWith("legacy");
 });
 
 it("does not finish registration after switching accounts during capability discovery", async () => {
   const { useAuth, token } = await setup();
   api.beginOwnerTransition.mockReturnValue({ id: "stale", guestId: "guest" });
-  let finish!: (protocol: number) => void;
+  let finish!: (claim: import("./api").GuestClaimCapability) => void;
   api.getGuestClaimCapability.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
   const registration = useAuth.getState().register("stale@example.test", "secret123");
   await vi.waitFor(() => expect(api.getGuestClaimCapability).toHaveBeenCalled());
   token.setToken("other-account");
-  finish(1);
+  finish({ transitionId: "stale", ticket: "server-ticket" });
   await registration;
 
   expect(api.registerUser).not.toHaveBeenCalled();

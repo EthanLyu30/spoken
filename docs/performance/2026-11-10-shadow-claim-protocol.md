@@ -1,7 +1,7 @@
 # Guest claim rollout verification
 
 Draft PR #94 is based on production commit 42f10ba. This report covers
-compatibility commit 7538246 and the legacy response-loss follow-up.
+compatibility commit 7538246, legacy response loss, and an in-flight mode change.
 Tests used synthetic accounts and isolated databases.
 
 ## Behavior
@@ -13,9 +13,9 @@ Tests used synthetic accounts and isolated databases.
   in the same transaction as account creation. An upgraded client uses the
   explicit response to release writes queued for that registration.
 - The browser blocks a second registration while it checks capability. It
-  enables the account queue only after the backend advertises mode 1.
-  A legacy registration continues saving new activity under the original
-  guest identity.
+  enables the account queue only after receiving a ticket issued in mode 1.
+  The ticket is valid for 120 seconds and tied to the guest ID and registration
+  transition. A legacy registration continues saving under the guest identity.
 - A legacy browser can still save to the guest namespace after a claim or a
   switch back to mode 0. A later legacy registration can create an account
   without acquiring records from an already-claimed guest namespace.
@@ -84,6 +84,24 @@ On the two legacy paths, the learning progress page's guest history panel
 showed the word that the API returned as ID 2. In mode 1, the word stayed queued until
 the server confirmed the account's claim.
 
+## Capability downgrade and lost response
+
+Edge 157.0.4341.42 used the candidate's minified build with two tabs and an
+isolated backend. The test intercepted the actual mode 1 capability response,
+switched the backend to mode 0, verified that a new probe returned no ticket,
+and delivered the previously issued ticket to the browser. The registration
+then reached mode 0 and committed with HTTP 201 and claimed=true.
+
+The other tab queued a word through the vocabulary page. The test dropped
+the registration response, then logged into the account. One authenticated
+word save returned HTTP 201. The account contained the original word ID 1
+and the recovered word ID 2. The guest scope and browser queue were empty.
+
+Backend regressions verify that mode 0 rejects missing, expired, or
+mismatched credentials and rejects a login token used as a claim ticket.
+A rejected request leaves no account. Account endpoints still require a login token,
+and reusing the ticket to claim the guest for a second account is rejected.
+
 ## PostgreSQL 16.15
 
 Two independent request workers used a local PostgreSQL instance. A
@@ -102,8 +120,7 @@ reading both the account and guest scopes.
 
 From the backend run pytest -q. From the frontend run npm test,
 npm run typecheck, npm run lint and npm run build. The local suite returned
-654 backend passes for the compatibility candidate and 616 frontend
-passes across 76 files after the response-loss follow-up. The normal
+660 backend passes and 617 frontend passes across 76 files. The normal
 minified build completed with a temporary output directory.
 
 [GitHub Actions for the candidate](https://github.com/EthanLyu30/spoken/actions/runs/42830060996)
@@ -117,9 +134,8 @@ after the frontend is restored. The original backend binary does not
 recognize a reserved guest namespace and must not be the rollback target
 after mode 1 creates claims.
 
-A legacy backend cannot prove which account should receive queued writes
-from an earlier frontend build. The current frontend keeps new legacy
-writes guest-visible. Automatic replay of already queued writes still
-requires proof of the account owner. Drain in-flight mode 1 registrations
-before changing the flag. A simultaneous capability downgrade and lost
-registration response was outside this browser run.
+Mode 0 stops issuing new tickets immediately. Compatible instances with
+the same JWT_SECRET can finish registrations with a ticket already issued
+in mode 1 until its 120-second expiry. An expired ticket fails before
+account creation. Browser records already queued stay local until an
+account claim can be verified.

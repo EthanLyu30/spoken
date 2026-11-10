@@ -19,6 +19,8 @@ from app.core.config import get_settings
 
 _ALGO = "HS256"
 _PBKDF2_ROUNDS = 200_000
+_GUEST_CLAIM_AUDIENCE = "spoken-guest-claim"
+_GUEST_CLAIM_TTL_SECONDS = 120
 # Development remains zero-config without giving every installation the same
 # signing key. Configure JWT_SECRET for sessions that survive process restarts
 # and for deployments with more than one worker.
@@ -65,3 +67,24 @@ def decode_token(token: str) -> int | None:
         return int(payload["sub"])
     except (jwt.PyJWTError, KeyError, ValueError):
         return None
+
+
+def create_guest_claim_ticket(guest_id: str, transition_id: str) -> str:
+    """Authorize one guest registration while the claim protocol is enabled."""
+    now = datetime.now(timezone.utc)
+    return jwt.encode({
+        "aud": _GUEST_CLAIM_AUDIENCE,
+        "guest_id": guest_id,
+        "transition_id": transition_id,
+        "iat": now,
+        "exp": now + timedelta(seconds=_GUEST_CLAIM_TTL_SECONDS),
+    }, _secret(), algorithm=_ALGO)
+
+
+def verify_guest_claim_ticket(ticket: str, guest_id: str, transition_id: str) -> bool:
+    try:
+        payload = jwt.decode(ticket, _secret(), algorithms=[_ALGO],
+                             audience=_GUEST_CLAIM_AUDIENCE, options={"require": ["iat", "exp"]})
+        return payload.get("guest_id") == guest_id and payload.get("transition_id") == transition_id
+    except jwt.PyJWTError:
+        return False
