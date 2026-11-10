@@ -58,8 +58,11 @@ def create_word(
 ) -> WordEntry:
     progress.lock_owner(db, client_id)
     if not client_id.startswith("u:"):
+        import os
+
         claim = db.get(GuestClaim, client_id)
-        if claim is not None and claim.owner_id != client_id:
+        shadow = os.environ.get("GUEST_CLAIM_PROTOCOL", "0") == "1"
+        if claim is not None and claim.owner_id != client_id and not shadow:
             raise GuestAlreadyClaimed(client_id)
     text = text.strip()
     existing = find_by_text(db, client_id, text)

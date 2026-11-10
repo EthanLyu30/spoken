@@ -6,7 +6,9 @@ the existing word/session/practice endpoints become account-scoped with no
 other changes.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+import os
+
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_optional_client_id, get_current_user
@@ -21,6 +23,19 @@ from app.services.telemetry import is_admin
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def guest_claim_protocol() -> int:
+    """0 = legacy, 1 = shadow claim protocol."""
+    try:
+        return 1 if int(os.environ.get("GUEST_CLAIM_PROTOCOL", "0")) >= 1 else 0
+    except ValueError:
+        return 0
+
+
+@router.get("/guest-capabilities")
+def guest_capabilities() -> dict[str, int]:
+    return {"protocol": guest_claim_protocol()}
+
+
 def _user_out(user: User, db: Session) -> UserOut:
     return UserOut.model_validate(user).model_copy(update={"is_admin": is_admin(db, user.id)})
 
@@ -30,26 +45,38 @@ def register(
     payload: RegisterRequest,
     db: Session = Depends(get_db),
     device_id: str = Depends(get_optional_client_id),
+    x_claim_protocol: int | None = Header(default=None, alias="X-Claim-Protocol"),
 ) -> AuthResponse:
     if repo.get_by_email(db, payload.email) is not None:
         raise HTTPException(status_code=409, detail="该邮箱已注册，去登录吧")
     # A friendly starting name from the email's local part; user can rename later.
     default_name = payload.email.split("@", 1)[0][:40]
+    protocol = guest_claim_protocol()
+    use_shadow = protocol >= 1 and x_claim_protocol == 1
+    atomic = protocol == 0 or use_shadow
     user = repo.create_user(
         db, payload.email, hash_password(payload.password), display_name=default_name,
-        commit=False,
+        commit=not atomic,
     )
-    # Bind the progress collected anonymously on this device to the new account.
-    # The account row is still uncommitted here: claim_device_data commits both
-    # together, or rolls both back if the claim fails.
-    try:
-        repo.claim_device_data(db, device_id, f"u:{user.id}")
-    except repo.GuestAlreadyClaimed:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="guest_data_claimed")
-    db.commit()
-    db.refresh(user)
-    return AuthResponse(token=create_token(user.id), user=_user_out(user, db))
+    claim: dict[str, object] = {"protocol": protocol, "claimed": False}
+    if atomic:
+        # New frontend: account + claim are atomic.
+        try:
+            repo.claim_device_data(db, device_id, f"u:{user.id}", mark_claim=True)
+        except repo.GuestAlreadyClaimed:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="guest_data_claimed")
+        db.commit()
+        db.refresh(user)
+        claim = {"protocol": protocol, "claimed": use_shadow}
+    else:
+        # Legacy page: keep pre-claim rows moving, but do not install the new
+        # claim marker. Late anonymous writes remain recoverable guest rows.
+        repo.claim_device_data(db, device_id, f"u:{user.id}", mark_claim=False)
+        db.refresh(user)
+    return AuthResponse(
+        token=create_token(user.id), user=_user_out(user, db), claim=claim
+    )
 
 
 @router.post("/login", response_model=AuthResponse)

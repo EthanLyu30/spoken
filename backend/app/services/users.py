@@ -48,7 +48,9 @@ def create_user(
     return user
 
 
-def claim_device_data(db: Session, device_id: str, owner_id: str) -> None:
+def claim_device_data(
+    db: Session, device_id: str, owner_id: str, *, mark_claim: bool = True
+) -> None:
     """Move a device's anonymous rows to the account on first sign-up.
 
     Skips when there is no real device id (``anon``) or it is already an
@@ -62,7 +64,7 @@ def claim_device_data(db: Session, device_id: str, owner_id: str) -> None:
         for owner in sorted((device_id, owner_id)):
             progress.lock_owner(db, owner)
         # Re-check after taking the same lock used by guest writes.
-        claim = db.get(GuestClaim, device_id)
+        claim = db.get(GuestClaim, device_id) if mark_claim else None
         if claim is not None and claim.owner_id != owner_id:
             raise GuestAlreadyClaimed(device_id)
         request_receipts.claim(db, device_id, owner_id)
@@ -72,7 +74,7 @@ def claim_device_data(db: Session, device_id: str, owner_id: str) -> None:
                 update(model).where(model.client_id == device_id).values(client_id=owner_id)
             )
         progress.stats_and_awards(db, owner_id)
-        if claim is None:
+        if mark_claim and claim is None:
             db.add(GuestClaim(
                 client_id=device_id,
                 owner_id=owner_id,

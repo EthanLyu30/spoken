@@ -1,5 +1,7 @@
 """Shared FastAPI dependencies."""
 
+import os
+
 from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -75,7 +77,8 @@ def get_client_id(
                 from app.services import progress
                 progress.lock_owner(db, guest)
             claim = db.get(GuestClaim, guest)
-            if claim is not None and owner != claim.owner_id:
+            shadow = os.environ.get("GUEST_CLAIM_PROTOCOL", "0") == "1"
+            if claim is not None and owner != claim.owner_id and not shadow:
                 raise HTTPException(status_code=409, detail="guest_data_claimed")
     if not owner:
         raise HTTPException(status_code=400, detail="A device identifier or login is required")

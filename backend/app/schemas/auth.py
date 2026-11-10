@@ -58,6 +58,7 @@ class UserOut(BaseModel):
 class AuthResponse(BaseModel):
     token: str
     user: UserOut
+    claim: dict[str, object] | None = None
 
 
 _MAX_AVATAR = 400_000  # chars; a compressed ~128px data URL is far smaller
