@@ -198,12 +198,12 @@ def test_guest_claim_status_is_scoped_to_owning_account():
     dev = {"X-Client-Id": "claim-status-guest"}
     reg = client.post("/api/auth/register", json={"email": "claim-status@b.com", "password": "secret1"}, headers=dev)
     assert reg.status_code == 201
-    auth = {"Authorization": f"Bearer {reg.json()["token"]}"}
+    auth = {"Authorization": f"Bearer {reg.json()['token']}"}
     mine = client.get("/api/auth/guest-claim", params={"guest_id": "claim-status-guest"}, headers=auth)
     assert mine.status_code == 200 and mine.json() == {"claimed": True, "mine": True}
 
     other = client.post("/api/auth/register", json={"email": "claim-other@b.com", "password": "secret1"})
-    other_auth = {"Authorization": f"Bearer {other.json()["token"]}"}
+    other_auth = {"Authorization": f"Bearer {other.json()['token']}"}
     status = client.get("/api/auth/guest-claim", params={"guest_id": "claim-status-guest"}, headers=other_auth)
     assert status.status_code == 200 and status.json() == {"claimed": True, "mine": False}
 
