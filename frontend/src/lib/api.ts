@@ -1381,6 +1381,20 @@ export interface AuthUser {
 export interface AuthResponse {
   token: string;
   user: AuthUser;
+  claim?: { protocol: number; claimed: boolean };
+}
+
+/** 1 = shadow claim protocol, 0 = legacy/old backend. */
+export async function getGuestClaimCapability(): Promise<number> {
+  try {
+    const data = await request<{ protocol?: number }>(
+      "/api/auth/guest-capabilities",
+      { signal: AbortSignal.timeout(2000) },
+    );
+    return data.protocol === 1 ? 1 : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /** Create an account; binds the current device's anonymous data to it. */
@@ -1388,10 +1402,13 @@ export function registerUser(
   email: string,
   password: string,
   signal?: AbortSignal,
+  claimProtocol?: number,
 ): Promise<AuthResponse> {
   return request<AuthResponse>("/api/auth/register", {
     method: "POST",
     body: JSON.stringify({ email, password }),
+    headers:
+      claimProtocol === 1 ? { "X-Claim-Protocol": "1" } : undefined,
     signal,
   });
 }

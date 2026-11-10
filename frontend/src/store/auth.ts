@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import {
-  getMe, loginUser, registerUser, updateProfile as updateProfileApi,
+  getGuestClaimCapability, getMe, loginUser, registerUser, updateProfile as updateProfileApi,
   beginOwnerTransition, completeOwnerTransition, flushPendingWrites, retryPendingOwnerWrites,
   type AuthUser, ApiError,
 } from "../lib/api";
@@ -92,7 +92,8 @@ export const useAuth = create<AuthState>((set, get) => ({
     // A duplicate click must not advance the operation counter before the
     // transition gate rejects it; otherwise the first successful response is
     // treated as stale and its token is discarded.
-    const transition = beginOwnerTransition();
+    const claimProtocol = await getGuestClaimCapability();
+        const transition = beginOwnerTransition();
     const revision = ++operation;
     const generation = getAuthGeneration();
     try {
@@ -105,7 +106,13 @@ export const useAuth = create<AuthState>((set, get) => ({
         completeOwnerTransition("unknown", undefined, "registration was superseded", transition.id);
         return;
       }
-      const { token, user } = await registerUser(email, password);
+      const response = await registerUser(
+        email,
+        password,
+        undefined,
+        claimProtocol,
+      );
+      const { token, user } = response;
       if (revision !== operation || generation !== getAuthGeneration()) {
         completeOwnerTransition("unknown", undefined, "registration was superseded", transition.id);
         return;
@@ -113,7 +120,15 @@ export const useAuth = create<AuthState>((set, get) => ({
       setToken(token);
       writeCachedUser(token, user);
       set({ user, resolving: false, resolutionError: false });
-      completeOwnerTransition("success", user.id, undefined, transition.id);
+      const claimConfirmed = response.claim?.claimed === true;
+      completeOwnerTransition(
+        claimConfirmed ? "success" : "failed",
+        claimConfirmed ? user.id : undefined,
+        claimConfirmed
+          ? undefined
+          : "server did not confirm the guest claim",
+        transition.id,
+      );
       void useWords.getState().refresh();
       void retryPendingOwnerWrites();
     } catch (error) {
