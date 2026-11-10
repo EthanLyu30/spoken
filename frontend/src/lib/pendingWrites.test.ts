@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { beginOwnerTransition, completeOwnerTransition, flushPendingWrites, postSession, retryPendingOwnerWrites } from "./api";
 import { clearToken, setToken } from "./authToken";
+import { progressGeneration } from "./progressCache";
 
 function accountToken(id: number): string {
   return `header.${btoa(JSON.stringify({ sub: String(id) }))}.signature`;
@@ -296,8 +297,10 @@ it("replays a queued 204 delete without parsing a body", async () => {
   const fetcher = vi.fn(async () => ({ ok: true, status: 204, json: async () => { throw new SyntaxError("no body"); } }));
   vi.stubGlobal("fetch", fetcher);
 
+  const before = progressGeneration();
   await retryPendingOwnerWrites();
   expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(progressGeneration()).toBe(before + 1);
   expect(JSON.parse(localStorage.getItem("spoken-owner-pending-writes") || "[]")).toHaveLength(0);
 });
 
@@ -338,4 +341,34 @@ it("keeps identical content from different guests as separate recovery records",
   expect(rows).toHaveLength(2);
   expect(new Set(rows.map((row) => row.id)).size).toBe(2);
   expect(new Set(rows.map((row) => row.guestId))).toEqual(new Set(["guest-one", "guest-two"]));
+});
+
+it("continues after a missing delete instead of blocking later saves", async () => {
+  const token = accountToken(13);
+  localStorage.setItem("spoken-owner-pending-writes", JSON.stringify([
+    {
+      id: "missing-delete", transitionId: "t13", guestId: "guest-13",
+      path: "/api/words/404", method: "DELETE", body: null, headers: {}, createdAt: Date.now(),
+    },
+    {
+      id: "later-save", transitionId: "t13", guestId: "guest-13",
+      path: "/api/sessions", method: "POST", body: JSON.stringify(payload), headers: {}, createdAt: Date.now(),
+    },
+  ]));
+  localStorage.setItem("spoken-owner-transition-outcome", JSON.stringify({
+    id: "t13", status: "success", targetUserId: 13,
+  }));
+  setToken(token);
+  const fetcher = vi.fn(async (url: string) => {
+    if (String(url).includes("/api/words/404")) {
+      return new Response(JSON.stringify({ detail: "not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ id: 9 }), { status: 201, headers: { "Content-Type": "application/json" } });
+  });
+  vi.stubGlobal("fetch", fetcher);
+
+  await retryPendingOwnerWrites();
+  const rows = JSON.parse(localStorage.getItem("spoken-owner-pending-writes") || "[]") as Array<{ id: string }>;
+  expect(rows.map((row) => row.id)).toEqual(["missing-delete"]);
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });
