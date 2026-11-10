@@ -68,7 +68,7 @@ npm run dev
 
 前端默认在 <http://localhost:5173>，API 文档在 <http://127.0.0.1:8000/docs>。也可从仓库根目录运行 `docker compose up --build`，启动前先准备好 `backend/.env`。
 
-生产部署使用稳定的 `JWT_SECRET` 和 PostgreSQL `DATABASE_URL`。游客认领协议由 `GUEST_CLAIM_PROTOCOL` 控制，默认 `0`。 [认领验收与回滚](docs/performance/2026-11-10-shadow-claim-protocol.md)
+生产部署使用稳定的 `JWT_SECRET` 和 PostgreSQL `DATABASE_URL`。可用 `GUEST_CLAIM_PROTOCOL` 控制游客认领和回滚。 [部署配置](docs/DEPLOY.md) · [认领验收](docs/performance/2026-11-10-shadow-claim-protocol.md)
 
 ## 项目资料
 

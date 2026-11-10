@@ -10,6 +10,7 @@ import os
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from sqlalchemy.orm import Session
+from app.core.config import get_settings
 
 from app.core.deps import get_optional_client_id, get_current_user
 from app.core.security import (
@@ -27,7 +28,16 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def guest_claim_protocol() -> int:
     """0 = legacy, 1 = shadow claim protocol."""
-    return int(os.environ.get("GUEST_CLAIM_PROTOCOL") == "1")
+    override = os.environ.get("GUEST_CLAIM_PROTOCOL")
+    if override is not None:
+        return int(override == "1")
+    # Limit the rollout default to the deployed Spoken service. Self-hosted
+    # instances and previews can continue to opt in explicitly.
+    settings = get_settings()
+    return int(os.environ.get("RENDER_EXTERNAL_HOSTNAME") == "spoken-backend-sg.onrender.com"
+               and os.environ.get("RENDER_GIT_BRANCH") == "main"
+               and settings.database_url.startswith(("postgresql://", "postgresql+"))
+               and bool(settings.jwt_secret.strip()))
 
 
 @router.get("/guest-capabilities")

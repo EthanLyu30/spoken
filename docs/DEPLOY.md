@@ -59,7 +59,7 @@ Render Web Service 部署或重启时，会先在旁边启动新实例；只有�
 | `CORS_ORIGINS` | 允许的前端来源（分离部署时设为前端域名） | 分离部署需要 |
 | `DATABASE_URL` | 数据库连接串；默认临时 SQLite，设为 Postgres 则持久化 | 想持久化时需要 |
 | `JWT_SECRET` | 登录令牌与短期认领凭证的签名密钥，实例之间使用同一稳定私有值 | 生产账号功能需要 |
-| `GUEST_CLAIM_PROTOCOL` | 游客进度认领模式，默认 `0`。模式 `1` 签发短期认领凭证 | 可省略 |
+| `GUEST_CLAIM_PROTOCOL` | 游客进度认领模式。Spoken 的生产 Render 服务在使用 PostgreSQL 和稳定签名密钥时默认 `1`，其他部署默认 `0`。可显式设为 `0` 停止发放新凭证 | 可省略 |
 
 > 仅配 `DEEPSEEK_API_KEY` 即可跑通文字对话、Interview 评分、金句和自定义场景。朗读默认使用设备语音，Moonshine / Kokoro 由用户主动选用。讯飞提供实时识别、字幕和发音评测。
 > 生成一个强 `JWT_SECRET`：`python -c "import secrets; print(secrets.token_urlsafe(48))"`。
