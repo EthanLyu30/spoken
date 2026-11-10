@@ -74,3 +74,15 @@ This is a review-branch change; nothing was pushed, merged, or deployed.
 Keep the review branch. The four reported code paths have targeted fixes and
 regression tests, but the required normal-browser two-tab acceptance and clean-CI
 build have not passed, so this is not a merge or production recommendation.
+
+## Follow-up hardening (second audit)
+
+The later audit added four boundary cases on top of the first fix. These changes are in the final `bdef374` fix commit:
+
+- Enqueue adopts a registration marker only when `transition.guestId === getClientId()`. Writes made under another guest, or under an existing account token, do not adopt it.
+- Anonymous guest writes after a claim are rejected with 409 `guest_data_claimed`; an authenticated account may still write while the browser carries a claimed guest device id.
+- Pending records merge by stable id; a confirmed record cannot be resurrected by a stale module instance. `completeOwnerTransition` accepts only its own transition id, so an old registration cannot clear a newer marker.
+- A late 409 is persisted as a recoverable late-claim record. `deleteWord` now uses the shared request path instead of bypassing it.
+- `create_word` performs the external definition before taking the owner lock, then checks `GuestClaim` immediately before mutation.
+
+Validation for this follow-up: frontend 73 files / 597 tests, backend 649 tests, frontend typecheck/ESLint pass, workspace-temp build 2254 modules / 7.48 s. Default Windows build still fails on esbuild temp deletion; clean CI and real Postgres concurrency remain unverified. Normal-browser two-tab acceptance was not completed; the cross-tab behavior is covered by 32 targeted frontend tests.

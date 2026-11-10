@@ -1,20 +1,41 @@
 {
-  "generated_at": "2026-11-10T08:00:00+08:00",
+  "generated_at": "2026-11-10T18:32:00+08:00",
   "branch": "review/three-workstreams-20261109",
-  "base_commits": ["2f139e0", "87659ef", "d18d15e"],
-  "scope": "guest ownership hardening after audit of four P1 failures",
+  "base_commits": [
+    "717dec0",
+    "bdef374",
+    "e337efb"
+  ],
+  "scope": "guest ownership hardening after m08008 audit; final follow-up to four P1 findings",
   "fixes": {
     "enqueue_identity": "queue only when no account token; existing account keeps own token",
     "server_boundary": "get_client_id takes ProgressOwner lock before GuestClaim check; claim re-checks after same lock",
     "queue_persistence": "merge stored records by record id; remove by id without deleting other records",
     "stale_marker": "markers older than 60 seconds discarded before registration",
     "single_send": "sendOnce keyed by record id shares immediate and retry sends",
-    "record_binding": "record keeps guest id and transition id; target token subject must match confirmed target"
+    "record_binding": "record keeps guest id and transition id; target token subject must match confirmed target",
+    "followup_enqueue_identity": "marker adopted only when transition.guestId matches getClientId(); account tokens bypass transition",
+    "followup_server_account_bypass": "claim guard applies to anonymous guest writes; authenticated account writes may carry a claimed guest id",
+    "followup_queue_merge": "fresh records merged by stable id; confirmed records cannot be resurrected by stale module memory",
+    "followup_transition_owner": "completeOwnerTransition accepts only its transition id; old registration cannot clear newer marker",
+    "followup_late_409": "late guest_data_claimed is persisted as a recoverable late-claim record; deleteWord uses shared request path",
+    "followup_word_lock": "definition runs before owner lock; create_word checks GuestClaim immediately before mutation"
   },
   "validation": {
-    "targeted_tests": {"files": 2, "passed": 28, "failed": 0},
-    "frontend_full": {"files": 73, "passed": 593, "failed": 0},
-    "backend_full": {"passed": 647, "failed": 0},
+    "targeted_tests": {
+      "files": 3,
+      "passed": 37,
+      "failed": 0
+    },
+    "frontend_full": {
+      "files": 73,
+      "passed": 597,
+      "failed": 0
+    },
+    "backend_full": {
+      "passed": 649,
+      "failed": 0
+    },
     "typecheck": "pass",
     "eslint": "pass",
     "build_default_local": {
@@ -25,8 +46,8 @@
     "build_workspace_temp": {
       "status": "pass",
       "modules": 2254,
-      "seconds": 7.43,
-      "temp": "D:\\personal_space\\spoken\\frontend\\.tmp-esbuild4",
+      "seconds": 7.48,
+      "temp": "D:\\personal_space\\spoken\\frontend\\.tmp-esbuild5",
       "note": "Windows temp path; not a clean-CI proof"
     }
   },
@@ -39,14 +60,23 @@
     "unknown outcome retains record",
     "two module instances merge queue by id",
     "concurrent retries send one POST per record in one page",
-    "24h stale marker is discarded"
+    "24h stale marker is discarded",
+    "different guest cannot adopt A registration marker",
+    "account B normal write with A claimed device id is allowed under B",
+    "old registration completion cannot clear newer marker",
+    "stale module record is not resurrected after confirmation",
+    "late 409 is retained for recovery",
+    "word definition happens before owner lock"
   ],
   "not_accepted": [
     "two normal browser tabs (pre-claim in-flight, simultaneous enqueue, B switch, close/reopen, >15s, lost response with queue)",
     "refresh/relogin/another-browser ownership verification",
-    "cross-tab database-atomic dedupe for every write endpoint",
+    "real Postgres claim/write concurrency test",
     "clean-CI default npm run build",
-    "real Postgres claim/write concurrency test"
+    "cross-tab database-atomic dedupe for every write endpoint"
   ],
-  "sanitization": "No tokens, signed URLs, passwords, raw audio, or private transcripts stored."
+  "sanitization": "No tokens, signed URLs, passwords, raw audio, or private transcripts stored.",
+  "implementation_commit": "bdef374",
+  "test_commit": "e337efb",
+  "deployment": "none"
 }
