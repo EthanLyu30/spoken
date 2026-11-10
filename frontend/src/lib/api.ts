@@ -1436,7 +1436,25 @@ export interface AuthUser {
   avatar_url: string;
   created_at: string;
   is_admin?: boolean;
+  email_verified?: boolean;
 }
+
+export const getAccountCapabilities = () => request<{ email_actions: boolean; account_data: boolean }>(
+  "/api/auth/account-capabilities", { cache: "no-store" }, 3000,
+);
+
+export const exportAccountData = () => request<unknown>("/api/auth/me/export", { cache: "no-store" });
+export const deleteAccount = (password: string) => request<void>("/api/auth/me", {
+  method: "DELETE", body: JSON.stringify({ password }),
+});
+export const requestPasswordReset = (email: string) => request<void>("/api/auth/password-reset", {
+  method: "POST", body: JSON.stringify({ email }),
+});
+export const requestEmailVerification = () => request<void>("/api/auth/email-verification", { method: "POST" });
+export const confirmAccountEmailAction = (action: "reset" | "verify", token: string, password?: string) => request<void>(
+  action === "reset" ? "/api/auth/password-reset/confirm" : "/api/auth/email-verification/confirm",
+  { method: "POST", body: JSON.stringify({ token, password }) },
+);
 
 export interface AuthResponse {
   token: string;

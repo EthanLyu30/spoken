@@ -83,6 +83,8 @@ def _migrate_users() -> None:
     cols = {
         "display_name": "VARCHAR(40) NOT NULL DEFAULT ''",
         "avatar_url": "TEXT NOT NULL DEFAULT ''",
+        "auth_version": "VARCHAR(32) NOT NULL DEFAULT ''",
+        "email_verified_at": "TIMESTAMP",
     }
     with engine.begin() as conn:
         if _url.startswith("sqlite"):

@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { LogIn, UserPlus, X } from "lucide-react";
 import { Button } from "./ui/Button";
 import { useAuth } from "../store/auth";
 import { cn } from "../lib/utils";
+import { getAccountCapabilities, requestPasswordReset } from "../lib/api";
 
 const inputCls =
   "w-full rounded-2xl border border-border bg-surface-2 px-4 py-2.5 text-ink outline-none focus:border-coral";
@@ -15,11 +16,22 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
   const login = useAuth((s) => s.login);
   const register = useAuth((s) => s.register);
 
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode, setMode] = useState<"login" | "register" | "reset">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const [canReset, setCanReset] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    void getAccountCapabilities().then(value => { if (active) setCanReset(value.email_actions); }).catch(() => {
+      if (active) setCanReset(false);
+    });
+    return () => { active = false; };
+  }, [open]);
 
   if (!open) return null;
 
@@ -28,8 +40,14 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
     if (busy) return;
     setBusy(true);
     setErr(null);
+    setMessage("");
     try {
       const em = email.trim();
+      if (mode === "reset") {
+        await requestPasswordReset(em);
+        setMessage("如果该邮箱可以重置密码，你将收到邮件。请检查收件箱和垃圾邮件。");
+        return;
+      }
       if (mode === "login") await login(em, password);
       else await register(em, password);
       onClose();
@@ -40,8 +58,10 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
     }
   }
 
+  const title = mode === "reset" ? "重置密码" : mode === "login" ? "登录" : "注册";
+
   return (
-    <div className="auth-overlay fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true" aria-label={mode === "login" ? "登录账号" : "注册账号"}>
+    <div className="auth-overlay fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true" aria-label={mode === "reset" ? title : `${title}账号`}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-sm rounded-huge border border-border bg-surface p-6 shadow-pop">
         <button
@@ -54,7 +74,7 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
         </button>
 
         <h2 className="font-display text-xl font-semibold text-ink">
-          {mode === "login" ? "登录" : "注册"}
+          {title}
         </h2>
         <p className="mb-4 mt-1 text-sm text-muted">登录后可在任意设备续上你的生词本与进度。</p>
 
@@ -66,6 +86,7 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
               onClick={() => {
                 setMode(m);
                 setErr(null);
+                setMessage("");
               }}
               className={cn(
                 "rounded-2xl px-3 py-2 text-sm font-bold transition-transform active:translate-y-0.5",
@@ -91,7 +112,7 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
             required
             className={inputCls}
           />
-          <input
+          {mode !== "reset" && <input
             aria-label="密码"
             type="password"
             autoComplete={mode === "login" ? "current-password" : "new-password"}
@@ -101,10 +122,11 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
             required
             minLength={6}
             className={inputCls}
-          />
+          />}
           {err && <p role="alert" className="text-sm font-semibold text-coral-deep">{err}</p>}
+          {message && <p role="status" className="text-sm text-muted">{message}</p>}
           <Button type="submit" disabled={busy} className="w-full">
-            {mode === "login" ? (
+            {mode === "reset" ? (busy ? "提交中…" : "申请重置邮件") : mode === "login" ? (
               <>
                 <LogIn className="h-4 w-4" /> {busy ? "登录中…" : "登录"}
               </>
@@ -115,6 +137,10 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
             )}
           </Button>
         </form>
+
+        {mode === "login" && canReset && <button type="button" className="ui-link mt-3" onClick={() => {
+          setMode("reset"); setErr(null); setMessage(""); setPassword("");
+        }}>忘记密码？</button>}
 
         <p className="mt-3 text-xs text-muted">
           {mode === "register"

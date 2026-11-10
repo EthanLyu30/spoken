@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # everyone to log in again.
     jwt_secret: str = ""
     jwt_expire_days: int = 30
+    resend_api_key: str = ""
+    account_mail_from: str = ""
+    account_public_origin: str = ""
 
     # Persistence
     database_url: str = "sqlite:///./spoken.db"

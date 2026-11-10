@@ -10,7 +10,7 @@ import tempfile
 
 _fd, _path = tempfile.mkstemp(prefix="spoken_test_", suffix=".db")
 os.close(_fd)
-os.environ["DATABASE_URL"] = "sqlite:///" + _path.replace(os.sep, "/")
+os.environ["DATABASE_URL"] = os.environ.get("SPOKEN_TEST_POSTGRES_URL") or "sqlite:///" + _path.replace(os.sep, "/")
 
 from app.core.config import get_settings  # noqa: E402
 

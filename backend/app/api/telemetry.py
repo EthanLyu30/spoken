@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 from app.schemas.telemetry import BrowserTiming, SINK_DIAGNOSTIC_FIELDS
-from app.core.deps import get_optional_client_id
+from app.core.deps import authenticated_user, get_optional_client_id
 from app.db import get_db
 from app.services.monitoring import record_visit
 
@@ -30,6 +30,8 @@ async def site_visit(request: Request, client_id: str = Depends(get_optional_cli
     _rates.move_to_end(key)
     while len(_rates) > 4096:
         _rates.popitem(last=False)
+    if client_id.startswith("u:"):
+        await asyncio.to_thread(authenticated_user, db, request.headers.get("authorization"), lock_progress=True)
     await asyncio.to_thread(record_visit, db, client_id)
     return Response(status_code=204)
 

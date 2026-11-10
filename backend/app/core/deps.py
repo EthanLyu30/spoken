@@ -3,7 +3,7 @@
 from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from app.core.security import decode_token
+from app.core.security import decode_account_token
 from app.db import get_db
 from app.models.progress import GuestClaim
 from app.models.user import User
@@ -21,9 +21,24 @@ def _bearer(authorization: str | None) -> str | None:
     return None
 
 
+def authenticated_user(db: Session, authorization: str | None, *, lock_progress: bool = False) -> User:
+    token = _bearer(authorization)
+    claims = decode_account_token(token) if token else None
+    if claims:
+        user_id, version = claims
+        if lock_progress:
+            from app.services.progress import lock_owner
+            lock_owner(db, f"u:{user_id}")
+        user = db.get(User, user_id, populate_existing=True)
+        if user is not None and user.auth_version == version:
+            return user
+    raise HTTPException(status_code=401, detail="未登录或登录已过期")
+
+
 def get_optional_client_id(
     x_client_id: str | None = Header(default=None, alias="X-Client-Id"),
     authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
 ) -> str:
     """Resolve the data owner for the request.
 
@@ -31,12 +46,8 @@ def get_optional_client_id(
     Guest IDs retain their existing values, but cannot name the reserved
     account namespace. Invalid credentials never downgrade to guest access.
     """
-    token = _bearer(authorization)
     if authorization is not None:
-        uid = decode_token(token) if token else None
-        if uid is None:
-            raise HTTPException(status_code=401, detail="未登录或登录已过期")
-        return f"u:{uid}"
+        return f"u:{authenticated_user(db, authorization).id}"
     cid = (x_client_id or "").strip()
     if len(cid) > 64 or cid.lower().startswith("u:"):
         raise HTTPException(status_code=400, detail="Invalid device identifier")
@@ -54,7 +65,12 @@ def get_client_id(
     A protocol-aware guest can recover writes interrupted by a claim. Legacy
     anonymous writes stay isolated in the guest space across mode changes.
     """
-    owner = get_optional_client_id(x_client_id, authorization)
+    if authorization is not None:
+        writes = request.method not in ("GET", "HEAD", "OPTIONS")
+        deferred_word = request.method == "POST" and request.url.path == "/api/words"
+        user = authenticated_user(db, authorization, lock_progress=writes and not deferred_word)
+        return f"u:{user.id}"
+    owner = get_optional_client_id(x_client_id, authorization, db)
     guest = (x_client_id or "").strip()
     if (
         guest
@@ -85,9 +101,4 @@ def get_current_user(
     db: Session = Depends(get_db),
 ) -> User:
     """Require a logged-in account; 401 otherwise."""
-    token = _bearer(authorization)
-    uid = decode_token(token) if token else None
-    user = db.get(User, uid) if uid is not None else None
-    if user is None:
-        raise HTTPException(status_code=401, detail="未登录或登录已过期")
-    return user
+    return authenticated_user(db, authorization)
