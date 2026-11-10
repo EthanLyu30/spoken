@@ -51,6 +51,10 @@ def prune_visits(db, now):
     db.execute(delete(SiteVisit).where(SiteVisit.id.in_(overflow)))
 
 
+def visit_digest(secret: str, kind: str, client_id: str) -> str:
+    return hmac.new(secret.encode(), f'spoken-visitors-v1/{kind}/{client_id}'.encode(), hashlib.sha256).hexdigest()
+
+
 def record_visit(db, client_id, *, at=None):
     settings = get_settings()
     if not settings.telemetry_enabled or not settings.jwt_secret or not client_id or client_id == 'anon':
@@ -65,7 +69,7 @@ def record_visit(db, client_id, *, at=None):
     else:
         kind = 'guest'
     now = at or utcnow()
-    digest = hmac.new(settings.jwt_secret.encode(), f'spoken-visitors-v1/{kind}/{client_id}'.encode(), hashlib.sha256).hexdigest()
+    digest = visit_digest(settings.jwt_secret, kind, client_id)
     initialize_visitors(db, now)
     query = _insert(db, SiteVisit).values(day=now.date(), kind=kind, subject_hash=digest,
         first_seen_at=now, last_seen_at=now)

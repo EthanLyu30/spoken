@@ -45,7 +45,9 @@ def guest_capabilities(
 
 
 def _user_out(user: User, db: Session) -> UserOut:
-    return UserOut.model_validate(user).model_copy(update={"is_admin": is_admin(db, user.id)})
+    return UserOut.model_validate(user).model_copy(update={
+        "is_admin": is_admin(db, user.id), "email_verified": user.email_verified_at is not None,
+    })
 
 
 @router.post("/register", response_model=AuthResponse, status_code=201)
@@ -81,7 +83,7 @@ def register(
     db.commit()
     db.refresh(user)
     return AuthResponse(
-        token=create_token(user.id), user=_user_out(user, db),
+        token=create_token(user.id, user.auth_version), user=_user_out(user, db),
         claim={"protocol": protocol, "claimed": use_shadow and migrated, "migrated": migrated},
     )
 
@@ -91,7 +93,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
     user = repo.get_by_email(db, payload.email)
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="邮箱或密码不正确")
-    return AuthResponse(token=create_token(user.id), user=_user_out(user, db))
+    return AuthResponse(token=create_token(user.id, user.auth_version), user=_user_out(user, db))
 
 
 @router.get("/guest-claim")

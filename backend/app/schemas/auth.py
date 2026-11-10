@@ -53,6 +53,7 @@ class UserOut(BaseModel):
     avatar_url: str = ""
     created_at: datetime
     is_admin: bool = False
+    email_verified: bool = False
 
 
 class AuthResponse(BaseModel):

@@ -60,6 +60,9 @@ Render Web Service 部署或重启时，会先在旁边启动新实例；只有�
 | `DATABASE_URL` | 数据库连接串；默认临时 SQLite，设为 Postgres 则持久化 | 想持久化时需要 |
 | `JWT_SECRET` | 登录令牌与短期认领凭证的签名密钥，实例之间使用同一稳定私有值 | 生产账号功能需要 |
 | `GUEST_CLAIM_PROTOCOL` | 游客进度认领模式，默认 `0`。模式 `1` 签发短期认领凭证 | 可省略 |
+| `RESEND_API_KEY` / `ACCOUNT_MAIL_FROM` / `ACCOUNT_PUBLIC_ORIGIN` | 邮箱验证和密码重置所需的发信凭据、已验证发件人和前端 HTTPS 地址 | 可省略 |
+
+邮箱验证和密码重置只有三项邮件配置齐全时才显示入口。配置后用测试邮箱各验证一次真实收信、链接打开、超时与单次使用。旧用户可以继续登录和练习，密码重置完成后旧登录会话失效。数据导出和删除账号独立于发信配置。 [Resend 发送邮件接口](https://resend.com/docs/api-reference/emails/send-email)
 
 > 仅配 `DEEPSEEK_API_KEY` 即可跑通文字对话、Interview 评分、金句和自定义场景。朗读默认使用设备语音，Moonshine / Kokoro 由用户主动选用。讯飞提供实时识别、字幕和发音评测。
 > 生成一个强 `JWT_SECRET`：`python -c "import secrets; print(secrets.token_urlsafe(48))"`。

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.api.chat import get_client
-from app.core.deps import get_client_id, get_timezone
+from app.core.deps import authenticated_user, get_client_id, get_timezone
 from app.db import get_db
 from app.schemas.word import Word, WordCreate, WordReview, WordUpdate
 from app.services import words as repo
@@ -40,6 +40,8 @@ async def add_word(
         m, e = await repo.define_word(text, client)
         meaning = meaning or m
         example = example or e
+    if client_id.startswith("u:"):
+        authenticated_user(db, request.headers.get("authorization"), lock_progress=True)
     try:
         entry = repo.create_word(
             db, client_id, text, payload.scenario_id, meaning, example, payload.kind, timezone,

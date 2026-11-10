@@ -17,7 +17,7 @@ from app.core.ratelimit import limiter, limit_for
 from app.core.observability import TelemetryMiddleware
 from app.services.telemetry import TelemetrySink, RetentionWorker, configured_bootstrap_admin
 from app.services.deepseek import DeepSeekClient, create_http_client
-from app.api import admin, telemetry
+from app.api import account, admin, telemetry
 from app.api import (
     asr,
     auth,
@@ -183,6 +183,7 @@ async def protect_costly_endpoints(request: Request, call_next):
 # API routes are mounted under /api
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+app.include_router(account.router, prefix="/api")
 app.include_router(scenarios.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(feedback.router, prefix="/api")
