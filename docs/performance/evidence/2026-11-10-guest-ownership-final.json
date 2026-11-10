@@ -44,7 +44,7 @@
     },
     "frontend_full": {
       "files": 73,
-      "tests": 602,
+      "tests": 603,
       "result": "passed"
     },
     "backend_full": {

@@ -37,11 +37,18 @@ Queue persistence and removal run through a Web Locks critical section (`spoken-
 - `frontend/src/lib/pendingWrites.test.ts` — 20 tests.
 - `frontend/src/lib/authSync.test.ts` — 17 tests.
 - `frontend/src/lib/api.progress.test.ts` — 6 tests.
-- Targeted total: **43 passed**.
-- Full frontend: **73 files / 602 passed**.
+- Targeted total: **43 passed** (20 + 17 + 6).
+- Full frontend: **73 files / 603 passed**.
 - Backend full: **649 passed** (backend unchanged this round; word-definition lock ordering covered).
 - TypeScript: pass.
 - ESLint: pass.
+
+## Additional hardening
+
+- Sends are serialized by a per-record cross-tab lease; the sender re-reads the queue after taking the lease and skips records another tab already confirmed.
+- A 404 on one queued record is caught per record so later saves continue.
+- Both 204 paths invalidate progress before returning.
+- A late 409 schedules one recovery attempt; auth refresh/login also retries queued records.
 
 ## Not accepted yet
 
