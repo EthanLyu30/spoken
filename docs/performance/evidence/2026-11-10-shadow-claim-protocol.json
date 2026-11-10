@@ -1,0 +1,42 @@
+{
+  "candidate": {
+    "product_commits": ["8aac01e", "889a3c7", "a557483"],
+    "flag_values_implemented": [0, 1],
+    "pr": 94,
+    "base": "42f10ba9532d259d8231b9b9c29ec0a867251780"
+  },
+  "tests": {
+    "backend_full": {"passed": 651},
+    "frontend_full": {"files": 74, "passed": 609},
+    "shadow_backend": {"passed": 2},
+    "capability_frontend": {"passed": 4},
+    "ownership_targeted": {"passed": 31},
+    "typecheck": "pass"
+  },
+  "capability_cases": [
+    {"case": "protocol_1", "result": 1, "source": "unit"},
+    {"case": "old_backend_404", "result": 0, "source": "unit"},
+    {"case": "network_timeout", "result": 0, "source": "unit"},
+    {"case": "unknown_protocol_2", "result": 0, "source": "unit"}
+  ],
+  "shadow_observe": [
+    {"case": "new_header_register", "claim_claimed": true, "source": "TestClient"},
+    {"case": "late_anonymous_word_after_claim", "http": 201, "new_account_visible": false, "guest_visible": true, "source": "TestClient"},
+    {"case": "old_page_register_no_header", "claim_claimed": false, "late_guest_write": 201, "source": "TestClient"}
+  ],
+  "matrix": {
+    "old_fe_old_be": "baseline, not rerun",
+    "old_fe_new_be_flag1": "backend test only, late write 201 guest",
+    "new_fe_old_be": "capability 404 fallback unit",
+    "new_fe_new_be_flag1": "backend + frontend tests; no full browser two-tab",
+    "flag0": "legacy unit path",
+    "rollback": "not verified"
+  },
+  "release_blockers": [
+    "no user-facing recovery card for retained guest rows",
+    "two-tab browser matrix not run",
+    "PostgreSQL commit-order concurrency not run",
+    "registration response loss with queued write not run",
+    "clean-CI default build pending"
+  ]
+}
