@@ -92,8 +92,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     // A duplicate click must not advance the operation counter before the
     // transition gate rejects it; otherwise the first successful response is
     // treated as stale and its token is discarded.
-    const claimProtocol = await getGuestClaimCapability();
-        const transition = beginOwnerTransition();
+    const transition = beginOwnerTransition();
     const revision = ++operation;
     const generation = getAuthGeneration();
     try {
@@ -101,6 +100,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       // the guest owner. A failed write aborts registration rather than silently
       // switching ownership; writes that start after this point are queued and
       // remain bound to this transition.
+      const claimProtocol = await getGuestClaimCapability();
       await flushPendingWrites();
       if (revision !== operation || generation !== getAuthGeneration()) {
         completeOwnerTransition("unknown", undefined, "registration was superseded", transition.id);
@@ -120,7 +120,11 @@ export const useAuth = create<AuthState>((set, get) => ({
       setToken(token);
       writeCachedUser(token, user);
       set({ user, resolving: false, resolutionError: false });
-      const claimConfirmed = response.claim?.claimed === true;
+      // A received 201 identifies this exact registration. On a compatible
+      // backend respect an explicit refusal to move an already-claimed guest.
+      const claimConfirmed = response.claim == null
+        || response.claim.claimed
+        || response.claim.migrated === true;
       completeOwnerTransition(
         claimConfirmed ? "success" : "failed",
         claimConfirmed ? user.id : undefined,
@@ -128,6 +132,7 @@ export const useAuth = create<AuthState>((set, get) => ({
           ? undefined
           : "server did not confirm the guest claim",
         transition.id,
+        response.claim?.claimed === true,
       );
       void useWords.getState().refresh();
       void retryPendingOwnerWrites();

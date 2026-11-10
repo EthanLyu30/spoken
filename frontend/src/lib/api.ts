@@ -66,6 +66,7 @@ type OwnerTransitionOutcome = {
   status: "success" | "failed" | "unknown";
   targetUserId?: number;
   error?: string;
+  claimedGuestId?: string;
 };
 type OwnerTransition = {
   id: string;
@@ -123,16 +124,21 @@ function transitionDescriptor(): { id: string; guestId: string; startedAt: numbe
   }
 }
 
-function readTransitionOutcome(id: string): OwnerTransitionOutcome | null {
+function latestTransitionOutcome(): OwnerTransitionOutcome | null {
   try {
     const raw = localStorage.getItem(OWNER_OUTCOME_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<OwnerTransitionOutcome>;
-    if (parsed.id !== id || (parsed.status !== "success" && parsed.status !== "failed" && parsed.status !== "unknown")) return null;
-    return { id, status: parsed.status, targetUserId: parsed.targetUserId, error: parsed.error };
+    if (typeof parsed.id !== "string" || (parsed.status !== "success" && parsed.status !== "failed" && parsed.status !== "unknown")) return null;
+    return { ...parsed, id: parsed.id, status: parsed.status };
   } catch {
     return null;
   }
+}
+
+function readTransitionOutcome(id: string): OwnerTransitionOutcome | null {
+  const outcome = latestTransitionOutcome();
+  return outcome?.id === id ? outcome : null;
 }
 
 function writeTransitionOutcome(outcome: OwnerTransitionOutcome): void {
@@ -419,10 +425,14 @@ export function completeOwnerTransition(
   targetUserId?: number,
   error?: string,
   transitionId?: string,
+  claimed = false,
 ): void {
   if (!localTransition) return;
   if (transitionId && localTransition.id !== transitionId) return;
-  const outcome: OwnerTransitionOutcome = { id: localTransition.id, status, targetUserId, error };
+  const outcome: OwnerTransitionOutcome = {
+    id: localTransition.id, status, targetUserId, error,
+    claimedGuestId: status === "success" && claimed ? localTransition.guestId : undefined,
+  };
   localTransition.settle(outcome);
   writeTransitionOutcome(outcome);
   clearTransitionDescriptor(localTransition.id);
@@ -436,11 +446,11 @@ export function endOwnerTransition(): void {
 
 function headersForStored(record: StoredOwnerWrite, token: string): Record<string, string> {
   return {
+    ...record.headers,
     "Content-Type": "application/json",
     "X-Client-Id": record.guestId,
     "X-Timezone": deviceTimezone(),
     Authorization: `Bearer ${token}`,
-    ...record.headers,
   };
 }
 
@@ -554,15 +564,11 @@ function scheduleLateClaimRetry(): void {
 }
 
 /** Retry records that can be proven to belong to the currently signed-in account. */
-export async function retryPendingOwnerWrites(): Promise<number> {  const token = getToken();
+export async function retryPendingOwnerWrites(): Promise<number> {
+  const token = getToken();
   if (!token) return 0;
   const subject = tokenSubject(token);
-  const outcome = (() => {
-    try {
-      const raw = localStorage.getItem(OWNER_OUTCOME_KEY);
-      return raw ? JSON.parse(raw) as OwnerTransitionOutcome : null;
-    } catch { return null; }
-  })();
+  const outcome = latestTransitionOutcome();
   let sent = 0;
   loadQueuedWrites();
   for (const record of [...queuedWrites.values()]) {
@@ -622,9 +628,9 @@ export interface HealthResponse {
   app: string;
 }
 
-function stableLateWriteId(path: string, body: string | null, guestId: string): string {
+function stableLateWriteId(path: string, method: string, body: string | null, guestId: string): string {
   let hash = 2166136261;
-  const text = `${guestId}\n${path}\n${body ?? ""}`;
+  const text = `${guestId}\n${method}\n${path}\n${body ?? ""}`;
   for (let i = 0; i < text.length; i++) {
     hash ^= text.charCodeAt(i);
     hash = Math.imul(hash, 16777619);
@@ -632,15 +638,16 @@ function stableLateWriteId(path: string, body: string | null, guestId: string): 
   return `late-${(hash >>> 0).toString(16)}`;
 }
 
-async function retainLateClaimedWrite(path: string, init: RequestInit | undefined, guestId: string): Promise<void> {
+async function retainLateClaimedWrite(path: string, init: RequestInit | undefined, guestId: string, transitionId: string): Promise<void> {
   const body = typeof init?.body === "string" ? init.body : null;
-  const id = stableLateWriteId(path, body, guestId);
+  const method = init?.method ?? "POST";
+  const id = stableLateWriteId(path, method, body, guestId);
   const record: StoredOwnerWrite = {
     id,
-    transitionId: "late-claim",
+    transitionId,
     guestId,
     path,
-    method: init?.method ?? "POST",
+    method,
     body,
     headers: init?.headers && typeof init.headers === "object"
       ? init.headers as Record<string, string>
@@ -650,6 +657,15 @@ async function retainLateClaimedWrite(path: string, init: RequestInit | undefine
   queuedWrites.set(id, record);
   freshQueuedWrites.add(id);
   await persistQueuedWrites();
+}
+
+async function requestError(response: Response, path: string, method = "GET"): Promise<ApiError> {
+  let detail = "";
+  try {
+    const data = await response.json();
+    if (typeof data?.detail === "string") detail = data.detail;
+  } catch { /* non-JSON error body */ }
+  return new ApiError(detail || `${method} ${path} failed: ${response.status}`, response.status);
 }
 
 /**
@@ -667,14 +683,17 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
   const matchingTransition = transition && transition.guestId === getClientId() ? transition : null;
   if (matchingTransition) return queuedWrite<T>(matchingTransition, path, init);
   const requestGuestId = getClientId();
+  const guestWrite = ownerWrite && !getToken();
+  const priorOutcome = guestWrite ? latestTransitionOutcome() : null;
   const generation = getAuthGeneration();
   const checkGeneration = () => { if (generation !== getAuthGeneration()) throw new DOMException("Account changed", "AbortError"); };
   const requestInit: RequestInit = {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      "X-Client-Id": getClientId(),
+      "X-Client-Id": requestGuestId,
       "X-Timezone": deviceTimezone(),
+      ...(guestWrite ? { "X-Claim-Protocol": "1" } : {}),
       ...authHeader(),
       ...traceHeaders(init?.signal),
       ...(init?.headers as Record<string, string> | undefined),
@@ -695,29 +714,35 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
   }
   try {
     checkGeneration();
-    const response = fetch(`${BASE_URL}${path}`, requestInit);
-    const res = await response;
+    const url = BASE_URL + path;
+    let res = await fetch(url, requestInit);
     if (!res.ok) {
-      // Surface the backend's message (FastAPI `detail`) when present, e.g. the
-      // Chinese login/register errors; fall back to a generic status string.
-      let detail = "";
-      try {
-        const data = await res.json();
-        if (data && typeof data.detail === "string") detail = data.detail;
-      } catch {
-        /* non-JSON error body */
-      }
-      if (ownerWrite && res.status === 409 && detail === "guest_data_claimed") {
-        // Retain against the guest identity that issued this request, even if
-        // the page has already switched accounts. The record must survive the
-        // identity check below and be retryable after login.
-        await retainLateClaimedWrite(path, init, requestGuestId);
-        scheduleLateClaimRetry();
+      const error = await requestError(res, path, init?.method);
+      if (guestWrite && error.status === 409 && error.message === "guest_data_claimed") {
+        const completed = latestTransitionOutcome();
+        if (completed?.claimedGuestId === requestGuestId && completed.id !== priorOutcome?.id) {
+          // The claim completed after dispatch. Retain under its original
+          // transition before checking whether this tab switched accounts.
+          await retainLateClaimedWrite(path, init, requestGuestId, completed.id);
+          scheduleLateClaimRetry();
+          checkGeneration();
+          throw error;
+        }
+        // A legacy logout can leave an already-claimed ID active. The 409
+        // rejected this write before commit, so it is safe to keep it as guest.
+        const headers = new Headers(requestInit.headers);
+        headers.delete("X-Claim-Protocol");
+        headers.delete("Authorization");
+        res = await fetch(url, { ...requestInit, headers, credentials: "omit" });
+        if (!res.ok) {
+          const guestError = await requestError(res, path, init?.method);
+          checkGeneration();
+          throw guestError;
+        }
+      } else {
         checkGeneration();
-        throw new ApiError(detail, res.status);
+        throw error;
       }
-      checkGeneration();
-      throw new ApiError(detail || `${init?.method ?? "GET"} ${path} failed: ${res.status}`, res.status);
     }
     if (res.status === 204) {
       checkGeneration();
@@ -1323,6 +1348,26 @@ export function getWords(signal?: AbortSignal): Promise<Word[]> {
   return request<Word[]>("/api/words", { signal });
 }
 
+/** Explicit guest read, independent of the account store and its progress cache. */
+export async function readGuestHistory(guestId: string, signal: AbortSignal) {
+  async function list<T>(path: string): Promise<T[]> {
+    const response = await fetch(BASE_URL + path, {
+      headers: { "X-Client-Id": guestId },
+      credentials: "omit",
+      cache: "no-store",
+      signal: withTimeout(signal, 12_000),
+    });
+    if (!response.ok) throw new ApiError("无法读取游客记录", response.status);
+    return response.json() as Promise<T[]>;
+  }
+  const [sessions, practice, words] = await Promise.all([
+    list<SessionSummary>("/api/sessions"),
+    list<PracticeRecord>("/api/practice?limit=100"),
+    list<Word>("/api/words"),
+  ]);
+  return { sessions, practice, words };
+}
+
 export function postWord(
   payload: {
     text: string;
@@ -1381,7 +1426,7 @@ export interface AuthUser {
 export interface AuthResponse {
   token: string;
   user: AuthUser;
-  claim?: { protocol: number; claimed: boolean };
+  claim?: { protocol: number; claimed: boolean; migrated?: boolean } | null;
 }
 
 /** 1 = shadow claim protocol, 0 = legacy/old backend. */
@@ -1389,7 +1434,8 @@ export async function getGuestClaimCapability(): Promise<number> {
   try {
     const data = await request<{ protocol?: number }>(
       "/api/auth/guest-capabilities",
-      { signal: AbortSignal.timeout(2000) },
+      { cache: "no-store" },
+      2000,
     );
     return data.protocol === 1 ? 1 : 0;
   } catch {

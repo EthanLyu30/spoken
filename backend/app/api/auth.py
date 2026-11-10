@@ -25,10 +25,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def guest_claim_protocol() -> int:
     """0 = legacy, 1 = shadow claim protocol."""
-    try:
-        return 1 if int(os.environ.get("GUEST_CLAIM_PROTOCOL", "0")) >= 1 else 0
-    except ValueError:
-        return 0
+    return int(os.environ.get("GUEST_CLAIM_PROTOCOL") == "1")
 
 
 @router.get("/guest-capabilities")
@@ -52,30 +49,21 @@ def register(
     # A friendly starting name from the email's local part; user can rename later.
     default_name = payload.email.split("@", 1)[0][:40]
     protocol = guest_claim_protocol()
-    use_shadow = protocol >= 1 and x_claim_protocol == 1
-    atomic = protocol == 0 or use_shadow
+    use_shadow = protocol == 1 and x_claim_protocol == 1
     user = repo.create_user(
         db, payload.email, hash_password(payload.password), display_name=default_name,
-        commit=not atomic,
+        commit=False,
     )
-    claim: dict[str, object] = {"protocol": protocol, "claimed": False}
-    if atomic:
-        # New frontend: account + claim are atomic.
-        try:
-            repo.claim_device_data(db, device_id, f"u:{user.id}", mark_claim=True)
-        except repo.GuestAlreadyClaimed:
-            db.rollback()
-            raise HTTPException(status_code=409, detail="guest_data_claimed")
-        db.commit()
-        db.refresh(user)
-        claim = {"protocol": protocol, "claimed": use_shadow}
-    else:
-        # Legacy page: keep pre-claim rows moving, but do not install the new
-        # claim marker. Late anonymous writes remain recoverable guest rows.
-        repo.claim_device_data(db, device_id, f"u:{user.id}", mark_claim=False)
-        db.refresh(user)
+    try:
+        migrated = repo.claim_device_data(db, device_id, f"u:{user.id}", mark_claim=use_shadow)
+    except repo.GuestAlreadyClaimed:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="guest_data_claimed")
+    db.commit()
+    db.refresh(user)
     return AuthResponse(
-        token=create_token(user.id), user=_user_out(user, db), claim=claim
+        token=create_token(user.id), user=_user_out(user, db),
+        claim={"protocol": protocol, "claimed": use_shadow and migrated, "migrated": migrated},
     )
 
 

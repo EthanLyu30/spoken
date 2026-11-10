@@ -279,7 +279,10 @@ it("retains a late 409 guest-claimed write for claim recovery", async () => {
   }));
   vi.stubGlobal("fetch", fetchMock);
 
-  await expect(postSession({ ...payload })).rejects.toThrow("guest_data_claimed");
+  const saved = postSession({ ...payload });
+  const transition = beginOwnerTransition();
+  completeOwnerTransition("success", 11, undefined, transition.id, true);
+  await expect(saved).rejects.toThrow("guest_data_claimed");
   const queued = JSON.parse(localStorage.getItem("spoken-owner-pending-writes")!) as Array<{ id: string; guestId: string }>;
   expect(queued.some((row) => row.guestId === "guest-late")).toBe(true);
 });
@@ -313,6 +316,8 @@ it("retains a late 409 against the original guest after the page switches accoun
   vi.stubGlobal("fetch", fetcher);
 
   const save = postSession({ ...payload });
+  const transition = beginOwnerTransition();
+  completeOwnerTransition("success", 11, undefined, transition.id, true);
   setToken(accountToken(12));
   release(new Response(JSON.stringify({ detail: "guest_data_claimed" }), {
     status: 409,
@@ -334,14 +339,40 @@ it("keeps identical content from different guests as separate recovery records",
   vi.stubGlobal("fetch", fetcher);
 
   localStorage.setItem("spoken-client-id", "guest-one");
-  await expect(postSession({ ...payload })).rejects.toMatchObject({ status: 409 });
+  const first = postSession({ ...payload });
+  const firstTransition = beginOwnerTransition();
+  completeOwnerTransition("success", 11, undefined, firstTransition.id, true);
+  await expect(first).rejects.toMatchObject({ status: 409 });
   localStorage.setItem("spoken-client-id", "guest-two");
-  await expect(postSession({ ...payload })).rejects.toMatchObject({ status: 409 });
+  const second = postSession({ ...payload });
+  const secondTransition = beginOwnerTransition();
+  completeOwnerTransition("success", 12, undefined, secondTransition.id, true);
+  await expect(second).rejects.toMatchObject({ status: 409 });
 
   const rows = JSON.parse(localStorage.getItem("spoken-owner-pending-writes") || "[]") as Array<{ id: string; guestId: string }>;
   expect(rows).toHaveLength(2);
   expect(new Set(rows.map((row) => row.id)).size).toBe(2);
   expect(new Set(rows.map((row) => row.guestId))).toEqual(new Set(["guest-one", "guest-two"]));
+});
+
+it("keeps a post-logout save as guest even when a legacy tab left the claimed ID active", async () => {
+  localStorage.setItem("spoken-client-id", "guest-from-legacy-logout");
+  const earlier = beginOwnerTransition();
+  completeOwnerTransition("success", 11, undefined, earlier.id, true);
+  const fetcher = vi.fn(async (_path: string, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    if (headers.has("X-Claim-Protocol")) {
+      return Response.json({ detail: "guest_data_claimed" }, { status: 409 });
+    }
+    expect(headers.get("X-Client-Id")).toBe("guest-from-legacy-logout");
+    expect(headers.has("Authorization")).toBe(false);
+    return Response.json({ id: 18 }, { status: 201 });
+  });
+  vi.stubGlobal("fetch", fetcher);
+
+  await expect(postSession({ ...payload })).resolves.toEqual({ id: 18 });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(localStorage.getItem("spoken-owner-pending-writes") || "[]")).toHaveLength(0);
 });
 
 it("continues after a missing delete instead of blocking later saves", async () => {

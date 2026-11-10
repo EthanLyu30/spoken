@@ -1,7 +1,5 @@
 """Shared FastAPI dependencies."""
 
-import os
-
 from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -53,9 +51,8 @@ def get_client_id(
 ) -> str:
     """Private stored data requires an account or an unambiguous guest owner.
 
-    Once a guest owner has been claimed, a write that still names it is only
-    allowed for the owning account. The old guest (or a different login) gets a
-    recoverable 409 instead of recreating data under the wrong owner.
+    A protocol-aware guest can recover writes interrupted by a claim. Legacy
+    anonymous writes stay isolated in the guest space across mode changes.
     """
     owner = get_optional_client_id(x_client_id, authorization)
     guest = (x_client_id or "").strip()
@@ -76,10 +73,8 @@ def get_client_id(
                 # same ProgressOwner lock before moving rows.
                 from app.services import progress
                 progress.lock_owner(db, guest)
-            claim = db.get(GuestClaim, guest)
-            shadow = os.environ.get("GUEST_CLAIM_PROTOCOL", "0") == "1"
-            if claim is not None and owner != claim.owner_id and not shadow:
-                raise HTTPException(status_code=409, detail="guest_data_claimed")
+                if request.headers.get("X-Claim-Protocol") == "1" and db.get(GuestClaim, guest) is not None:
+                    raise HTTPException(status_code=409, detail="guest_data_claimed")
     if not owner:
         raise HTTPException(status_code=400, detail="A device identifier or login is required")
     return owner

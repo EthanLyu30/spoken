@@ -50,23 +50,27 @@ def create_user(
 
 def claim_device_data(
     db: Session, device_id: str, owner_id: str, *, mark_claim: bool = True
-) -> None:
+) -> bool:
     """Move a device's anonymous rows to the account on first sign-up.
 
     Skips when there is no real device id (``anon``) or it is already an
     account id, so we never merge one account's data into another.
     """
     if not device_id or device_id == "anon" or device_id.startswith("u:"):
-        return
+        return False
     if device_id == owner_id:
-        return
+        return False
     try:
         for owner in sorted((device_id, owner_id)):
             progress.lock_owner(db, owner)
         # Re-check after taking the same lock used by guest writes.
-        claim = db.get(GuestClaim, device_id) if mark_claim else None
+        claim = db.get(GuestClaim, device_id)
         if claim is not None and claim.owner_id != owner_id:
-            raise GuestAlreadyClaimed(device_id)
+            if mark_claim:
+                raise GuestAlreadyClaimed(device_id)
+            # A legacy page can register a new account, but cannot take the
+            # ambiguous guest history left after someone else's claim.
+            return False
         request_receipts.claim(db, device_id, owner_id)
         progress.claim_progress(db, device_id, owner_id)
         for model in _OWNED:
@@ -81,6 +85,7 @@ def claim_device_data(
                 claimed_at=datetime.now(timezone.utc).replace(tzinfo=None),
             ))
         db.commit()
+        return True
     except Exception:
         db.rollback()
         raise

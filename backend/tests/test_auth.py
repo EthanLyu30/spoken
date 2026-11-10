@@ -166,8 +166,9 @@ def test_register_rolls_back_account_when_claim_fails(monkeypatch):
     assert retry.status_code == 201
 
 
-def test_guest_claim_blocks_late_guest_writes_and_allows_owner_retry():
-    dev = {"X-Client-Id": "late-write-guest"}
+def test_guest_claim_blocks_late_guest_writes_and_allows_owner_retry(monkeypatch):
+    monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", "1")
+    dev = {"X-Client-Id": "late-write-guest", "X-Claim-Protocol": "1"}
     assert client.post("/api/words", json={"text": "early", "meaning": "m", "example": "e"}, headers=dev).status_code == 201
     reg = client.post("/api/auth/register", json={"email": "late-write@b.com", "password": "secret1"}, headers=dev)
     assert reg.status_code == 201
@@ -194,8 +195,9 @@ def test_guest_claim_blocks_late_guest_writes_and_allows_owner_retry():
     assert not any(x["text"] in ("early", "late") for x in old)
 
 
-def test_guest_claim_status_is_scoped_to_owning_account():
-    dev = {"X-Client-Id": "claim-status-guest"}
+def test_guest_claim_status_is_scoped_to_owning_account(monkeypatch):
+    monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", "1")
+    dev = {"X-Client-Id": "claim-status-guest", "X-Claim-Protocol": "1"}
     reg = client.post("/api/auth/register", json={"email": "claim-status@b.com", "password": "secret1"}, headers=dev)
     assert reg.status_code == 201
     auth = {"Authorization": f"Bearer {reg.json()['token']}"}
@@ -208,8 +210,9 @@ def test_guest_claim_status_is_scoped_to_owning_account():
     assert status.status_code == 200 and status.json() == {"claimed": True, "mine": False}
 
 
-def test_second_account_cannot_claim_an_already_claimed_guest():
-    dev = {"X-Client-Id": "one-owner-guest"}
+def test_second_account_cannot_claim_an_already_claimed_guest(monkeypatch):
+    monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", "1")
+    dev = {"X-Client-Id": "one-owner-guest", "X-Claim-Protocol": "1"}
     first = client.post("/api/auth/register", json={"email": "owner-one@b.com", "password": "secret1"}, headers=dev)
     assert first.status_code == 201
     second = client.post("/api/auth/register", json={"email": "owner-two@b.com", "password": "secret1"}, headers=dev)
@@ -219,8 +222,9 @@ def test_second_account_cannot_claim_an_already_claimed_guest():
         assert db.scalar(select(User).where(User.email == "owner-two@b.com")) is None
 
 
-def test_authenticated_account_write_with_claimed_device_id_is_allowed():
-    guest = {"X-Client-Id": "cross-account-device"}
+def test_authenticated_account_write_with_claimed_device_id_is_allowed(monkeypatch):
+    monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", "1")
+    guest = {"X-Client-Id": "cross-account-device", "X-Claim-Protocol": "1"}
     first = client.post("/api/auth/register", json={"email": "device-owner@b.com", "password": "secret1"}, headers=guest)
     assert first.status_code == 201
     owner_auth = {"Authorization": f"Bearer {first.json()['token']}"}
@@ -290,3 +294,47 @@ def test_shadow_protocol_keeps_old_page_registration_legacy(monkeypatch):
     assert not any(
         x["text"] == "oldpagelate" for x in client.get("/api/words", headers=auth).json()
     )
+
+
+@pytest.mark.parametrize("mode", ["0", "1"])
+def test_legacy_registration_does_not_move_already_claimed_guest_history(monkeypatch, mode):
+    monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", "1")
+    guest = {"X-Client-Id": f"shadow-legacy-{mode}"}
+    protocol = {**guest, "X-Claim-Protocol": "1"}
+    first = client.post("/api/auth/register", headers=protocol, json={
+        "email": f"shadow-original-{mode}@b.com", "password": "secret1",
+    })
+    assert first.status_code == 201
+
+    monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", mode)
+    word = {"text": "still a guest", "meaning": "m", "example": "e"}
+    late = client.post("/api/words", headers=guest, json=word)
+    assert late.status_code == 201
+    assert client.post("/api/words", headers=protocol, json={
+        **word, "text": "protocol retry",
+    }).status_code == 409
+
+    second = client.post("/api/auth/register", headers=guest, json={
+        "email": f"shadow-second-{mode}@b.com", "password": "secret1",
+    })
+    assert second.status_code == 201
+    assert second.json()["claim"]["migrated"] is False
+    for registration in (first, second):
+        account = {"Authorization": f"Bearer {registration.json()['token']}"}
+        assert client.get("/api/words", headers=account).json() == []
+    assert [item["id"] for item in client.get("/api/words", headers=guest).json()] == [
+        late.json()["id"],
+    ]
+
+
+def test_legacy_registration_rolls_back_on_failed_migration(monkeypatch):
+    monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", "1")
+    guest = {"X-Client-Id": "legacy-rollback"}
+    registration = {"email": "legacy-rollback@b.com", "password": "secret1"}
+    with monkeypatch.context() as patch:
+        def fail_claim(*args, **kwargs):
+            raise RuntimeError("claim unavailable")
+        patch.setattr(auth_api.repo, "claim_device_data", fail_claim)
+        with pytest.raises(RuntimeError, match="claim unavailable"):
+            client.post("/api/auth/register", headers=guest, json=registration)
+    assert client.post("/api/auth/register", headers=guest, json=registration).status_code == 201

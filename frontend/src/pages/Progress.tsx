@@ -16,6 +16,7 @@ import {
 import type { EChartsOption } from "echarts";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
+import { BrowserGuestHistory } from "../components/BrowserGuestHistory";
 import { InterviewResults } from "../components/InterviewResults";
 import { useProgressData } from "../hooks/useProgressData";
 import { useAuth } from "../store/auth";
@@ -212,6 +213,7 @@ export default function Progress() {
             刷新记录
           </button>
         </header>
+        <BrowserGuestHistory key={owner} />
         {errors.length > 0 && (
           <div className="learning-notice" role="status">
             部分记录暂时未能更新，已加载的内容仍可查看。
