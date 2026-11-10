@@ -1,0 +1,78 @@
+{
+  "date": "2026-11-10",
+  "branch": "review/three-workstreams-20261109",
+  "scope": "guest-to-registered ownership recovery",
+  "base_commits": [
+    "ec6af0c",
+    "9cd1be1",
+    "d9bb82a",
+    "11d265b",
+    "2510c2b",
+    "beafddb",
+    "2f139e0",
+    "87659ef",
+    "d18d15e",
+    "bdef374",
+    "e337efb",
+    "e2595c7"
+  ],
+  "uncommitted_round": {
+    "product_files": [
+      "frontend/src/lib/api.ts",
+      "frontend/src/store/auth.ts"
+    ],
+    "test_files": [
+      "frontend/src/lib/pendingWrites.test.ts",
+      "frontend/src/lib/authSync.test.ts",
+      "frontend/src/lib/api.progress.test.ts"
+    ],
+    "fixes": [
+      "empty 204 delete responses are not JSON-decoded",
+      "late 409 guest_data_claimed is retained before page-generation abort",
+      "recovery ids include the original guest id",
+      "queue persist/remove use a Web Locks critical section",
+      "duplicate registration cannot advance the first registration revision"
+    ]
+  },
+  "tests": {
+    "targeted": {
+      "pendingWrites": 20,
+      "authSync": 17,
+      "apiProgress": 6,
+      "total": 43,
+      "result": "passed"
+    },
+    "frontend_full": {
+      "files": 73,
+      "tests": 602,
+      "result": "passed"
+    },
+    "backend_full": {
+      "tests": 649,
+      "result": "passed",
+      "note": "backend unchanged this round"
+    },
+    "typecheck": "passed",
+    "lint": "passed"
+  },
+  "browser": {
+    "two_tab": "not collected in this round",
+    "previous_single_tab": "not reused for this change"
+  },
+  "postgres": {
+    "claim_write_concurrency": "not run"
+  },
+  "build": {
+    "default_windows": "failed",
+    "error": "[vite:worker] remove ... esbuild-...: Access is denied",
+    "workspace_temp": "reached worker stage; same environment error; not a clean CI pass"
+  },
+  "release": {
+    "status": "hold",
+    "push": false,
+    "merge": false,
+    "deploy": false,
+    "vad_ms": 900,
+    "speech_watchdog_ms": 5000
+  }
+}
