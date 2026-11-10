@@ -213,10 +213,25 @@ function mergeQueuedWrites(): void {
   } catch { /* the in-memory copy still protects this page */ }
 }
 
+const LEASE_BUSY = Symbol("owner-write-lease-busy");
+
 function withQueueLock(work: () => void | Promise<void>): Promise<void> {
   const locks = (globalThis.navigator as unknown as { locks?: { request: (name: string, options: { mode: string }, cb: () => Promise<void>) => Promise<void> } }).locks;
   if (locks?.request) {
     return locks.request("spoken-owner-write-queue", { mode: "exclusive" }, async () => { await work(); });
+  }
+  if (typeof indexedDB !== "undefined") {
+    return (async () => {
+      for (let attempt = 0; attempt < 500; attempt += 1) {
+        const acquired = await withIndexedDbLease("queue", async () => {
+          await work();
+          return true;
+        });
+        if (acquired !== LEASE_BUSY) return;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      throw new Error("owner write queue lock timeout");
+    })();
   }
   return Promise.resolve().then(work);
 }
@@ -227,23 +242,23 @@ function withQueueLock(work: () => void | Promise<void>): Promise<void> {
  * the localStorage path is only for environments without IndexedDB (for
  * example jsdom in unit tests).
  */
-function withRecordSendLock<T>(id: string, work: () => Promise<T>): Promise<T | undefined> {
+function withRecordSendLock<T>(id: string, work: () => Promise<T>): Promise<T | typeof LEASE_BUSY> {
   const locks = (globalThis.navigator as unknown as { locks?: { request: (name: string, options: { mode: string }, cb: () => Promise<T>) => Promise<T> } }).locks;
   if (locks?.request) {
     return locks.request(`spoken-owner-write-send:${id}`, { mode: "exclusive" }, work);
   }
-  if (typeof indexedDB !== "undefined") return withIndexedDbSendLock(id, work);
+  if (typeof indexedDB !== "undefined") return withIndexedDbLease(`send:${id}`, work);
   return withLocalStorageSendLease(id, work);
 }
 
-function withIndexedDbSendLock<T>(id: string, work: () => Promise<T>): Promise<T | undefined> {
+function withIndexedDbLease<T>(id: string, work: () => Promise<T>): Promise<T | typeof LEASE_BUSY> {
   const token = randomId();
-  return new Promise<T | undefined>((resolve, reject) => {
+  return new Promise<T | typeof LEASE_BUSY>((resolve, reject) => {
     const open = indexedDB.open("spoken-owner-write-locks", 1);
     open.onupgradeneeded = () => {
       if (!open.result.objectStoreNames.contains("leases")) open.result.createObjectStore("leases", { keyPath: "id" });
     };
-    open.onerror = () => reject(open.error ?? new Error("could not open send lease"));
+    open.onerror = () => reject(open.error ?? new Error("could not open owner lease"));
     open.onsuccess = () => {
       const db = open.result;
       const release = () => {
@@ -267,7 +282,7 @@ function withIndexedDbSendLock<T>(id: string, work: () => Promise<T>): Promise<T
         if (row && (row.expires ?? 0) > Date.now()) {
           tx.abort();
           db.close();
-          resolve(undefined);
+          resolve(LEASE_BUSY);
           return;
         }
         store.put({ id, token, expires: Date.now() + 120_000 });
@@ -277,30 +292,30 @@ function withIndexedDbSendLock<T>(id: string, work: () => Promise<T>): Promise<T
       };
       tx.onerror = () => {
         db.close();
-        reject(tx.error ?? new Error("could not acquire send lease"));
+        reject(tx.error ?? new Error("could not acquire owner lease"));
       };
       tx.onabort = () => {
         db.close();
-        resolve(undefined);
+        resolve(LEASE_BUSY);
       };
     };
   });
 }
 
-function withLocalStorageSendLease<T>(id: string, work: () => Promise<T>): Promise<T | undefined> {
+function withLocalStorageSendLease<T>(id: string, work: () => Promise<T>): Promise<T | typeof LEASE_BUSY> {
   const key = `spoken-owner-write-send:${id}`;
   const token = randomId();
   try {
     const raw = localStorage.getItem(key);
     if (raw) {
       const lease = JSON.parse(raw) as { at?: number };
-      if (Date.now() - (lease.at ?? 0) < 120_000) return Promise.resolve(undefined);
+      if (Date.now() - (lease.at ?? 0) < 120_000) return Promise.resolve(LEASE_BUSY);
     }
     localStorage.setItem(key, JSON.stringify({ token, at: Date.now() }));
     const verified = JSON.parse(localStorage.getItem(key) || "{}") as { token?: string };
-    if (verified.token !== token) return Promise.resolve(undefined);
+    if (verified.token !== token) return Promise.resolve(LEASE_BUSY);
   } catch {
-    return Promise.resolve(undefined);
+    return Promise.resolve(LEASE_BUSY);
   }
   return work().finally(() => {
     try {
@@ -482,25 +497,35 @@ async function queuedWrite<T>(
     throw new OwnerTransitionError("当前登录账号不是该注册记录的目标账号，记录已保留");
   }
   const result = await sendOnce<T>(record, token!);
-  return result.sent ? result.data : undefined as T;
+  if (result.status === "sent") return result.data;
+  if (result.status === "deferred") {
+    throw new OwnerTransitionError("保存正在另一标签处理，记录已保留，可稍后重试");
+  }
+  throw new OwnerTransitionError("保存已由另一标签确认，请刷新账号数据");
 }
 
-type SendResult<T> = { sent: true; data: T } | { sent: false };
+type SendResult<T> =
+  | { status: "sent"; data: T; counted: boolean }
+  | { status: "deferred" }
+  | { status: "already-confirmed" };
 
 async function sendOnce<T>(record: StoredOwnerWrite, token: string): Promise<SendResult<T>> {
   const existing = inflightWrites.get(record.id) as Promise<SendResult<T>> | undefined;
-  if (existing) return existing;
+  if (existing) {
+    const result = await existing;
+    return result.status === "sent" ? { ...result, counted: false } : result;
+  }
   const promise = (async (): Promise<SendResult<T>> => {
     // A different tab may have confirmed and removed this record while this
     // tab was waiting for the send lease. Re-read after taking the lease.
     const result = await withRecordSendLock(record.id, async (): Promise<SendResult<T>> => {
       loadQueuedWrites();
-      if (!queuedWrites.has(record.id)) return { sent: false };
+      if (!queuedWrites.has(record.id)) return { status: "already-confirmed" };
       const data = await sendStoredWrite<T>(record, token);
       await removeQueuedWrite(record.id);
-      return { sent: true, data };
+      return { status: "sent", data, counted: true };
     });
-    return result ?? { sent: false };
+    return result === LEASE_BUSY ? { status: "deferred" } : result;
   })();
   inflightWrites.set(record.id, promise);
   try {
@@ -551,6 +576,7 @@ export async function retryPendingOwnerWrites(): Promise<number> {  const token 
       try {
         const response = await fetch(`${BASE_URL}/api/auth/guest-claim?guest_id=${encodeURIComponent(record.guestId)}`, {
           headers: { Authorization: `Bearer ${token}` },
+          signal: withTimeout(undefined, 5_000),
         });
         if (response.ok) {
           const status = await response.json() as { claimed?: boolean; mine?: boolean };
@@ -561,7 +587,7 @@ export async function retryPendingOwnerWrites(): Promise<number> {  const token 
     if (!allowed) continue;
     try {
       const result = await sendOnce(record, token);
-      if (result.sent) sent++;
+      if (result.status === "sent" && result.counted) sent++;
     } catch {
       // Keep this record recoverable and continue with later records. A missing
       // delete (404) must not block unrelated saves behind it.
