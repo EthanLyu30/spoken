@@ -14,43 +14,50 @@
     "d18d15e",
     "bdef374",
     "e337efb",
-    "e2595c7"
+    "e2595c7",
+    "f9e47dc",
+    "bb4ef9c",
+    "8230fc3",
+    "184b7c1",
+    "cf3f1d7",
+    "a55965c"
   ],
   "uncommitted_round": {
     "product_files": [
-      "frontend/src/lib/api.ts",
-      "frontend/src/store/auth.ts"
+      "frontend/src/lib/api.ts"
     ],
     "test_files": [
-      "frontend/src/lib/pendingWrites.test.ts",
-      "frontend/src/lib/authSync.test.ts",
-      "frontend/src/lib/api.progress.test.ts"
+      "frontend/src/lib/pendingWrites.test.ts"
     ],
     "fixes": [
       "empty 204 delete responses are not JSON-decoded",
       "late 409 guest_data_claimed is retained before page-generation abort",
       "recovery ids include the original guest id",
       "queue persist/remove use a Web Locks critical section",
-      "duplicate registration cannot advance the first registration revision"
+      "duplicate registration cannot advance the first registration revision",
+      "cross-tab queue persist/remove use Web Locks or an IndexedDB lease, not an unlocked localStorage fallback",
+      "send result is sent/deferred/already-confirmed; unsent queued save rejects instead of returning success",
+      "shared in-flight send only counts the initiating retry",
+      "guest-claim recovery request has a 5 s timeout"
     ]
   },
   "tests": {
     "targeted": {
-      "pendingWrites": 21,
+      "pendingWrites": 22,
       "authSync": 17,
       "apiProgress": 6,
-      "total": 44,
+      "total": 45,
       "result": "passed"
     },
     "frontend_full": {
       "files": 73,
-      "tests": 604,
+      "tests": 605,
       "result": "passed"
     },
     "backend_full": {
       "tests": 649,
       "result": "passed",
-      "note": "backend unchanged this round"
+      "note": "backend unchanged this round; full suite passed"
     },
     "typecheck": "passed",
     "lint": "passed"
@@ -65,7 +72,7 @@
   "build": {
     "default_windows": "failed",
     "error": "[vite:worker] remove ... esbuild-...: Access is denied",
-    "workspace_temp": "reached worker stage; same environment error; not a clean CI pass"
+    "workspace_temp": "same worker-stage environment error; not a clean CI pass"
   },
   "release": {
     "status": "hold",

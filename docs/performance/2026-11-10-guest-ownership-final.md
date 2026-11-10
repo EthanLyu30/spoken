@@ -26,7 +26,15 @@ A `409 guest_data_claimed` is retained before the page-generation check. The rec
 
 ### Queue atomicity
 
-Queue persistence and removal run through a Web Locks critical section (`spoken-owner-write-queue`) when the browser supports it. The merge step re-reads the persisted array, removes memory-only records already confirmed by another tab/module, and writes only live records. A direct execution fallback remains for browsers without Web Locks.
+Queue persistence and removal run through a cross-tab critical section: Web Locks (`spoken-owner-write-queue`) when available, otherwise an IndexedDB readwrite lease. The IndexedDB path retries until it obtains the lease; the localStorage path is only a test-environment fallback. The merge step re-reads the persisted array, removes memory-only records already confirmed by another tab/module, and writes only live records. A simultaneous two-tab enqueue therefore cannot overwrite the other tab's record.
+
+### Truthful send result
+
+`sendOnce()` now returns `sent` (with `counted`), `deferred`, or `already-confirmed`. A queued save that cannot obtain the cross-tab send lease throws instead of returning `undefined` as a successful result. A shared in-flight promise only lets the initiating pass increment the retry count; a second pass receives `counted: false`. The retry loop only counts actual sends.
+
+### Guest-claim timeout
+
+The recovery `GET /api/auth/guest-claim` call uses a 5 s timeout. A stuck first claim query cannot block later queued records indefinitely; the record remains retryable.
 
 ### Duplicate registration
 
@@ -34,11 +42,11 @@ Queue persistence and removal run through a Web Locks critical section (`spoken-
 
 ## Verification
 
-- `frontend/src/lib/pendingWrites.test.ts` — 21 tests.
+- `frontend/src/lib/pendingWrites.test.ts` — 22 tests.
 - `frontend/src/lib/authSync.test.ts` — 17 tests.
 - `frontend/src/lib/api.progress.test.ts` — 6 tests.
-- Targeted total: **44 passed** (21 + 17 + 6).
-- Full frontend: **73 files / 604 passed**.
+- Targeted total: **45 passed** (22 + 17 + 6).
+- Full frontend: **73 files / 605 passed**.
 - Backend full: **649 passed** (backend unchanged this round; word-definition lock ordering covered).
 - TypeScript: pass.
 - ESLint: pass.
@@ -52,7 +60,7 @@ Queue persistence and removal run through a Web Locks critical section (`spoken-
 
 ## Not accepted yet
 
-- A normal two-tab browser run for simultaneous enqueue, late account switch, duplicate registration, and delete is still required. The queue is unit-tested with Web Locks, but the browser path was not collected in this round.
+- A normal two-tab browser run for simultaneous enqueue, late account switch, duplicate registration, and delete is still required. The queue uses Web Locks/IndexedDB unit paths, but a real two-tab request/ownership reconciliation was not collected in this round.
 - Real Postgres concurrency for claim versus old-guest writes was not run; earlier SQLite reproductions are not a substitute.
 - Default `npm run build` on this Windows host still fails while deleting an esbuild worker temporary file (`Access is denied`). A workspace `TMP`/`TEMP` build reached the worker stage but failed at the same delete; this is an environment blocker, not a verified clean-CI pass. The source compiled through TypeScript and the earlier large build.
 - The browser acceptance evidence from the previous round used a temporary debug hook; that evidence is not reused as proof for this change.
