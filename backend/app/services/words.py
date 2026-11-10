@@ -8,9 +8,11 @@ from datetime import datetime, timedelta
 from sqlalchemy import asc, desc, select
 from sqlalchemy.orm import Session
 
+from app.models.progress import GuestClaim
 from app.models.word import WordEntry
 from app.services.deepseek import DeepSeekClient, DeepSeekError
 from app.services import progress, request_receipts
+from app.services.users import GuestAlreadyClaimed
 from app.schemas.word import Word
 
 # Leitner intervals (days) by box level; remembering bumps the box up.
@@ -55,6 +57,10 @@ def create_word(
     timezone: str | None = None,
 ) -> WordEntry:
     progress.lock_owner(db, client_id)
+    if not client_id.startswith("u:"):
+        claim = db.get(GuestClaim, client_id)
+        if claim is not None and claim.owner_id != client_id:
+            raise GuestAlreadyClaimed(client_id)
     text = text.strip()
     existing = find_by_text(db, client_id, text)
     if existing is not None:

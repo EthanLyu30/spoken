@@ -91,7 +91,7 @@ export const useAuth = create<AuthState>((set, get) => ({
   register: async (email, password) => {
     const revision = ++operation;
     const generation = getAuthGeneration();
-    beginOwnerTransition();
+    const transition = beginOwnerTransition();
     try {
       // A just-finished practice/word write must land while this browser is still
       // the guest owner. A failed write aborts registration rather than silently
@@ -99,22 +99,22 @@ export const useAuth = create<AuthState>((set, get) => ({
       // remain bound to this transition.
       await flushPendingWrites();
       if (revision !== operation || generation !== getAuthGeneration()) {
-        completeOwnerTransition("unknown", undefined, "registration was superseded");
+        completeOwnerTransition("unknown", undefined, "registration was superseded", transition.id);
         return;
       }
       const { token, user } = await registerUser(email, password);
       if (revision !== operation || generation !== getAuthGeneration()) {
-        completeOwnerTransition("unknown", undefined, "registration was superseded");
+        completeOwnerTransition("unknown", undefined, "registration was superseded", transition.id);
         return;
       }
       setToken(token);
       writeCachedUser(token, user);
       set({ user, resolving: false, resolutionError: false });
-      completeOwnerTransition("success", user.id);
+      completeOwnerTransition("success", user.id, undefined, transition.id);
       void useWords.getState().refresh();
       void retryPendingOwnerWrites();
     } catch (error) {
-      completeOwnerTransition("failed", undefined, error instanceof Error ? error.message : "registration failed");
+      completeOwnerTransition("failed", undefined, error instanceof Error ? error.message : "registration failed", transition.id);
       throw error;
     }
   },

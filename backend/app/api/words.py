@@ -10,6 +10,7 @@ from app.schemas.word import Word, WordCreate, WordReview, WordUpdate
 from app.services import words as repo
 from app.services.deepseek import DeepSeekClient
 from app.services.request_receipts import RequestConflict
+from app.services.users import GuestAlreadyClaimed
 
 router = APIRouter(tags=["words"])
 
@@ -34,7 +35,10 @@ async def add_word(
         m, e = await repo.define_word(text, client)
         meaning = meaning or m
         example = example or e
-    entry = repo.create_word(db, client_id, text, payload.scenario_id, meaning, example, payload.kind, timezone)
+    try:
+        entry = repo.create_word(db, client_id, text, payload.scenario_id, meaning, example, payload.kind, timezone)
+    except GuestAlreadyClaimed as exc:
+        raise HTTPException(status_code=409, detail="guest_data_claimed") from exc
     return Word.model_validate(entry)
 
 

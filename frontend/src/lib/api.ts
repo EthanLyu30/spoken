@@ -57,6 +57,7 @@ let localTransition: OwnerTransition | null = null;
 const externalTransitions = new Map<string, Promise<OwnerTransitionOutcome>>();
 const queuedWrites = new Map<string, StoredOwnerWrite>();
 const inflightWrites = new Map<string, Promise<unknown>>();
+const freshQueuedWrites = new Set<string>();
 
 type OwnerTransitionOutcome = {
   id: string;
@@ -136,21 +137,32 @@ function writeTransitionOutcome(outcome: OwnerTransitionOutcome): void {
   try { localStorage.setItem(OWNER_OUTCOME_KEY, JSON.stringify(outcome)); } catch { /* RAM-only */ }
 }
 
-function clearTransitionDescriptor(): void {
+function clearTransitionDescriptor(id?: string): void {
+  if (id) {
+    const descriptor = transitionDescriptor();
+    if (descriptor && descriptor.id !== id) return;
+  }
   try { localStorage.removeItem(OWNER_TRANSITION_KEY); } catch { /* RAM-only transition */ }
 }
 
 function loadQueuedWrites(): void {
   try {
     const raw = localStorage.getItem(OWNER_QUEUE_KEY);
-    if (!raw) return;
+    if (!raw) {
+      for (const id of [...queuedWrites.keys()]) {
+        if (!freshQueuedWrites.has(id)) queuedWrites.delete(id);
+      }
+      return;
+    }
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return;
+    const stored = new Set<string>();
     for (const item of parsed) {
       if (!item || typeof item !== "object") continue;
       const row = item as Partial<StoredOwnerWrite>;
       if (typeof row.id !== "string" || typeof row.transitionId !== "string" || typeof row.guestId !== "string"
         || typeof row.path !== "string" || typeof row.method !== "string" || typeof row.createdAt !== "number") continue;
+      stored.add(row.id);
       queuedWrites.set(row.id, {
         id: row.id,
         transitionId: row.transitionId,
@@ -161,6 +173,9 @@ function loadQueuedWrites(): void {
         headers: row.headers && typeof row.headers === "object" ? row.headers as Record<string, string> : {},
         createdAt: row.createdAt,
       });
+    }
+    for (const id of [...queuedWrites.keys()]) {
+      if (!stored.has(id) && !freshQueuedWrites.has(id)) queuedWrites.delete(id);
     }
   } catch { /* ignore corrupt local queue */ }
 }
@@ -179,14 +194,24 @@ function persistQueuedWrites(): void {
       }
     }
   } catch { /* ignore corrupt persisted queue */ }
-  for (const row of queuedWrites.values()) merged.set(row.id, row);
+  for (const row of [...queuedWrites.values()]) {
+    if (merged.has(row.id) || freshQueuedWrites.has(row.id)) {
+      merged.set(row.id, row);
+    } else {
+      // Another module/tab confirmed and removed this record. Do not write the
+      // stale in-memory copy back into the shared queue.
+      queuedWrites.delete(row.id);
+    }
+  }
   try {
     localStorage.setItem(OWNER_QUEUE_KEY, JSON.stringify([...merged.values()]));
+    freshQueuedWrites.clear();
   } catch { /* the in-memory copy still protects this page */ }
 }
 
 function removeQueuedWrite(id: string): void {
   queuedWrites.delete(id);
+  freshQueuedWrites.delete(id);
   try {
     const raw = localStorage.getItem(OWNER_QUEUE_KEY);
     const parsed = raw ? JSON.parse(raw) as unknown : [];
@@ -271,12 +296,14 @@ export function completeOwnerTransition(
   status: OwnerTransitionOutcome["status"],
   targetUserId?: number,
   error?: string,
+  transitionId?: string,
 ): void {
   if (!localTransition) return;
+  if (transitionId && localTransition.id !== transitionId) return;
   const outcome: OwnerTransitionOutcome = { id: localTransition.id, status, targetUserId, error };
   localTransition.settle(outcome);
   writeTransitionOutcome(outcome);
-  clearTransitionDescriptor();
+  clearTransitionDescriptor(localTransition.id);
   localTransition = null;
 }
 
@@ -333,6 +360,7 @@ async function queuedWrite<T>(
     createdAt: Date.now(),
   };
   queuedWrites.set(record.id, record);
+  freshQueuedWrites.add(record.id);
   persistQueuedWrites();
   const outcome = await transition.outcome;
   if (outcome.status !== "success" || !outcome.targetUserId) {
@@ -425,6 +453,36 @@ export interface HealthResponse {
   app: string;
 }
 
+function stableLateWriteId(path: string, body: string | null): string {
+  let hash = 2166136261;
+  const text = `${path}\n${body ?? ""}`;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `late-${(hash >>> 0).toString(16)}`;
+}
+
+function retainLateClaimedWrite(path: string, init?: RequestInit): void {
+  const body = typeof init?.body === "string" ? init.body : null;
+  const id = stableLateWriteId(path, body);
+  const record: StoredOwnerWrite = {
+    id,
+    transitionId: "late-claim",
+    guestId: getClientId(),
+    path,
+    method: init?.method ?? "POST",
+    body,
+    headers: init?.headers && typeof init.headers === "object"
+      ? init.headers as Record<string, string>
+      : {},
+    createdAt: Date.now(),
+  };
+  queuedWrites.set(id, record);
+  freshQueuedWrites.add(id);
+  persistQueuedWrites();
+}
+
 /**
  * Combine the caller's abort signal with a timeout so a hung request fails
  * cleanly (surfaced as an error the UI can show) instead of spinning forever.
@@ -435,7 +493,10 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
   // token is already present (e.g. account B), keep that write under B and do
   // not adopt someone else's in-flight registration.
   const transition = ownerWrite && !getToken() ? currentTransition() : null;
-  if (transition) return queuedWrite<T>(transition, path, init);
+  // A write from a different guest must never adopt this transition. Account
+  // writes also bypass it; they keep their own token identity.
+  const matchingTransition = transition && transition.guestId === getClientId() ? transition : null;
+  if (matchingTransition) return queuedWrite<T>(matchingTransition, path, init);
   const generation = getAuthGeneration();
   const checkGeneration = () => { if (generation !== getAuthGeneration()) throw new DOMException("Account changed", "AbortError"); };
   const requestInit: RequestInit = {
@@ -486,6 +547,12 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
     settlePending?.();
     return data;
   } catch (error) {
+    if (ownerWrite && error instanceof ApiError && error.status === 409
+      && error.message.includes("guest_data_claimed")) {
+      // A guest write that raced a completed claim is recoverable. Keep a
+      // stable record so a later login/guest-claim retry can finish it.
+      retainLateClaimedWrite(path, init);
+    }
     settlePending?.(error);
     throw error;
   }
@@ -1119,13 +1186,7 @@ export function patchWord(id: number, mastered: boolean, signal?: AbortSignal): 
 }
 
 export async function deleteWord(id: number, signal?: AbortSignal): Promise<void> {
-  const generation = getAuthGeneration();
-  const headers = { "X-Client-Id": getClientId(), "X-Timezone": deviceTimezone(), ...authHeader() };
-  if (generation !== getAuthGeneration()) throw new DOMException("Account changed", "AbortError");
-  const res = await fetch(`${BASE_URL}/api/words/${id}`, { method: "DELETE", headers, signal });
-  if (generation !== getAuthGeneration()) throw new DOMException("Account changed", "AbortError");
-  if (!res.ok) throw new Error(`delete word failed: ${res.status}`);
-  invalidateProgress();
+  await request<void>(`/api/words/${id}`, { method: "DELETE", signal });
 }
 
 // --- Accounts (optional; the app also works anonymously per-device) ---

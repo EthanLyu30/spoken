@@ -63,14 +63,20 @@ def get_client_id(
         and guest.lower() != "anon"
         and request.method not in ("GET", "HEAD", "OPTIONS")
     ):
-        # Serialize this check with claim_device_data, which takes the same
-        # ProgressOwner lock before moving rows. Without the lock a request
-        # could pass the claim check, pause, and write after the claim commits.
-        from app.services import progress
-        progress.lock_owner(db, guest)
-        claim = db.get(GuestClaim, guest)
-        if claim is not None and owner != claim.owner_id:
-            raise HTTPException(status_code=409, detail="guest_data_claimed")
+        # Account writes keep their own account identity even if the browser
+        # still carries a guest id that was claimed by another account. Only a
+        # guest write (no Bearer owner) can recreate claimed data under the old
+        # guest owner. Word creation performs its definition call before taking
+        # the write lock, so defer its claim check to create_word.
+        if not owner.startswith("u:"):
+            if not (request.method == "POST" and request.url.path == "/api/words"):
+                # Serialize this check with claim_device_data, which takes the
+                # same ProgressOwner lock before moving rows.
+                from app.services import progress
+                progress.lock_owner(db, guest)
+            claim = db.get(GuestClaim, guest)
+            if claim is not None and owner != claim.owner_id:
+                raise HTTPException(status_code=409, detail="guest_data_claimed")
     if not owner:
         raise HTTPException(status_code=400, detail="A device identifier or login is required")
     return owner
