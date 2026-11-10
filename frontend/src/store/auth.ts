@@ -89,9 +89,12 @@ export const useAuth = create<AuthState>((set, get) => ({
     void retryPendingOwnerWrites();
   },
   register: async (email, password) => {
+    // A duplicate click must not advance the operation counter before the
+    // transition gate rejects it; otherwise the first successful response is
+    // treated as stale and its token is discarded.
+    const transition = beginOwnerTransition();
     const revision = ++operation;
     const generation = getAuthGeneration();
-    const transition = beginOwnerTransition();
     try {
       // A just-finished practice/word write must land while this browser is still
       // the guest owner. A failed write aborts registration rather than silently

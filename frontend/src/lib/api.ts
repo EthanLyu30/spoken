@@ -180,8 +180,10 @@ function loadQueuedWrites(): void {
   } catch { /* ignore corrupt local queue */ }
 }
 
-function persistQueuedWrites(): void {
-  // Merge with what other tabs/module instances already persisted.
+function mergeQueuedWrites(): void {
+  // Merge with what other tabs/module instances already persisted. Callers
+  // hold the cross-tab queue lock so a simultaneous enqueue cannot overwrite
+  // a record that was written between the read and this write.
   const merged = new Map<string, StoredOwnerWrite>();
   try {
     const raw = localStorage.getItem(OWNER_QUEUE_KEY);
@@ -209,17 +211,31 @@ function persistQueuedWrites(): void {
   } catch { /* the in-memory copy still protects this page */ }
 }
 
-function removeQueuedWrite(id: string): void {
+function withQueueLock(work: () => void | Promise<void>): Promise<void> {
+  const locks = (globalThis.navigator as unknown as { locks?: { request: (name: string, options: { mode: string }, cb: () => Promise<void>) => Promise<void> } }).locks;
+  if (locks?.request) {
+    return locks.request("spoken-owner-write-queue", { mode: "exclusive" }, async () => { await work(); });
+  }
+  return Promise.resolve().then(work);
+}
+
+async function persistQueuedWrites(): Promise<void> {
+  await withQueueLock(mergeQueuedWrites);
+}
+
+async function removeQueuedWrite(id: string): Promise<void> {
   queuedWrites.delete(id);
   freshQueuedWrites.delete(id);
-  try {
-    const raw = localStorage.getItem(OWNER_QUEUE_KEY);
-    const parsed = raw ? JSON.parse(raw) as unknown : [];
-    if (Array.isArray(parsed)) {
-      localStorage.setItem(OWNER_QUEUE_KEY, JSON.stringify(parsed.filter((row) =>
-        !row || typeof row !== "object" || (row as StoredOwnerWrite).id !== id)));
-    }
-  } catch { /* in-memory deletion still applies */ }
+  await withQueueLock(() => {
+    try {
+      const raw = localStorage.getItem(OWNER_QUEUE_KEY);
+      const parsed = raw ? JSON.parse(raw) as unknown : [];
+      if (Array.isArray(parsed)) {
+        localStorage.setItem(OWNER_QUEUE_KEY, JSON.stringify(parsed.filter((row) =>
+          !row || typeof row !== "object" || (row as StoredOwnerWrite).id !== id)));
+      }
+    } catch { /* in-memory deletion still applies */ }
+  });
 }
 
 loadQueuedWrites();
@@ -337,6 +353,7 @@ async function sendStoredWrite<T>(record: StoredOwnerWrite, token: string): Prom
     } catch { /* non-JSON error body */ }
     throw new ApiError(detail || `${record.method} ${record.path} failed: ${response.status}`, response.status);
   }
+  if (response.status === 204) return undefined as T;
   const data = await response.json() as T;
   if (/^\/api\/(sessions|practice|words)(\/|$)/.test(record.path)) invalidateProgress();
   return data;
@@ -361,7 +378,7 @@ async function queuedWrite<T>(
   };
   queuedWrites.set(record.id, record);
   freshQueuedWrites.add(record.id);
-  persistQueuedWrites();
+  await persistQueuedWrites();
   const outcome = await transition.outcome;
   if (outcome.status !== "success" || !outcome.targetUserId) {
     throw new OwnerTransitionError(outcome.error ?? "注册未确认成功，记录已保留，可稍后重试");
@@ -378,7 +395,7 @@ async function sendOnce<T>(record: StoredOwnerWrite, token: string): Promise<T> 
   if (existing) return existing;
   const promise = (async () => {
     const data = await sendStoredWrite<T>(record, token);
-    removeQueuedWrite(record.id);
+    await removeQueuedWrite(record.id);
     return data;
   })();
   inflightWrites.set(record.id, promise);
@@ -453,9 +470,9 @@ export interface HealthResponse {
   app: string;
 }
 
-function stableLateWriteId(path: string, body: string | null): string {
+function stableLateWriteId(path: string, body: string | null, guestId: string): string {
   let hash = 2166136261;
-  const text = `${path}\n${body ?? ""}`;
+  const text = `${guestId}\n${path}\n${body ?? ""}`;
   for (let i = 0; i < text.length; i++) {
     hash ^= text.charCodeAt(i);
     hash = Math.imul(hash, 16777619);
@@ -463,13 +480,13 @@ function stableLateWriteId(path: string, body: string | null): string {
   return `late-${(hash >>> 0).toString(16)}`;
 }
 
-function retainLateClaimedWrite(path: string, init?: RequestInit): void {
+async function retainLateClaimedWrite(path: string, init: RequestInit | undefined, guestId: string): Promise<void> {
   const body = typeof init?.body === "string" ? init.body : null;
-  const id = stableLateWriteId(path, body);
+  const id = stableLateWriteId(path, body, guestId);
   const record: StoredOwnerWrite = {
     id,
     transitionId: "late-claim",
-    guestId: getClientId(),
+    guestId,
     path,
     method: init?.method ?? "POST",
     body,
@@ -480,7 +497,7 @@ function retainLateClaimedWrite(path: string, init?: RequestInit): void {
   };
   queuedWrites.set(id, record);
   freshQueuedWrites.add(id);
-  persistQueuedWrites();
+  await persistQueuedWrites();
 }
 
 /**
@@ -497,6 +514,7 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
   // writes also bypass it; they keep their own token identity.
   const matchingTransition = transition && transition.guestId === getClientId() ? transition : null;
   if (matchingTransition) return queuedWrite<T>(matchingTransition, path, init);
+  const requestGuestId = getClientId();
   const generation = getAuthGeneration();
   const checkGeneration = () => { if (generation !== getAuthGeneration()) throw new DOMException("Account changed", "AbortError"); };
   const requestInit: RequestInit = {
@@ -527,7 +545,6 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
     checkGeneration();
     const response = fetch(`${BASE_URL}${path}`, requestInit);
     const res = await response;
-    checkGeneration();
     if (!res.ok) {
       // Surface the backend's message (FastAPI `detail`) when present, e.g. the
       // Chinese login/register errors; fall back to a generic status string.
@@ -538,8 +555,21 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
       } catch {
         /* non-JSON error body */
       }
+      if (ownerWrite && res.status === 409 && detail === "guest_data_claimed") {
+        // Retain against the guest identity that issued this request, even if
+        // the page has already switched accounts. The record must survive the
+        // identity check below and be retryable after login.
+        await retainLateClaimedWrite(path, init, requestGuestId);
+        checkGeneration();
+        throw new ApiError(detail, res.status);
+      }
       checkGeneration();
       throw new ApiError(detail || `${init?.method ?? "GET"} ${path} failed: ${res.status}`, res.status);
+    }
+    if (res.status === 204) {
+      checkGeneration();
+      settlePending?.();
+      return undefined as T;
     }
     const data = await res.json() as T;
     checkGeneration();
@@ -547,12 +577,6 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_
     settlePending?.();
     return data;
   } catch (error) {
-    if (ownerWrite && error instanceof ApiError && error.status === 409
-      && error.message.includes("guest_data_claimed")) {
-      // A guest write that raced a completed claim is recoverable. Keep a
-      // stable record so a later login/guest-claim retry can finish it.
-      retainLateClaimedWrite(path, init);
-    }
     settlePending?.(error);
     throw error;
   }
