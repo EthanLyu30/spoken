@@ -58,8 +58,10 @@ export function useProgressData(owner: string) {
     setData(
       (previous) =>
         (cached ? { ...cached, sessionsPending: true, practicePending: true, statsPending: true, insightsPending: true } : undefined) ??
-        (previous.owner === owner && previous.status === "ready"
-          ? { ...previous, stats: statsDayRef.current === requestDay ? previous.stats : null, errors: [], sessionsPending: true, practicePending: true, statsPending: true, insightsPending: true }
+        (previous.owner === owner
+          ? { ...previous, status: previous.status === "error" ? "loading" : previous.status,
+              stats: statsDayRef.current === requestDay ? previous.stats : null,
+              errors: [], sessionsPending: true, practicePending: true, statsPending: true, insightsPending: true }
           : empty(owner)),
     );
     const update = (patch: Partial<ProgressData>) => {

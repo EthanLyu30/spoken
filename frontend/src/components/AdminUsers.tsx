@@ -1,15 +1,18 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, Search, Users } from "lucide-react";
+import { ArrowLeft, ArrowRight, RefreshCw, Search, Users } from "lucide-react";
 import { AdminApiError, getAdminUsers, type AdminUsersPage, type AdminUserSort } from "../lib/adminApi";
 
 const dateTime = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
   hour: "2-digit", minute: "2-digit", hour12: false,
 });
+const updateTime = new Intl.DateTimeFormat("zh-CN", {
+  timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+});
 const count = (value?: number | null) => value == null ? "—" : value.toLocaleString("zh-CN");
 
-export function AdminUsers({ revision, onForbidden }: { revision: number; onForbidden: () => void }) {
-  const [result, setResult] = useState<{ scope: string; data: AdminUsersPage } | null>(null);
+export function AdminUsers({ onForbidden }: { onForbidden: () => void }) {
+  const [result, setResult] = useState<{ scope: string; data: AdminUsersPage; at: Date } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
@@ -34,7 +37,7 @@ export function AdminUsers({ revision, onForbidden }: { revision: number; onForb
         setOffset(Math.max(0, Math.floor((data.total - 1) / 20) * 20));
         return;
       }
-      setResult({ scope, data });
+      setResult({ scope, data, at: new Date() });
     }).catch((err: unknown) => {
       if (controller.signal.aborted) return;
       if (err instanceof AdminApiError && (err.status === 401 || err.status === 403)) onForbidden();
@@ -43,9 +46,10 @@ export function AdminUsers({ revision, onForbidden }: { revision: number; onForb
       if (!controller.signal.aborted) setLoading(false);
     });
     return () => controller.abort();
-  }, [offset, search, sort, scope, revision, retry, onForbidden]);
+  }, [offset, search, sort, scope, retry, onForbidden]);
 
   const moveTo = (next: number) => { setLoading(true); setOffset(next); };
+  const refresh = () => { setLoading(true); setRetry(value => value + 1); };
   const activation = summary?.activation_24h;
   const activationRate = activation?.eligible ? `${(100 * activation.completed / activation.eligible).toFixed(1)}%` : "—";
   let maturationNote = loading ? "正在读取首练数据…" : "首练数据暂不可用";
@@ -57,21 +61,43 @@ export function AdminUsers({ revision, onForbidden }: { revision: number; onForb
   const items = page?.items ?? [];
   const total = page?.total ?? 0;
   const limit = page?.limit ?? 20;
+  const guestActivity = summary?.guest_activity;
+  const visitors = summary?.visitors;
 
   return <section aria-label="用户运营">
+    <div className="admin-audience-toolbar">
+      <p role="status">{loading ? "正在刷新用户数据…" : result && <>
+        用户数据更新于 <time dateTime={result.at.toISOString()}>{updateTime.format(result.at)}</time>（北京时间）
+      </>}</p>
+      <button type="button" className="admin-refresh" aria-label="刷新数据" disabled={loading} onClick={refresh}>
+        <RefreshCw size={15} className={loading ? "admin-spinning" : undefined} />{loading ? "刷新中…" : "刷新数据"}
+      </button>
+    </div>
     <section className="admin-metrics admin-audience" aria-label="用户指标">
       <article><span>注册总人数</span><strong>{count(summary?.registered)}</strong><small>累计普通账号</small></article>
       <article><span>近 7 天新增</span><strong>{count(summary?.new_7d ?? null)}</strong><small>过去 168 小时注册</small></article>
       <article><span>登录活跃账号</span><strong>{count(summary?.visitors?.registered_active)}</strong><small>近 7 天 · 按账号去重</small></article>
-      <article><span>未登录访客</span><strong>{count(summary?.visitors?.guest_uv)}</strong><small>近 7 天 · 按浏览器去重</small></article>
     </section>
     <section className="admin-panel admin-activation" aria-label="首练转化">
       <div><h2>注册后 24 小时首练率</h2><p>近 7 天注册且已满 24 小时的普通账号。完成场景会话、跟读或面试任一项计为首练。</p></div>
       <div className="admin-activation-value"><strong>{activationRate}</strong><small>{maturationNote}</small></div>
     </section>
-    {summary?.visitors && (!summary.visitors.enabled || summary.visitors.at_capacity) && <p className="admin-notice">
-      {summary.visitors.enabled ? "访客记录达到保留上限，显示已保留的访问。" : "访客采集未启用，显示已保留的历史访问。"}
-    </p>}
+    <section className="admin-panel admin-guest-activity" aria-labelledby="admin-guest-title">
+      <div className="admin-panel-heading"><h2 id="admin-guest-title">游客使用</h2><span>近 7 天</span></div>
+      <dl className="admin-voice-summary">
+        <div><dt>未登录访客浏览器</dt><dd>{count(visitors?.guest_uv)}</dd></div>
+        <div><dt>有学习记录的游客浏览器</dt><dd>{count(guestActivity?.active_browsers)}</dd></div>
+        <div><dt>保存的场景会话</dt><dd>{count(guestActivity?.sessions)}</dd></div>
+        <div><dt>跟读 / 面试</dt><dd>{count(guestActivity?.pronunciation)} / {count(guestActivity?.interviews)}</dd></div>
+        <div><dt>收藏生词 / 复习记录</dt><dd>{count(guestActivity?.word_collections)} / {count(guestActivity?.word_reviews)}</dd></div>
+      </dl>
+      <p className="admin-panel-caption">访客按浏览器标识去重。练习统计基于仍归游客的学习记录，注册迁移后归入账号统计。</p>
+      {summary && !guestActivity && <p className="admin-panel-caption">游客学习明细暂不可用。</p>}
+      {visitors && (!visitors.enabled || visitors.at_capacity || !visitors.started_at) && <p className="admin-notice">
+        {!visitors.enabled ? "访客采集未启用，显示已保留的历史访问。" : visitors.at_capacity
+          ? "访客记录达到保留上限，显示已保留的访问。" : "暂未取得访客访问数据。"}
+      </p>}
+    </section>
     <section className="admin-panel admin-users" aria-label="注册账号列表" aria-busy={loading}>
       <div className="admin-panel-heading"><h2><Users size={16} />注册账号 <span>{page ? `${count(total)} 人` : ""}</span></h2></div>
       <div className="admin-user-controls">
@@ -91,7 +117,7 @@ export function AdminUsers({ revision, onForbidden }: { revision: number; onForb
       </div>
       {error && <div className="admin-notice admin-error-notice" role="alert">
         <span>{page ? "刷新失败，当前显示上次成功的数据。" : "账号列表加载失败。"}</span>
-        <button type="button" onClick={() => setRetry(value => value + 1)}>重试</button>
+        <button type="button" disabled={loading} onClick={refresh}>重试</button>
       </div>}
       {loading && !page && <p className="admin-loading" role="status">正在读取账号…</p>}
       {page && <><div className="admin-table-wrap" role="region" aria-label="账号表格" tabIndex={0}>

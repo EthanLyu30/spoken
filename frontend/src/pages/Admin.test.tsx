@@ -20,6 +20,9 @@ const monitoring = {
 };
 const trace = { trace_id: "a".repeat(32), started_at: "2026-10-30T02:00:00Z", source: "server", operation: "POST /api/chat/stream", outcome: "ok", duration_ms: 1200, http_status: 200, ttft_ms: 250, model: "deepseek-flash", input_tokens: 20, output_tokens: 10, release: "qa", spans: [{ id: "b".repeat(16), parent_id: null, name: "deepseek.stream", offset_ms: 50, duration_ms: 1100, outcome: "ok", attributes: { provider: "deepseek" } }] };
 const fetcher = vi.fn();
+const releaseFetcher = vi.fn();
+const deployedRelease = "6a913ffe82bd1dff93eb46486f28ca54367b097b";
+const releasePage = (release: string) => new Response(`<meta name="spoken-release" content="${release}">`);
 function show(view = "diagnostics") {
   return render(<MemoryRouter initialEntries={[`/admin?view=${view}`]}><Admin /></MemoryRouter>);
 }
@@ -30,9 +33,30 @@ beforeEach(() => {
   setToken("test-admin-session");
   useAuth.setState({ user });
   fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes("/overview") ? overview : url.includes(`/traces/${trace.trace_id}`) ? trace : { items: [], total: 0 }), { status: 200 }));
-  vi.stubGlobal("fetch", fetcher);
+  releaseFetcher.mockImplementation(async () => releasePage(deployedRelease));
+  vi.stubGlobal("fetch", (url: string, options?: RequestInit) => url === "/index.html"
+    ? releaseFetcher(url, options) : fetcher(url, options));
 });
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); fetcher.mockReset(); clearToken(); useAuth.setState({ user: null }); });
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); fetcher.mockReset(); releaseFetcher.mockReset(); clearToken(); useAuth.setState({ user: null }); });
+
+it("refreshes current browser diagnostics against the deployed release with an old bundle open", async () => {
+  vi.stubEnv("VITE_RELEASE", "previous-browser-bundle");
+  show();
+  fireEvent.click(screen.getByRole("tab", { name: "浏览器体验" }));
+  const browserTraceReleases = () => fetcher.mock.calls.map(([url]) => new URL(url, "http://localhost"))
+    .filter(url => url.pathname.endsWith("/traces") && url.searchParams.get("source") === "browser")
+    .map(url => url.searchParams.get("release"));
+  await waitFor(() => expect(browserTraceReleases()).toContain(deployedRelease));
+  expect(browserTraceReleases()).not.toContain("previous-browser-bundle");
+  expect(releaseFetcher).toHaveBeenCalledWith("/index.html", expect.objectContaining({ cache: "no-store" }));
+  const nextRelease = "5e8da79282bd1dff93eb46486f28ca54367b097b";
+  releaseFetcher.mockImplementation(async () => releasePage(nextRelease));
+  const refresh = screen.getByRole("button", { name: "刷新数据" });
+  await waitFor(() => expect(refresh).toBeEnabled());
+  fireEvent.click(refresh);
+  await waitFor(() => expect(browserTraceReleases().at(-1)).toBe(nextRelease));
+  expect(screen.getAllByText(/当前发布（5e8da79282）/).length).toBeGreaterThan(0);
+});
 
 it("labels non-model operations by type instead of claiming a missing model", () => {
   expect(modelLabel({ ...trace, operation: "DELETE /api/words/{word_id}", model: null })).toBe("数据删除");
@@ -81,13 +105,16 @@ it('shows the configured model, rates and honest cost coverage', async () => {
 
 it("loads accounts independently after an overview error and refreshes the active view", async () => {
   let registered = 105;
+  let finishRefresh: (response: Response) => void = () => {};
+  const userPage = () => new Response(JSON.stringify({
+    items: [{ id: 1, email: "learner@example.test", display_name: "Learner",
+      created_at: "2026-10-30T00:00:00Z", last_active: null, sessions: 0, words: 0, practice: 0 }],
+    registered, total: registered, limit: 20, new_7d: 4, visitors: monitoring.visitors,
+    activation_24h: { eligible: 4, completed: 1 },
+    guest_activity: { hours: 168, active_browsers: 5, sessions: 8, pronunciation: 3, interviews: 2, word_collections: 4, word_reviews: 7 },
+  }));
   fetcher.mockImplementation(async (url: string) => url.includes("/users")
-    ? new Response(JSON.stringify({
-      items: [{ id: 1, email: "learner@example.test", display_name: "Learner",
-        created_at: "2026-10-30T00:00:00Z", last_active: null, sessions: 0, words: 0, practice: 0 }],
-      registered, total: registered, limit: 20, new_7d: 4, visitors: monitoring.visitors,
-      activation_24h: { eligible: 4, completed: 1 },
-    }))
+    ? userPage()
     : new Response("{}", { status: 500 }));
   show("overview");
   expect(await screen.findByText(/概览暂时无法加载/)).toBeVisible();
@@ -96,16 +123,27 @@ it("loads accounts independently after an overview error and refreshes the activ
   expect(await screen.findByText("learner@example.test")).toBeVisible();
   const metrics = screen.getByRole("region", { name: "用户指标" });
   expect(within(metrics).getByText("105")).toBeVisible();
-  expect(within(metrics).getByText("12")).toBeVisible();
   expect(within(metrics).getByText("3")).toBeVisible();
+  const guests = within(screen.getByRole("region", { name: "游客使用" }));
+  expect(guests.getByText("12")).toBeVisible();
+  expect(guests.getByText("8")).toBeVisible();
   expect(screen.getByText("25.0%")).toBeVisible();
   expect(screen.queryByRole("tab", { name: "浏览器体验" })).not.toBeInTheDocument();
-  registered = 106;
-  fireEvent.click(screen.getByRole("button", { name: "刷新数据" }));
-  expect(await within(metrics).findByText("106")).toBeVisible();
   fireEvent.change(screen.getByLabelText("搜索账号"), { target: { value: "learner" } });
   fireEvent.click(screen.getByRole("button", { name: /^搜索$/ }));
   await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).includes("search=learner"))).toBe(true));
+  const refresh = screen.getByRole("button", { name: "刷新数据" });
+  await waitFor(() => expect(refresh).toBeEnabled());
+  registered = 106;
+  fetcher.mockImplementation(() => new Promise<Response>(resolve => { finishRefresh = resolve; }));
+  fireEvent.click(refresh);
+  expect(refresh).toBeDisabled();
+  expect(screen.getByText("正在刷新用户数据…")).toBeVisible();
+  expect(within(metrics).getByText("105")).toBeVisible();
+  expect(String(fetcher.mock.lastCall?.[0])).toContain("search=learner");
+  await act(async () => finishRefresh(userPage()));
+  expect(await within(metrics).findByText("106")).toBeVisible();
+  expect(screen.getByText(/用户数据更新于/)).toBeVisible();
 });
 
 it("shows per-stage samples on the overview and opens playback diagnostics", async () => {
@@ -156,7 +194,7 @@ it("defaults the overview to actual server release and supports all/history scop
   expect(screen.getByText(/当前发布（server-cur/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "调用诊断" }));
   fireEvent.click(await screen.findByRole("tab", { name: "浏览器体验" }));
-  const browserRelease = String(import.meta.env.VITE_RELEASE ?? "unknown");
+  const browserRelease = deployedRelease;
   await waitFor(() => expect(fetcher.mock.calls.some(([url]) => {
     const value = String(url);
     return value.includes("source=browser") && releaseParam(value) === browserRelease;
@@ -195,7 +233,7 @@ it("keeps overview and diagnostics scopes independent", async () => {
   await waitFor(() => expect(screen.getByRole("tab", { name: "浏览器体验" })).toBeVisible());
   fireEvent.click(screen.getByRole("tab", { name: "浏览器体验" }));
   await waitFor(() => expect(fetcher.mock.calls.some(([url]) => {
-    const value = String(url); return value.includes("source=browser") && releaseParam(value) === String(import.meta.env.VITE_RELEASE ?? "unknown");
+    const value = String(url); return value.includes("source=browser") && releaseParam(value) === deployedRelease;
   })).toBe(true));
   fireEvent.click(screen.getByRole("button", { name: "运行概览" }));
   await waitFor(() => expect(fetcher.mock.calls.some(([url]) => {
@@ -245,13 +283,13 @@ it("uses the frontend release for playback drilldown while keeping the backend s
   await waitFor(() => expect(fetcher.mock.calls.some(([url]) => {
     const value = String(url); const params = new URL(value, "http://localhost").searchParams;
     return params.get("source") === "browser" && params.get("operation") === "speech.complete"
-      && params.get("release") === String(import.meta.env.VITE_RELEASE ?? "unknown")
+      && params.get("release") === deployedRelease
       && params.get("experience_server_release") === "server-current";
   })).toBe(true));
 });
 
 it("does not inherit the backend release for browser experience when frontend release is unknown", async () => {
-  vi.stubEnv("VITE_RELEASE", "unknown");
+  releaseFetcher.mockImplementation(async () => new Response("<title>Spoken</title>"));
   fetcher.mockImplementation(async (url: string) => {
     if (!String(url).includes("/overview")) return new Response(JSON.stringify({ items: [], total: 0 }));
     const params = new URL(String(url), "http://localhost").searchParams;

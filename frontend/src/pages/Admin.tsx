@@ -5,11 +5,11 @@ import { useAuth } from "../store/auth";
 import { EChart } from "../components/EChart";
 import { AdminUsers } from "../components/AdminUsers";
 import { modelLabel, referenceCost } from '../lib/adminFormatting';
-import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, type AdminExperience, type AdminFilters, type AdminOverview, type AdminTrace, type AdminTraffic } from "../lib/adminApi";
+import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, getDeployedBrowserRelease, type AdminExperience, type AdminFilters, type AdminOverview, type AdminTrace, type AdminTraffic } from "../lib/adminApi";
 import "../admin.css";
 
 const defaults: AdminFilters = { hours: 24, source: "server", operation: "", model: "", release: "", outcome: "", traffic: "unmarked", testRunId: "" };
-const frontendRelease = () => import.meta.env.VITE_RELEASE ?? "unknown";
+const knownRelease = (release: string | null) => release && release !== "unknown" ? release : undefined;
 type ReleaseMode = "current" | "all" | "history";
 const isTestRelease = (release: string) => /^(development|test|qa)([-_]|$)/i.test(release);
 const releaseLabel = (release: string) => release === "unknown" ? "未知版本" : isTestRelease(release) ? `测试 · ${release}` : release.slice(0, 10);
@@ -77,21 +77,22 @@ export default function Admin() {
   const [overviewReleaseMode, setOverviewReleaseMode] = useState<ReleaseMode>("current");
   const [diagnosticReleaseMode, setDiagnosticReleaseMode] = useState<ReleaseMode>("current");
   const [serverRelease, setServerRelease] = useState<string | null>(null);
+  const [publishedBrowserRelease, setPublishedBrowserRelease] = useState<{ scope: string; release: string } | null>(null);
   const diagnostics = view === "diagnostics";
   // Overview always keeps its own scope (server source, no business filters).
   // Diagnostics owns its source/operation/model/outcome and its own version.
-  const filters = diagnostics ? diagnosticFilters : overviewFilters;
+  const selectedFilters = diagnostics ? diagnosticFilters : overviewFilters;
   const releaseMode = diagnostics ? diagnosticReleaseMode : overviewReleaseMode;
   const setFilters = diagnostics ? setDiagnosticFilters : setOverviewFilters;
   const setReleaseMode = diagnostics ? setDiagnosticReleaseMode : setOverviewReleaseMode;
-  const [data, setData] = useState<AdminOverview | null>(null);
-  const [rows, setRows] = useState<AdminTrace[]>([]);
-  const [total, setTotal] = useState(0);
+  const [overviewData, setData] = useState<AdminOverview | null>(null);
+  const [traceRows, setRows] = useState<AdminTrace[]>([]);
+  const [traceTotal, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [slow, setSlow] = useState(false);
   const [revision, setRevision] = useState(0);
   const [overviewLoading, setOverviewLoading] = useState(false);
-  const [listLoading, setListLoading] = useState(false);
+  const [loadingList, setListLoading] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [refreshingAccount, setRefreshingAccount] = useState(false);
   const [error, setError] = useState("");
@@ -112,7 +113,27 @@ export default function Admin() {
   const canRead = Boolean(user?.is_admin);
   const userId = user?.id;
   const denied = deniedAccount !== null && deniedAccount === userId;
-  const loading = view !== "users" && (overviewLoading || listLoading);
+  const browserCurrent = diagnostics && selectedFilters.source === "browser" && releaseMode === "current";
+  const browserReleaseScope = canRead && !denied && (browserCurrent || (view === "overview" && releaseMode === "current"))
+    ? `${userId}:${view}:${revision}` : "";
+  const browserRelease = publishedBrowserRelease?.scope === browserReleaseScope ? publishedBrowserRelease.release : null;
+  const checkingBrowserRelease = Boolean(browserReleaseScope) && browserRelease === null;
+  const data = checkingBrowserRelease ? null : overviewData;
+  const rows = checkingBrowserRelease ? [] : traceRows;
+  const total = checkingBrowserRelease ? 0 : traceTotal;
+  const listLoading = checkingBrowserRelease || loadingList;
+  const filters = useMemo(() => browserCurrent
+    ? { ...selectedFilters, release: knownRelease(browserRelease) ?? "" }
+    : selectedFilters, [browserCurrent, browserRelease, selectedFilters]);
+  const loading = checkingBrowserRelease || overviewLoading || listLoading;
+  useEffect(() => {
+    if (!browserReleaseScope) { setPublishedBrowserRelease(null); return; }
+    const controller = new AbortController();
+    void getDeployedBrowserRelease(controller.signal).catch(() => "unknown").then(release => {
+      if (!controller.signal.aborted) setPublishedBrowserRelease({ scope: browserReleaseScope, release });
+    });
+    return () => controller.abort();
+  }, [browserReleaseScope]);
   const rejectAccess = useCallback(() => {
     scopeController.current?.abort();
     detailController.current?.abort();
@@ -134,21 +155,21 @@ export default function Admin() {
     } finally { if (!controller.signal.aborted) setDetailLoading(false); }
   }, [rejectAccess]);
 
-  const knownRelease = (release: string | null | undefined) => release && release !== "unknown" ? release : undefined;
   const EXPERIENCE_ALL = "__all";
   const currentServerRelease = releaseMode === "current"
     ? serverRelease === null ? undefined : serverRelease === "unknown" ? EXPERIENCE_ALL : serverRelease
     : releaseMode === "all" ? undefined : filters.release || undefined;
   const currentBrowserRelease = releaseMode === "current"
-    ? frontendRelease() === "unknown" ? EXPERIENCE_ALL : frontendRelease()
+    ? browserRelease === "unknown" ? EXPERIENCE_ALL : browserRelease ?? undefined
     : releaseMode === "all" ? undefined : filters.release || undefined;
   useEffect(() => {
+    if (checkingBrowserRelease) return;
     const controller = new AbortController();
     scopeController.current = controller;
     let live = true;
     const inspectFirst = openFirstFailure.current;
     openFirstFailure.current = false;
-    const scope = JSON.stringify([userId, view, releaseMode, filters.hours, filters.source, filters.operation, filters.model, filters.release, filters.traffic, filters.testRunId]);
+    const scope = JSON.stringify([userId, view, releaseMode, filters.hours, filters.source, filters.operation, filters.model, filters.release, filters.traffic, filters.testRunId, currentBrowserRelease]);
     const listScope = JSON.stringify([scope, filters.outcome, offset, slow]);
     const keepOverview = previousScope.current === scope && hasOverview.current;
     const keepList = previousList.current === listScope && hasList.current;
@@ -195,7 +216,7 @@ export default function Admin() {
         }).finally(() => { if (live) setListLoading(false); });
     } else { setOverviewLoading(false); setListLoading(false); }
     return () => { live = false; controller.abort(); detailController.current?.abort(); };
-  }, [canRead, denied, diagnostics, userId, view, releaseMode, filters, offset, slow, revision, rejectAccess, inspect, currentServerRelease, currentBrowserRelease, serverRelease, setFilters]);
+  }, [canRead, denied, diagnostics, userId, view, releaseMode, filters, offset, slow, revision, rejectAccess, inspect, currentServerRelease, currentBrowserRelease, serverRelease, setFilters, checkingBrowserRelease]);
 
   const operationOptions = [...new Set([filters.operation, ...(data?.facets?.operations ?? data?.operations ?? [])])].filter(Boolean);
   const update = (patch: Partial<AdminFilters>) => { setOffset(0); setFilters(old => ({ ...old, ...patch })); };
@@ -219,7 +240,7 @@ export default function Admin() {
   };
   const openPlaybackDiagnostics = () => {
     const release = overviewReleaseMode === "current"
-      ? knownRelease(frontendRelease()) ?? ""
+      ? ""
       : overviewReleaseMode === "all" ? "" : overviewFilters.release;
     setDiagnosticReleaseMode(overviewReleaseMode);
     setDiagnosticFilters({ ...overviewFilters, source: "browser", operation: "speech.complete", model: "", release, outcome: "" });
@@ -228,15 +249,16 @@ export default function Admin() {
     window.requestAnimationFrame(() => document.querySelector(".admin-traces")?.scrollIntoView?.({ block: "start" }));
   };
   const changeSource = (source: "server" | "browser") => {
+    if (source === filters.source) return;
     const release = releaseMode === "current"
-      ? source === "browser" ? knownRelease(frontendRelease()) ?? "" : knownRelease(serverRelease) ?? ""
+      ? source === "browser" ? "" : knownRelease(serverRelease) ?? ""
       : releaseMode === "all" ? "" : filters.release;
     update({ source, operation: "", model: "", release, outcome: "" });
   };
   const changeRelease = (value: string) => {
     if (value === "__current") {
       setReleaseMode("current");
-      update({ release: filters.source === "browser" ? knownRelease(frontendRelease()) ?? "" : knownRelease(serverRelease) ?? "" });
+      update({ release: filters.source === "browser" ? "" : knownRelease(serverRelease) ?? "" });
     } else if (value === "__all") {
       setReleaseMode("all");
       update({ release: "" });
@@ -246,9 +268,14 @@ export default function Admin() {
     }
   };
   const versionValue = releaseMode === "current" ? "__current" : releaseMode === "all" ? "__all" : filters.release;
+  const selectedRelease = filters.source === "browser" ? browserRelease : serverRelease;
   const versionLabel = releaseMode === "current"
-    ? `当前发布（${filters.source === "browser" ? releaseLabel(frontendRelease()) : serverRelease ? releaseLabel(serverRelease) : "读取中"}）`
+    ? `当前发布（${selectedRelease ? releaseLabel(selectedRelease) : "核对中"}）`
     : releaseMode === "all" ? "全部保留" : releaseLabel(filters.release);
+  const refresh = () => {
+    if (browserCurrent) setOffset(0);
+    setRevision(value => value + 1);
+  };
 
   const timeRange = <label className="admin-period">时间范围<select value={filters.hours}
     onChange={event => update({ hours: Number(event.target.value) })}>
@@ -293,9 +320,9 @@ export default function Admin() {
   return <main className="admin-page">
     <header className="admin-heading"><div><span className="admin-eyebrow"><ShieldCheck size={14} /> SPOKEN · 仅管理员可见</span>
       <h1>运行看板<span>服务表现与使用情况</span></h1></div>
-      <div className="admin-heading-actions">{data && <span className={`admin-collection-state ${!data.collection.active ? "" : data.collection.dropped_since_restart || data.collection.write_errors_since_restart ? "degraded" : "enabled"}`}><i />{!data.collection.active ? "采集未启用" : data.collection.dropped_since_restart || data.collection.write_errors_since_restart ? "采集有缺口" : "采集已启用"}</span>}
-        <button className="admin-refresh" disabled={loading} onClick={() => setRevision(v => v + 1)}><RefreshCw size={15} className={loading ? "admin-spinning" : undefined} />{loading ? "加载中…" : "刷新数据"}</button>
-      </div>
+      {view !== "users" && <div className="admin-heading-actions">{data && <span className={`admin-collection-state ${!data.collection.active ? "" : data.collection.dropped_since_restart || data.collection.write_errors_since_restart ? "degraded" : "enabled"}`}><i />{!data.collection.active ? "采集未启用" : data.collection.dropped_since_restart || data.collection.write_errors_since_restart ? "采集有缺口" : "采集已启用"}</span>}
+        <button className="admin-refresh" disabled={loading} onClick={refresh}><RefreshCw size={15} className={loading ? "admin-spinning" : undefined} />{loading ? "加载中…" : "刷新数据"}</button>
+      </div>}
     </header>
     <div className="admin-view-bar">
       <nav className="admin-view-nav" aria-label="运行看板分区">
@@ -304,25 +331,27 @@ export default function Admin() {
       </nav>
       {view === "overview" && <>{timeRange}{versionSelect}{trafficSelect}</>}
     </div>
-    {view === "users" ? <AdminUsers key={userId} revision={revision} onForbidden={rejectAccess} /> : <>
+    {view === "users" ? <AdminUsers key={userId} onForbidden={rejectAccess} /> : <>
     {diagnostics && <div className="admin-toolbar">
       <div role="tablist" aria-label="采集来源" className="admin-tabs">{(["server", "browser"] as const).map(source =>
         <button key={source} role="tab" aria-selected={filters.source === source} onClick={() => changeSource(source)}>{source === "server" ? "后端调用" : "浏览器体验"}</button>)}</div>
       {timeRange}{versionSelect}{trafficSelect}
       <label className="admin-operation">业务操作<select value={filters.operation} onChange={e => update({ operation: e.target.value })}><option value="">所有操作（混合样本）</option>{operationOptions.map(op => <option key={op} value={op}>{names[op] ?? op}</option>)}</select></label>
       {filters.source === "server" && <label>模型<select aria-label="模型" value={filters.model} onChange={e => update({ model: e.target.value })}><option value="">全部</option>{(data?.facets?.models ?? []).map(m => <option key={m}>{m}</option>)}</select></label>}
-      <span className={`admin-release-state ${releaseMode}`}>{versionLabel}</span>
+      <span className={`admin-release-state ${releaseMode}`} title={releaseMode === "current" ? selectedRelease ?? undefined : filters.release}>{versionLabel}</span>
     </div>}
     {filters.traffic === "test" && <TestRunFilter key={`${view}:${filters.testRunId}`} value={filters.testRunId}
       onApply={testRunId => update({ testRunId })} />}
-    <div className="admin-scope-caption"><span>{filters.operation ? names[filters.operation] ?? filters.operation : "全部业务概览"}{diagnostics && !filters.operation && " · 性能比较请先选同一种操作"} · {versionLabel}{filters.testRunId && ` · 批次 ${filters.testRunId}`}</span><span>{updatedAt ? `概览更新于 ${date(updatedAt)}` : "仅展示已采集的真实记录"}</span></div>
-    {!diagnostics && data?.count === 0 && releaseMode === "current" && <p className="admin-notice admin-empty-current" role="status">当前发布暂无可比较样本。可切换到「全部保留」或单个历史版本排障。</p>}
+    <div className="admin-scope-caption"><span>{filters.operation ? names[filters.operation] ?? filters.operation : "全部业务概览"}{diagnostics && !filters.operation && " · 性能比较请先选同一种操作"} · {versionLabel}{filters.testRunId && ` · 批次 ${filters.testRunId}`}</span>{!checkingBrowserRelease && <span>{updatedAt ? `概览更新于 ${date(updatedAt)}` : "仅展示已采集的真实记录"}</span>}</div>
+    {data?.count === 0 && releaseMode === "current" && knownRelease(selectedRelease) && <p className="admin-notice admin-empty-current" role="status">当前发布暂无可比较样本。可切换到「全部保留」或单个历史版本排障。</p>}
     {releaseMode === "current" && filters.source === "server" && serverRelease === "unknown" && <p className="admin-notice" role="status">后端当前版本未知，无法按「当前发布」比较；当前显示全部保留样本。</p>}
+    {checkingBrowserRelease && <p className="admin-loading" role="status">正在核对线上前端发布版本…</p>}
+    {browserRelease === "unknown" && browserReleaseScope && <p className="admin-notice" role="status">暂时无法确认线上前端版本。浏览器数据按全部保留版本显示。</p>}
     {diagnostics && <p className="admin-perspective">{filters.source === 'server'
       ? '服务端视角：接口收到请求至响应结束，看业务处理、模型调用和错误。「模型 / 类型」只在大模型调用时显示具体模型；读取、语音、写入和删除分别标为对应类型，只有 AI 调用缺失模型时才显示「AI 调用未记录」。'
       : '用户端视角：记录识别收尾、说完至首声、播放完成，包含网络、队列与播放等待。浏览器样本不提供后端模型或 Token，因此隐藏模型与费用区。'}</p>}
     {error && <p className="admin-notice" role="alert">{error}</p>}
-    {overviewError && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{overviewError}</span><button onClick={() => setRevision(v => v + 1)}>重试</button></p>}
+    {overviewError && !checkingBrowserRelease && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{overviewError}</span><button onClick={refresh}>重试</button></p>}
     {overviewLoading && !data && <p className="admin-loading" role="status">正在读取运行概览…</p>}
     {data && <>
       {filters.traffic !== "all" && !data.traffic_filter && <p className="admin-notice" role="status">此后端尚不支持流量筛选，当前展示全部流量。</p>}
@@ -374,7 +403,7 @@ export default function Admin() {
         <label><input type="checkbox" checked={slow} onChange={e => { setOffset(0); setSlow(e.target.checked); }} />优先查看慢请求</label>
         <select aria-label="调用状态" value={filters.outcome} onChange={e => update({ outcome: e.target.value })}><option value="">全部状态</option>{Object.entries(labels).map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select>
       </div></div>
-      {listError && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{listError}</span><button onClick={() => setRevision(v => v + 1)}>重试</button></p>}
+      {listError && !checkingBrowserRelease && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{listError}</span><button onClick={refresh}>重试</button></p>}
       <div className="admin-table-wrap" aria-busy={listLoading}><table><thead><tr><th>时间 · 北京</th><th>业务操作</th><th>状态</th><th>耗时</th>{filters.source === "server" && <><th>模型 / 类型</th><th>费用参考</th></>}<th>Trace</th></tr></thead><tbody>
         {rows.map(row => <tr key={row.trace_id} data-outcome={row.outcome}><td><time dateTime={row.started_at}>{date(row.started_at)}</time></td><td className="admin-operation-cell"><strong>{names[row.operation] ?? row.operation}</strong><small>版本 {releaseLabel(row.release)}</small></td><td><span className={`admin-badge ${row.outcome}`}>{labels[row.outcome] ?? row.outcome}</span></td><td className="admin-duration">{ms(row.duration_ms)}</td>{filters.source === "server" && <><td>{modelLabel(row)}</td><td className="admin-row-cost" title="按已采集用量与公开单价参考；未计价不代表零费用">{referenceCost(row.cost_min_cny, row.cost_max_cny)}</td></>}<td><button aria-label={`查看调用 ${row.trace_id.slice(0, 8)}`} onClick={() => void inspect(row.trace_id)}>{row.trace_id.slice(0, 8)} <ArrowRight size={14} /></button></td></tr>)}
         {!rows.length && <tr><td colSpan={filters.source === "server" ? 7 : 5} className="admin-empty">{listLoading ? "正在读取调用记录…" : listError ? "列表读取失败，可点击上方重试。" : "暂无调用记录。可切换业务操作、状态或时间范围；这里不会生成演示数据。"}</td></tr>}

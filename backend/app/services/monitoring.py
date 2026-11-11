@@ -96,9 +96,32 @@ def visitor_summary(db, *, hours=24):
         'at_capacity': retained >= settings.visitor_max_records}
 
 
+def guest_learning_summary(db, *, since, hours):
+    event = LearningEvent
+    categories = {
+        "sessions": event.event_type == "session",
+        "pronunciation": (event.event_type == "practice") & (event.kind == "pronunciation"),
+        "interviews": (event.event_type == "practice") & (event.kind == "interview"),
+        "word_collections": event.event_type == "word_collected",
+        "word_reviews": event.event_type == "word_reviewed",
+    }
+    counts = db.execute(select(
+        func.count(func.distinct(event.client_id)).label("active_browsers"),
+        *(func.count(case((condition, 1))).label(name) for name, condition in categories.items()),
+    ).where(
+        event.occurred_at >= since,
+        event.client_id != "",
+        func.lower(event.client_id) != "anon",
+        ~func.lower(event.client_id).startswith("u:"),
+        event.event_type.in_(("session", "practice", "word_collected", "word_reviewed")),
+    )).mappings().one()
+    return {"hours": hours, **counts}
+
+
 def registered_users(db, *, limit, offset, search, sort):
     now = utcnow()
-    week_ago = now - timedelta(days=7)
+    hours = 168
+    week_ago = now - timedelta(hours=hours)
     day = timedelta(hours=24)
     ordinary = ~select(AdminAccount.user_id).where(AdminAccount.user_id == User.id).exists()
     owner = literal("u:") + cast(User.id, String)
@@ -152,6 +175,7 @@ def registered_users(db, *, limit, offset, search, sort):
     return {
         "items": items, "registered": registered, "total": total, "limit": limit, "new_7d": new,
         "activation_24h": {"eligible": mature, "completed": activated},
-        "visitors": visitor_summary(db, hours=168),
+        "visitors": visitor_summary(db, hours=hours),
+        "guest_activity": guest_learning_summary(db, since=week_ago, hours=hours),
         "note": "访客数据按设备隔离且只保留哈希计数，无法反查具体身份。",
     }

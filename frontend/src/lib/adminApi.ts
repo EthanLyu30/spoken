@@ -17,6 +17,10 @@ export interface AdminVisitors {
   guest_uv: number | null; registered_active: number | null; enabled: boolean;
   started_at: string | null; hours: number; max_records: number; at_capacity: boolean;
 }
+export interface AdminGuestActivity {
+  hours: number; active_browsers: number; sessions: number; pronunciation: number;
+  interviews: number; word_collections: number; word_reviews: number;
+}
 export interface AdminExperience {
   stages: (Percentiles & { operation: string; samples: number })[];
   playback: {
@@ -45,6 +49,7 @@ export interface AdminUsersPage {
   items: AdminUser[]; registered: number; total: number; limit: number; new_7d: number;
   activation_24h: { eligible: number; completed: number };
   visitors: AdminVisitors;
+  guest_activity?: AdminGuestActivity;
 }
 export type AdminUserSort = "activity" | "registered";
 export interface AdminTrace {
@@ -62,6 +67,15 @@ export class AdminApiError extends Error {
 }
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+export async function getDeployedBrowserRelease(signal: AbortSignal): Promise<string> {
+  const response = await fetch(`${import.meta.env.BASE_URL}index.html`, {
+    cache: "no-store", signal: withTimeout(signal, 2_000),
+  });
+  if (!response.ok) return "unknown";
+  const html = new DOMParser().parseFromString(await response.text(), "text/html");
+  const release = html.querySelector<HTMLMetaElement>('meta[name="spoken-release"]')?.content;
+  return release && /^[a-f0-9]{40}$/i.test(release) ? release : "unknown";
+}
 async function read<T>(path: string, signal?: AbortSignal): Promise<T> {
   const token = getToken();
   const response = await fetch(`${BASE}/api/admin${path}`, {

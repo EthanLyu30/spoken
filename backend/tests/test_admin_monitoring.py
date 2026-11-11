@@ -161,6 +161,15 @@ def test_user_page_counts_all_accounts_and_sorts_by_durable_activity(client):
                           occurred_at=now - timedelta(days=1, minutes=106) + timedelta(microseconds=1)),
             LearningEvent(event_key="exactly-24h", client_id="u:5", event_type="practice",
                           occurred_at=now - timedelta(days=1, minutes=105)),
+            LearningEvent(event_key="guest-session", client_id="guest-a", event_type="session", occurred_at=now),
+            LearningEvent(event_key="guest-pronunciation", client_id="guest-a", event_type="practice",
+                          kind="pronunciation", occurred_at=now),
+            LearningEvent(event_key="guest-interview", client_id="guest-b", event_type="practice",
+                          kind="interview", occurred_at=now),
+            LearningEvent(event_key="guest-review", client_id="guest-b", event_type="word_reviewed", occurred_at=now),
+            LearningEvent(event_key="guest-collect", client_id="guest-b", event_type="word_collected", occurred_at=now),
+            LearningEvent(event_key="old-guest", client_id="guest-c", event_type="session", occurred_at=now - timedelta(days=8)),
+            LearningEvent(event_key="legacy-anon", client_id="anon", event_type="session", occurred_at=now),
         ])
         db.commit()
         queries = []
@@ -170,10 +179,15 @@ def test_user_page_counts_all_accounts_and_sorts_by_durable_activity(client):
         assert len(result["items"]) == 20
         assert result["items"][0]["id"] == 1
         assert result["activation_24h"] == {"eligible": 105, "completed": 2}
-        assert len(queries) <= 5
+        assert result["guest_activity"] == {
+            "hours": 168, "active_browsers": 2, "sessions": 1, "pronunciation": 1,
+            "interviews": 1, "word_collections": 1, "word_reviews": 1,
+        }
+        assert len(queries) <= 6
         filtered = list_users(db, limit=20, offset=0, search="u105@", sort="registered")
         assert filtered["registered"] == 105
         assert filtered["total"] == 1
+        assert filtered["guest_activity"] == result["guest_activity"]
         assert [user["id"] for user in filtered["items"]] == [105]
     engine.dispose()
 

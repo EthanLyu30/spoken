@@ -2,10 +2,17 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
+const deployedCommit = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
-  define: { "import.meta.env.VITE_RELEASE": JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA ?? "development") },
+  plugins: [react(), {
+    name: "spoken-release-marker",
+    transformIndexHtml() {
+      return deployedCommit ? [{ tag: "meta", attrs: { name: "spoken-release", content: deployedCommit }, injectTo: "head" }] : [];
+    },
+  }],
+  define: { "import.meta.env.VITE_RELEASE": JSON.stringify(deployedCommit || "development") },
   test: {
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
