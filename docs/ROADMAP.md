@@ -5,7 +5,8 @@
 2026-11-10 核对。游客进度迁移已随 PR #94 合并。双标签页、PostgreSQL 并发、旧后端丢响应和模式切换恢复已经在隔离环境通过。 [PR #94](https://github.com/EthanLyu30/spoken/pull/94) · [认领验收](performance/2026-11-10-shadow-claim-protocol.md)
 
 - [x] **游客认领模式 `1` 的线上冒烟**。用独立测试账号核对了注册前后相同的会话和收藏 ID，旧游客查询为空。迟到匿名写入返回 409，带新账号令牌重试成功。独立 HTTP 会话重新登录后能导出这些数据。测试账号已删除。 [发布 PR](https://github.com/EthanLyu30/spoken/pull/98) · [部署指南](DEPLOY.md)
-- [ ] **真实设备语音与手机验收**。Windows Chrome 和 Edge 已补测物理麦克风和系统回录首声，Chrome 文字对话离线重试通过。仍待验收物理麦克风的完整转写和句中停顿、通话中实际断网恢复及 iPhone Safari 真机。 [语音可靠性](VOICE_RELIABILITY.md) · [Chrome 声学记录](performance/2026-11-08-chrome-five-round-acoustic.md)
+- [x] **iPhone Safari 真机与物理麦克风验收**。2026-11-11，首页、实时通话、手动录音、回复实际出声和麦克风释放均通过。800 ms 句中停顿 **3/3** 保留尾句，页面每轮只显示一条用户消息。 [真机验收记录](VOICE_RELIABILITY.md#iphone-safari-真机验收)
+- **通话中实际断网恢复**。按要求跳过。 [语音验收记录](VOICE_RELIABILITY.md#iphone-safari-真机验收)
 - [x] **运行看板区分测试流量**。线上支持未标记、仅测试及全部流量，支持按批次 ID 查询，浏览器和后端保留上限分别显示。 [看板说明](admin-observability.md)
 - [x] **账号管理实现**。新增数据导出、密码确认后删除、邮箱验证和密码重置，核心链路已通过 SQLite 和 PostgreSQL 测试。线上已用测试账号验证导出、密码确认删除和删除后旧令牌失效。 [PR #97](https://github.com/EthanLyu30/spoken/pull/97)
 - [x] **生产邮件配置与收件验收**。2026-11-11，邮箱验证和密码重置邮件均在 Resend 显示 Delivered，QQ 测试邮箱实际收到两封。完整链接流程仍待线上验收，包括邮箱验证生效、实际改密，以及链接过期和单次使用。 [部署指南](DEPLOY.md)
