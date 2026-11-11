@@ -18,8 +18,8 @@ it("keeps playback status concise and hides the engine after a native failure", 
   expect(screen.getByRole("status")).toHaveTextContent("正在朗读");
   expect(screen.getByRole("status")).not.toHaveTextContent("实际声音");
   act(()=>playback.update({phase:"error",fallbackReason:"browser-start-failed"}));
-  expect(screen.getByRole("alert")).toHaveTextContent("朗读暂时不可用");
-  expect(screen.getByRole("alert")).not.toHaveTextContent("浏览器朗读未能完成");
+  expect(screen.getByRole("alert")).toHaveTextContent("朗读启动失败");
+  expect(screen.getByRole("alert")).not.toHaveTextContent("Google US English");
 });
 
 it("suppresses inline errors when the App owns the shared error alert",()=>{

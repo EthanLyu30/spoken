@@ -38,11 +38,11 @@ function expectNoCloudTts(){expect(fetcher.mock.calls.map(([url])=>String(url)).
 it("surfaces missing English voices from Daily, dismisses the error, and shows a fresh attempt again",async()=>{
   await openDaily();fireEvent.click(screen.getAllByRole("button",{name:"朗读"})[0]);
   await waitFor(()=>expect(useSpeechPlayback.getState().playback?.phase).toBe("error"));
-  expect(screen.getByRole("alert")).toHaveTextContent("朗读暂时不可用");
+  expect(screen.getByRole("alert")).toHaveTextContent("浏览器尚未提供英语音色");
   fireEvent.click(screen.getByRole("button",{name:"关闭朗读错误提示"}));
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   fireEvent.click(screen.getAllByRole("button",{name:"朗读"})[0]);
-  expect(await screen.findByRole("alert")).toHaveTextContent("朗读暂时不可用");expectNoCloudTts();
+  expect(await screen.findByRole("alert")).toHaveTextContent("浏览器尚未提供英语音色");expectNoCloudTts();
 }, 15000);
 it("surfaces a real native startup failure from the dictionary overlay without closing it",async()=>{
   voices=[{name:"English",voiceURI:"en",lang:"en-US"} as SpeechSynthesisVoice];
@@ -51,7 +51,11 @@ it("surfaces a real native startup failure from the dictionary overlay without c
   fireEvent.click(await within(dialog).findByRole("button",{name:"朗读"}));
   await waitFor(()=>expect(utterances).toHaveLength(1));
   act(()=>utterances[0].onerror?.({error:"synthesis-unavailable"}));
-  expect(await screen.findByRole("alert")).toHaveTextContent("朗读暂时不可用");
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("朗读启动失败");
+  expect(alert).toHaveTextContent("重试");
+  expect(alert).toHaveTextContent("更换英语音色");
+  expect(alert).not.toHaveTextContent("浏览器尚未提供英语音色");
   expect(dialog).toBeVisible();expectNoCloudTts();
 });
 it("places the shared error inside an open native modal and removes it on successful playback",async()=>{
@@ -60,7 +64,7 @@ it("places the shared error inside an open native modal and removes it on succes
   try {
     fireEvent.click(screen.getAllByRole("button",{name:"朗读"})[0]);await waitFor(()=>expect(utterances).toHaveLength(1));
     act(()=>utterances[0].onerror?.({error:"synthesis-unavailable"}));
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("朗读暂时不可用");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("朗读启动失败");
     fireEvent.click(within(dialog).getByRole("button",{name:"关闭朗读错误提示"}));expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button",{name:"朗读"})[0]);await waitFor(()=>expect(utterances).toHaveLength(2));
     await act(async()=>{utterances[1].onstart?.();utterances[1].onend?.();});

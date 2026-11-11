@@ -388,7 +388,6 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
           if (stopped) return;
           if (earlyPlayback.failed) {
             failed = true;
-            playback.update({fallbackReason:"browser-start-failed"});
             return;
           }
           const final = (await finalText).trim();
@@ -396,7 +395,6 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
           if (remainder && !stopped) {
             const remainderPlayback = await playBrowser(remainder, browserVoice);
             failed = remainderPlayback.failed && !stopped;
-            if (failed) playback.update({fallbackReason:"browser-start-failed"});
           }
           completed = !stopped && !failed;
           return;
@@ -455,7 +453,6 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
         playback.update({effectiveEngine:null,voice:null,fallbackReason:"browser-unavailable"});
         return;
       }
-      if (failed && engine === "browser") playback.update({fallbackReason:"browser-start-failed"});
       completed = !stopped;
     } catch (error) {
       failed = !stopped;
@@ -463,6 +460,9 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
     } finally {
       controller.abort(); // Also releases unused/pending browser discovery.
       settled = true;
+      if (!stopped && failed && engine === "browser" && firstAt === undefined) {
+        playback.update({fallbackReason:"browser-start-failed"});
+      }
       playback.update({phase:stopped ? "cancelled" : failed || (buffered.trim() && firstAt === undefined) ? "error" : "completed"});
       if (buffered.trim()) {
         const finishedAt = performance.now();

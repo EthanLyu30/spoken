@@ -7,6 +7,9 @@ function PlaybackMessage({ playback }: { playback: SpeechPlayback }) {
     if (playback.fallbackReason === "browser-unavailable") {
       return <p>朗读暂时不可用：浏览器尚未提供英语音色。请稍后重试，或检查设备的英语语音设置。</p>;
     }
+    if (playback.fallbackReason === "browser-start-failed") {
+      return <p>朗读启动失败。请再次点击朗读重试，或在语音设置中更换英语音色。</p>;
+    }
     return <p>朗读暂时不可用，可继续文字练习。</p>;
   }
   if (playback.fallbackReason === "browser-voice-unavailable") {

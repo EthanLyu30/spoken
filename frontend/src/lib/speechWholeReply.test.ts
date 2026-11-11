@@ -384,6 +384,7 @@ it("never replays an online voice that already started, even with a local fallba
   await done;
   expect(utterances).toHaveLength(1);
   expect(q.failed).toBe(true);
+  expect(q.status?.fallbackReason).not.toBe("browser-start-failed");
 });
 
 it("stops after one failed local recovery rather than cycling through voices", async () => {

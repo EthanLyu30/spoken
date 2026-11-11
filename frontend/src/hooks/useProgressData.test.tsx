@@ -88,11 +88,17 @@ it("retains readable session insights and radar when a manual refresh fails", as
   expect(result.current.latest?.scores[0].score).toBe(80);
   expect(result.current.insights?.available).toBe(false);
   expect(result.current.insightsPending).toBe(false);
-  api.getProgressSessions.mockReturnValueOnce(new Promise(() => {}));
+  let finishRetry!: (value: ReturnType<typeof overview>) => void;
+  api.getProgressSessions.mockReturnValueOnce(new Promise(resolve => { finishRetry = resolve; }));
   act(() => result.current.reload());
   expect(result.current.sessionsPending).toBe(true);
   expect(result.current.sessions).toEqual([session]);
   expect(result.current.latest?.scores[0].score).toBe(80);
+  const refreshedSession = { ...session, id: 2 };
+  await act(async () => finishRetry(overview([refreshedSession])));
+  expect(result.current.sessions).toEqual([refreshedSession]);
+  expect(result.current.errors).not.toContain("sessions");
+  expect(result.current.sessionsPending).toBe(false);
 });
 it("never displays or accepts the previous owner's late response", async () => {
   let resolve!: (value: ReturnType<typeof overview>) => void;

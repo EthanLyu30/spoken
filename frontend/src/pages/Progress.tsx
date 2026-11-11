@@ -62,6 +62,12 @@ export default function Progress() {
     reload,
   } = data;
   const [filter, setFilter] = useState("all");
+  const sessionsFailed = errors.includes("sessions");
+  const practiceFailed = errors.includes("practice");
+  const includesSessions = filter === "all" || filter === "session";
+  const includesPractice = filter !== "session";
+  const historyFailed = (includesSessions && sessionsFailed) || (includesPractice && practiceFailed);
+  const historyPending = (includesSessions && data.sessionsPending) || (includesPractice && data.practicePending);
   const [radarOpen, setRadarOpen] = useState(false);
   const [review, setReview] = useState<{
     owner: string;
@@ -247,7 +253,7 @@ export default function Progress() {
             note={
               sessions.length
                 ? "最近 " + sessions.length + " 次场景对话"
-                : "完成场景对话后点亮"
+                : sessionsFailed ? "场景记录暂时无法加载" : "完成场景对话后点亮"
             }
           />
           <Metric
@@ -260,7 +266,7 @@ export default function Progress() {
                 ? interviewSummary.scale === 5
                   ? "新版 " + interviewSummary.count + " 次 · 内容参考分" + (interviewSummary.legacyCount ? "；旧版 " + interviewSummary.legacyCount + " 次未混入" : "")
                   : "旧版 " + interviewSummary.count + " 次 · 保留原分制"
-                : "从一组主题访谈开始"
+                : practiceFailed ? "访谈记录暂时无法加载" : "从一组主题访谈开始"
             }
           />
           <Metric
@@ -333,14 +339,18 @@ export default function Progress() {
               <div className="learning-chart-empty">
                 <ChartNoAxesCombined />
                 <p>
-                  {status === "loading"
-                    ? "正在读取练习记录…"
-                    : "第一条曲线，从第一次开口开始。"}
+                  {sessionsFailed
+                    ? "场景对话记录暂时无法加载。"
+                    : data.sessionsPending
+                      ? "正在读取练习记录…"
+                      : "第一条曲线，从第一次开口开始。"}
                 </p>
-                <Link to="/scenes">
-                  去选一个熟悉的场景
-                  <ArrowRight size={14} />
-                </Link>
+                {!sessionsFailed && !data.sessionsPending && (
+                  <Link to="/scenes">
+                    去选一个熟悉的场景
+                    <ArrowRight size={14} />
+                  </Link>
+                )}
               </div>
             )}
             <p className="learning-footnote">
@@ -392,9 +402,11 @@ export default function Progress() {
               <div className="learning-skills-empty">
                 <Buddy size={68} />
                 <p>
-                  {!insights && !errors.includes("insights")
-                    ? "能力分析会在记录加载后补齐。"
-                    : "完成一段场景对话，就能找到值得继续练的一项。"}
+                  {errors.includes("insights")
+                    ? "暂时无法加载能力分析。"
+                    : !insights
+                      ? "能力分析会在记录加载后补齐。"
+                      : "完成一段场景对话，就能找到值得继续练的一项。"}
                 </p>
               </div>
             )}
@@ -478,17 +490,26 @@ export default function Progress() {
             </ul>
           ) : (
             <div className="learning-history-empty">
-              <Buddy size={70} />
-              <h3>
-                {status === "loading" || data.practicePending
-                  ? "正在找回你的练习记录…"
-                  : "这里，等你的第一次开口。"}
-              </h3>
-              <p>场景对话、访谈和跟读练习都会汇集在这里。</p>
-              <Link to="/interview" className="ui-link">
-                试试一组主题访谈
-                <ArrowRight size={15} />
-              </Link>
+              {historyFailed ? (
+                <>
+                  <div role="status"><h3>学习记录加载失败</h3></div>
+                  <button type="button" className="ui-secondary" onClick={reload}>
+                    重试加载记录
+                  </button>
+                </>
+              ) : historyPending ? (
+                <div role="status"><h3>正在找回你的练习记录…</h3></div>
+              ) : (
+                <>
+                  <Buddy size={70} />
+                  <h3>这里，等你的第一次开口。</h3>
+                  <p>场景对话、访谈和跟读练习都会汇集在这里。</p>
+                  <Link to="/interview" className="ui-link">
+                    试试一组主题访谈
+                    <ArrowRight size={15} />
+                  </Link>
+                </>
+              )}
             </div>
           )}
         </section>
