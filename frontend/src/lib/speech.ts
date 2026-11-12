@@ -203,8 +203,15 @@ function speakBrowser(text: string, settings: VoiceSettings, voice: SpeechSynthe
     reportTerminal("end", undefined, stateAtEvent);
   };
   utterance.onerror = event => {
-    if (started) failTerminal("native_error", event?.error ?? "unknown");
-    else failStartup("speech_error", event?.error ?? "unknown");
+    const error = event?.error ?? "unknown";
+    if (error === "canceled" || error === "interrupted") {
+      if (finished) return;
+      const stateAtEvent = state();
+      finish();
+      if (started) reportTerminal("cancelled", error, stateAtEvent);
+      else reportStart("cancelled", error, stateAtEvent);
+    } else if (started) failTerminal("native_error", error);
+    else failStartup("speech_error", error);
   };
   startupTimer = window.setTimeout(() => failStartup("startup_timeout"), 5_000);
   try {
@@ -317,9 +324,11 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
     markStarted();
   };
   const reportNativeStart = (duration: number, diagnostic: NativeDiagnostic, outcome: "ok" | "error" | "cancelled") => {
+    if (outcome === "cancelled") stopped = true;
     reportTiming("speech.native_start", duration, {engine: "browser", transport: "unknown", interactionId, outcome, ...diagnostic});
   };
   const reportNativeEnd = (duration: number, diagnostic: NativeEndDiagnostic, outcome: "ok" | "error" | "cancelled") => {
+    if (outcome === "cancelled") stopped = true;
     reportTiming("speech.native_end", duration, {engine: "browser", transport: "unknown", interactionId, outcome, ...diagnostic});
   };
   let browserRecovery: NativeDiagnostic | undefined;

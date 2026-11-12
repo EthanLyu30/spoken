@@ -8,7 +8,9 @@ import logging
 import math
 import hashlib
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -69,12 +71,30 @@ def configured_bootstrap_admin():
         logging.getLogger(__name__).warning('Administrator bootstrap unavailable: %s', type(exc).__name__)
 
 
+def source_budgets():
+    maximum = get_settings().telemetry_max_records
+    server = maximum * 3 // 4
+    return {"server": server, "browser": maximum - server}
+
+
+def retained_sources(db):
+    rows = {source: (count, oldest) for source, count, oldest in db.execute(
+        select(TelemetryRecord.source, func.count(), func.min(TelemetryRecord.started_at))
+        .group_by(TelemetryRecord.source)
+    )}
+    sources = {}
+    for source, budget in source_budgets().items():
+        count, oldest = rows.get(source, (0, None))
+        sources[source] = {"source_budget": budget, "retained": count, "at_capacity": count >= budget,
+                           "oldest_at": oldest.isoformat(timespec="seconds") + "Z" if oldest else None}
+    return sources
+
+
 def _prune_traces(db, now) -> None:
     settings = get_settings()
     cutoff = now - timedelta(days=settings.telemetry_retention_days)
     db.execute(delete(TelemetryRecord).where(TelemetryRecord.started_at < cutoff))
-    server_budget = settings.telemetry_max_records * 3 // 4
-    for source, budget in (("server", server_budget), ("browser", settings.telemetry_max_records - server_budget)):
+    for source, budget in source_budgets().items():
         oldest = db.scalar(select(TelemetryRecord.id).where(TelemetryRecord.source == source)
             .order_by(TelemetryRecord.id.desc()).offset(budget).limit(1))
         if oldest is not None:
@@ -83,8 +103,9 @@ def _prune_traces(db, now) -> None:
 
 def persist_batch(records: list[dict]) -> None:
     with SessionLocal() as db:
-        db.add_all(TelemetryRecord(**r) for r in records)
-        db.flush()
+        if records:
+            insert = sqlite_insert if db.get_bind().dialect.name == "sqlite" else pg_insert
+            db.execute(insert(TelemetryRecord).on_conflict_do_nothing(index_elements=["trace_id"]), records)
         _prune_traces(db, datetime.now(timezone.utc).replace(tzinfo=None))
         db.commit()
 
@@ -290,6 +311,8 @@ def serialize(record, *, detail=False):
     out = {key: getattr(record, key) for key in ("trace_id", "interaction_id", "operation", "source", "outcome", "duration_ms",
         "http_status", "ttft_ms", "model", "input_tokens", "output_tokens", "release",
         "error_type", "error_cause_type", "test_run_id")}
+    if record.guest_subject_hash and not record.test_run_id:
+        out["audience"] = "guest"
     out["started_at"] = record.started_at.isoformat(timespec="milliseconds") + "Z"
     spans = None
     if detail or not out["model"]:

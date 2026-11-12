@@ -13,7 +13,7 @@ from app.db import get_db
 from app.models.user import User
 from app.models.telemetry import TelemetryRecord
 from app.services.monitoring import registered_users
-from app.services.telemetry import conditions, experience_summary, is_admin, overview, serialize
+from app.services.telemetry import conditions, experience_summary, is_admin, overview, retained_sources, serialize
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -64,16 +64,11 @@ def _overview(request, options, db, include_experience=False,
             traffic=options["traffic"], test_run_id=options["test_run_id"],
         )
     sink = getattr(request.app.state, "telemetry_sink", None)
-    oldest = db.scalar(select(func.min(TelemetryRecord.started_at)))
-    counts = dict(db.execute(select(TelemetryRecord.source, func.count()).group_by(TelemetryRecord.source)).all())
     max_records = get_settings().telemetry_max_records
-    server_budget = max_records * 3 // 4
-    sources = {source: {"source_budget": budget, "at_capacity": counts.get(source, 0) >= budget}
-               for source, budget in (("server", server_budget), ("browser", max_records - server_budget))}
+    sources = retained_sources(db)
     data["collection"] = {"retention_days": get_settings().telemetry_retention_days,
         "max_records": max_records,
         **sources[options["source"]], "sources": sources,
-        "oldest_at": oldest.isoformat() + "Z" if oldest else None,
         "dropped_since_restart": sink.dropped if sink else 0,
         "write_errors_since_restart": sink.write_errors if sink else 0,
         "active": sink is not None and get_settings().telemetry_enabled}
@@ -86,11 +81,12 @@ def _overview(request, options, db, include_experience=False,
 
 
 @router.get("/users", dependencies=[Depends(get_admin_user)])
-def list_users(db: Session = Depends(get_db), *, limit: int = Query(100, ge=1, le=100),
+async def list_users(request: Request, db: Session = Depends(get_db), *, limit: int = Query(100, ge=1, le=100),
                offset: int = Query(0, ge=0, le=100000),
                search: str = Query("", max_length=255),
                sort: Literal["activity", "registered"] = "activity"):
-    return registered_users(db, limit=limit, offset=offset, search=search.strip(), sort=sort)
+    await flush(request)
+    return await asyncio.to_thread(registered_users, db, limit=limit, offset=offset, search=search.strip(), sort=sort)
 
 
 @router.get("/traces", dependencies=[Depends(get_admin_user)])

@@ -631,6 +631,7 @@ export default function Conversation() {
             else
               setMessages((m) => [...m, { role: "assistant", content: full }]);
             await queue.end(mutedRef.current ? "" : full);
+            if (queue.status?.phase === "cancelled") return "cancelled";
             if (queue.failed) throw new Error("语音播放失败，请点击回复旁的朗读按钮重试。");
           } catch (err) {
             queue.stop();
@@ -658,6 +659,7 @@ export default function Conversation() {
               });
               try {
                 await fallback.end(mutedRef.current ? "" : r.reply);
+                if (fallback.status?.phase === "cancelled") return "cancelled";
                 if (fallback.failed) throw new Error("语音播放失败，请点击回复旁的朗读按钮重试。");
               } finally {
                 signal.removeEventListener("abort", cancelFallback);

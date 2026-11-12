@@ -112,6 +112,12 @@ it("loads accounts independently after an overview error and refreshes the activ
     registered, total: registered, limit: 20, new_7d: 4, visitors: monitoring.visitors,
     activation_24h: { eligible: 4, completed: 1 },
     guest_activity: { hours: 168, active_browsers: 5, sessions: 8, pronunciation: 3, interviews: 2, word_collections: 4, word_reviews: 7 },
+    guest_requests: { first_sample_at: "2026-10-30T02:00:00Z", at_capacity: true, windows: [
+      { hours: 24, active_browsers: 6, requests: 27, failed: 2, cancelled: 1,
+        by_kind: { dialogue: 16, asr: 7, pronunciation: 1, interview: 1, feedback: 2 } },
+      { hours: 168, active_browsers: 12, requests: 91, failed: 4, cancelled: 3,
+        by_kind: { dialogue: 54, asr: 21, pronunciation: 6, interview: 4, feedback: 6 } },
+    ] },
   }));
   fetcher.mockImplementation(async (url: string) => url.includes("/users")
     ? userPage()
@@ -126,6 +132,12 @@ it("loads accounts independently after an overview error and refreshes the activ
   expect(within(metrics).getByText("3")).toBeVisible();
   const guests = within(screen.getByRole("region", { name: "游客使用" }));
   expect(guests.getByText("12")).toBeVisible();
+  expect(guests.getByText("8")).toBeVisible();
+  const requests = within(guests.getByRole("region", { name: "游客练习请求" }));
+  expect(requests.getByText("27")).toBeVisible();
+  expect(requests.getByText(/后端请求达到保留上限/)).toBeVisible();
+  fireEvent.click(requests.getByRole("button", { name: "近 7 天" }));
+  expect(requests.getByText("91")).toBeVisible();
   expect(guests.getByText("8")).toBeVisible();
   expect(screen.getByText("25.0%")).toBeVisible();
   expect(screen.queryByRole("tab", { name: "浏览器体验" })).not.toBeInTheDocument();
@@ -645,8 +657,46 @@ it("aborts in-flight reads and hides private results on logout", async () => {
 it("looks up a known Trace ID even when it is not in the current table", async () => {
   show(); await screen.findByText(/暂无调用记录/);
   fireEvent.change(screen.getByLabelText("Trace ID"), { target: { value: trace.trace_id } });
+  const lookup = screen.getByRole("button", { name: "查找调用" });
+  lookup.focus();
+  fireEvent.click(lookup);
+  const detail = await screen.findByRole("complementary", { name: "调用详情" });
+  expect(within(detail).getByRole("button", { name: "关闭调用详情" })).toHaveFocus();
+  fireEvent.keyDown(detail, { key: "Escape" });
+  expect(detail).not.toBeInTheDocument();
+  expect(lookup).toHaveFocus();
+});
+
+it("switches diagnostics sources using keyboard tabs with a labelled panel", async () => {
+  show();
+  const server = screen.getByRole("tab", { name: "后端调用" });
+  const browser = screen.getByRole("tab", { name: "浏览器体验" });
+  expect(server.tabIndex).toBe(0);
+  expect(browser.tabIndex).toBe(-1);
+  server.focus();
+  fireEvent.keyDown(server, { key: "ArrowRight" });
+  expect(browser).toHaveFocus();
+  expect(browser).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByRole("tabpanel", { name: "浏览器体验" })).toBeInTheDocument();
+  await screen.findByRole("region", { name: "调用记录表格" });
+  fireEvent.keyDown(browser, { key: "Home" });
+  expect(server).toHaveFocus();
+  expect(server).toHaveAttribute("aria-selected", "true");
+});
+
+it("describes an empty direct ASR result without blaming user cancellation", async () => {
+  const failure = { ...trace, source: "browser", operation: "asr.transcribe", outcome: "error", http_status: null,
+    spans: [{ ...trace.spans[0], name: "asr.transcribe", outcome: "error",
+      attributes: { engine: "xfyun", transport: "direct", asr_reason: "empty" } }] };
+  fetcher.mockImplementation(async (url: string) => Response.json(url.includes("/overview") ? overview
+    : url.includes(`/traces/${trace.trace_id}`) ? failure : { items: [], total: 0 }));
+  show();
+  await screen.findByText(/暂无调用记录/);
+  fireEvent.change(screen.getByLabelText("Trace ID"), { target: { value: trace.trace_id } });
   fireEvent.click(screen.getByRole("button", { name: "查找调用" }));
-  expect(await screen.findByRole("complementary", { name: "调用详情" })).toBeVisible();
+  const detail = within(await screen.findByRole("complementary", { name: "调用详情" }));
+  expect(detail.getByText(/识别未返回文字/)).toBeVisible();
+  expect(detail.getByText("识别结果分类")).toBeVisible();
 });
 
 it("rejects malformed Trace IDs before requesting a private detail", async () => {

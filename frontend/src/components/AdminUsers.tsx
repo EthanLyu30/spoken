@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, RefreshCw, Search, Users } from "lucide-react";
-import { AdminApiError, getAdminUsers, type AdminUsersPage, type AdminUserSort } from "../lib/adminApi";
+import { AdminApiError, getAdminUsers, type AdminGuestRequests, type AdminUsersPage, type AdminUserSort } from "../lib/adminApi";
 
 const dateTime = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
@@ -10,6 +10,42 @@ const updateTime = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
 });
 const count = (value?: number | null) => value == null ? "—" : value.toLocaleString("zh-CN");
+
+const guestRequestLabels = {
+  dialogue: "对话（含开场）", asr: "识别授权与录音识别", pronunciation: "跟读评分",
+  interview: "面试评分", feedback: "纠错、提示与小结",
+} as const;
+
+function GuestRequests({ data }: { data: AdminGuestRequests }) {
+  const [hours, setHours] = useState(24);
+  const scope = data.windows.find(window => window.hours === hours);
+  return <section className="admin-guest-requests" aria-labelledby="admin-guest-requests-title">
+    <div className="admin-panel-heading">
+      <h3 id="admin-guest-requests-title">游客练习请求</h3>
+      <div className="admin-tabs admin-guest-period" role="group" aria-label="游客请求时间范围">
+        <button type="button" aria-pressed={hours === 24} onClick={() => setHours(24)}>近 24 小时</button>
+        <button type="button" aria-pressed={hours === 168} onClick={() => setHours(168)}>近 7 天</button>
+      </div>
+    </div>
+    {scope && <div aria-live="polite">
+      <dl className="admin-voice-summary">
+        <div><dt>发起请求的游客浏览器</dt><dd>{count(scope.active_browsers)}</dd></div>
+        <div><dt>练习请求</dt><dd>{count(scope.requests)}</dd></div>
+        <div><dt>失败或超时</dt><dd>{count(scope.failed)}</dd></div>
+        <div><dt>已取消</dt><dd>{count(scope.cancelled)}</dd></div>
+      </dl>
+      {scope.requests > 0 && <dl className="admin-guest-breakdown">
+        {Object.entries(guestRequestLabels).map(([kind, label]) => <div key={kind}>
+          <dt>{label}</dt><dd>{count(scope.by_kind[kind as keyof typeof guestRequestLabels])}</dd>
+        </div>)}
+      </dl>}
+    </div>}
+    <p className="admin-panel-caption">统计保留的匿名练习 HTTP 请求。排除标记测试、带登录凭据及缺少浏览器标识的请求。重试按请求计数，设备直连和浏览器本地操作只覆盖经过本站的 HTTP 阶段。</p>
+    {!data.first_sample_at && <p className="admin-panel-caption" role="status">尚未采集到可归属的游客请求，历史调用未补算。</p>}
+    {data.first_sample_at && <p className="admin-panel-caption">近 7 天最早保留样本 {dateTime.format(new Date(data.first_sample_at))}（北京时间）。</p>}
+    {data.at_capacity && <p className="admin-notice" role="status">后端请求达到保留上限，所选时间范围可能不完整。</p>}
+  </section>;
+}
 
 export function AdminUsers({ onForbidden }: { onForbidden: () => void }) {
   const [result, setResult] = useState<{ scope: string; data: AdminUsersPage; at: Date } | null>(null);
@@ -83,12 +119,12 @@ export function AdminUsers({ onForbidden }: { onForbidden: () => void }) {
       <div className="admin-activation-value"><strong>{activationRate}</strong><small>{maturationNote}</small></div>
     </section>
     <section className="admin-panel admin-guest-activity" aria-labelledby="admin-guest-title">
-      <div className="admin-panel-heading"><h2 id="admin-guest-title">游客使用</h2><span>近 7 天</span></div>
+      <div className="admin-panel-heading"><h2 id="admin-guest-title">游客使用</h2><span>访问与保存 · 近 7 天</span></div>
       <dl className="admin-voice-summary">
         <div><dt>未登录访客浏览器</dt><dd>{count(visitors?.guest_uv)}</dd></div>
         <div><dt>有学习记录的游客浏览器</dt><dd>{count(guestActivity?.active_browsers)}</dd></div>
         <div><dt>保存的场景会话</dt><dd>{count(guestActivity?.sessions)}</dd></div>
-        <div><dt>跟读 / 面试</dt><dd>{count(guestActivity?.pronunciation)} / {count(guestActivity?.interviews)}</dd></div>
+        <div><dt>保存的跟读 / 面试</dt><dd>{count(guestActivity?.pronunciation)} / {count(guestActivity?.interviews)}</dd></div>
         <div><dt>收藏生词 / 复习记录</dt><dd>{count(guestActivity?.word_collections)} / {count(guestActivity?.word_reviews)}</dd></div>
       </dl>
       <p className="admin-panel-caption">访客按浏览器标识去重。练习统计基于仍归游客的学习记录，注册迁移后归入账号统计。</p>
@@ -97,6 +133,7 @@ export function AdminUsers({ onForbidden }: { onForbidden: () => void }) {
         {!visitors.enabled ? "访客采集未启用，显示已保留的历史访问。" : visitors.at_capacity
           ? "访客记录达到保留上限，显示已保留的访问。" : "暂未取得访客访问数据。"}
       </p>}
+      {summary?.guest_requests && <GuestRequests data={summary.guest_requests} />}
     </section>
     <section className="admin-panel admin-users" aria-label="注册账号列表" aria-busy={loading}>
       <div className="admin-panel-heading"><h2><Users size={16} />注册账号 <span>{page ? `${count(total)} 人` : ""}</span></h2></div>

@@ -369,7 +369,7 @@ it.each(["not-allowed", "interrupted", "canceled"])("does not switch voices afte
   utterances[0].onerror?.({error});
   await done;
   expect(utterances).toHaveLength(1);
-  expect(q.failed).toBe(true);
+  expect(q.failed).toBe(error === "not-allowed");
 });
 
 it("never replays an online voice that already started, even with a local fallback available", async () => {
@@ -665,6 +665,23 @@ it("retains a native failure diagnostic and failed final outcome", async () => {
   const q=createSpeechQueue();const done=q.end("Whole reply.");await vi.waitFor(()=>expect(utterances).toHaveLength(1));utterances[0].onerror?.();await done;
   expect(samples.filter(s=>s.operation==="speech.native_start")).toEqual([expect.objectContaining({reason:"speech_error",error_code:"unknown",outcome:"error"})]);
   expect(q.failed).toBe(true);expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
+});
+
+it.each(["canceled", "interrupted"])("records a browser %s event as an interruption rather than failed playback", async error => {
+  const q = createSpeechQueue();
+  const done = q.end("A whole reply.");
+  await vi.waitFor(() => expect(utterances).toHaveLength(1));
+  if (error === "interrupted") utterances[0].onstart?.();
+  utterances[0].onerror?.({ error });
+  await done;
+  expect(q.failed).toBe(false);
+  expect(q.status?.phase).toBe("cancelled");
+  expect(samples).toContainEqual(expect.objectContaining({
+    operation: error === "interrupted" ? "speech.native_end" : "speech.native_start",
+    outcome: "cancelled", reason: "cancelled", error_code: error,
+  }));
+  expect(samples).toContainEqual(expect.objectContaining({ operation: "speech.complete", outcome: "cancelled" }));
+  expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
 });
 it("prepares discovery independently of active playback and consumes current preferences", async () => {
   mocks.settings.engine = "browser";

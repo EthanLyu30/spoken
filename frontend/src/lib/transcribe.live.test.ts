@@ -36,7 +36,7 @@ describe("live ASR recovery", () => {
     live.send(pcm);
 
     await expect(live.finish(pcm)).resolves.toBe("complete transcript");
-    expect(mocks.postAsr).toHaveBeenCalledWith(pcm, undefined, expect.any(Function));
+    expect(mocks.postAsr).toHaveBeenCalledWith(pcm, expect.any(AbortSignal), expect.any(Function));
   });
 
   it("requires confirmation of a partial when complete-recording recovery also fails", async () => {

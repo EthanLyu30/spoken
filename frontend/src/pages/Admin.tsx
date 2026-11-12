@@ -20,7 +20,19 @@ const views = [
 ] as const;
 const labels: Record<string, string> = { ok: "成功", error: "失败", timeout: "超时", cancelled: "已取消" };
 const spanLabels: Record<string, string> = { ...labels, incomplete: "未完成" };
+const asrReasonLabels: Record<string, string> = {
+  empty: "识别未返回文字。单凭空转写无法判断麦克风输入或供应商的状态。",
+  incomplete: "识别只取得部分转写，需确认或重录。",
+  timeout: "识别等待超时。此记录由识别期限触发。",
+  disconnect: "识别连接断开或网络请求失败。",
+  provider_error: "识别供应商返回错误。可用数值错误码核对原因。",
+  http_error: "整段录音识别的 HTTP 请求失败。",
+  unavailable: "识别通道暂不可用。",
+  cancelled: "录音或识别任务已取消。取消动作的触发来源未采集。",
+  unknown: "未采集到可分类的识别失败原因。",
+};
 const measurementLabels: Record<string, string> = {
+  asr_reason: "识别结果分类", provider_code: "供应商错误码",
   llm_tcp: "模型 TCP 建连（ms）", llm_tls: "模型 TLS 握手（ms）",
   llm_headers: "等待模型响应头阶段（ms）", llm_response_headers: "模型请求至响应头（ms）",
   llm_first_event: "模型首个非空响应行（ms）", llm_first_text: "模型请求至首字（ms）",
@@ -103,6 +115,7 @@ export default function Admin() {
   const [traceLookup, setTraceLookup] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
   const detailController = useRef<AbortController | null>(null);
+  const detailTrigger = useRef<HTMLElement | null>(null);
   const openFirstFailure = useRef(false);
   const scopeController = useRef<AbortController | null>(null);
   const previousScope = useRef("");
@@ -125,6 +138,7 @@ export default function Admin() {
   const filters = useMemo(() => browserCurrent
     ? { ...selectedFilters, release: knownRelease(browserRelease) ?? "" }
     : selectedFilters, [browserCurrent, browserRelease, selectedFilters]);
+  const sourceRetention = data?.collection.sources?.[filters.source];
   const loading = checkingBrowserRelease || overviewLoading || listLoading;
   useEffect(() => {
     if (!browserReleaseScope) { setPublishedBrowserRelease(null); return; }
@@ -141,7 +155,9 @@ export default function Admin() {
     setData(null); setUpdatedAt(null); setRows([]); setTotal(0); setDetail(null);
     hasOverview.current = false; hasList.current = false;
   }, [userId]);
-  const inspect = useCallback(async (id: string) => {
+  const inspect = useCallback(async (id: string, trigger?: HTMLElement) => {
+    const focused = trigger ?? document.activeElement;
+    if (focused instanceof HTMLElement && !focused.closest(".admin-detail")) detailTrigger.current = focused;
     detailController.current?.abort();
     const controller = new AbortController(); detailController.current = controller;
     setDetail(null); setDetailLoading(true); setError("");
@@ -154,6 +170,12 @@ export default function Admin() {
       else setError(err instanceof AdminApiError && err.status === 404 ? "未找到该调用，可能已超过保留期。" : "调用详情无法加载，请稍后重试。");
     } finally { if (!controller.signal.aborted) setDetailLoading(false); }
   }, [rejectAccess]);
+  const closeDetail = useCallback(() => {
+    detailController.current?.abort();
+    setDetail(null);
+    detailTrigger.current?.focus();
+    detailTrigger.current = null;
+  }, []);
 
   const EXPERIENCE_ALL = "__all";
   const currentServerRelease = releaseMode === "current"
@@ -334,7 +356,15 @@ export default function Admin() {
     {view === "users" ? <AdminUsers key={userId} onForbidden={rejectAccess} /> : <>
     {diagnostics && <div className="admin-toolbar">
       <div role="tablist" aria-label="采集来源" className="admin-tabs">{(["server", "browser"] as const).map(source =>
-        <button key={source} role="tab" aria-selected={filters.source === source} onClick={() => changeSource(source)}>{source === "server" ? "后端调用" : "浏览器体验"}</button>)}</div>
+        <button key={source} type="button" id={`admin-source-${source}`} role="tab" aria-controls="admin-source-panel"
+          tabIndex={filters.source === source ? 0 : -1} aria-selected={filters.source === source} onClick={() => changeSource(source)}
+          onKeyDown={event => {
+            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+            event.preventDefault();
+            const next = event.key === "Home" ? "server" : event.key === "End" ? "browser" : source === "server" ? "browser" : "server";
+            document.getElementById(`admin-source-${next}`)?.focus();
+            changeSource(next);
+          }}>{source === "server" ? "后端调用" : "浏览器体验"}</button>)}</div>
       {timeRange}{versionSelect}{trafficSelect}
       <label className="admin-operation">业务操作<select value={filters.operation} onChange={e => update({ operation: e.target.value })}><option value="">所有操作（混合样本）</option>{operationOptions.map(op => <option key={op} value={op}>{names[op] ?? op}</option>)}</select></label>
       {filters.source === "server" && <label>模型<select aria-label="模型" value={filters.model} onChange={e => update({ model: e.target.value })}><option value="">全部</option>{(data?.facets?.models ?? []).map(m => <option key={m}>{m}</option>)}</select></label>}
@@ -342,6 +372,8 @@ export default function Admin() {
     </div>}
     {filters.traffic === "test" && <TestRunFilter key={`${view}:${filters.testRunId}`} value={filters.testRunId}
       onApply={testRunId => update({ testRunId })} />}
+    <div id={diagnostics ? "admin-source-panel" : undefined} role={diagnostics ? "tabpanel" : undefined}
+      aria-labelledby={diagnostics ? `admin-source-${filters.source}` : undefined}>
     <div className="admin-scope-caption"><span>{filters.operation ? names[filters.operation] ?? filters.operation : "全部业务概览"}{diagnostics && !filters.operation && " · 性能比较请先选同一种操作"} · {versionLabel}{filters.testRunId && ` · 批次 ${filters.testRunId}`}</span>{!checkingBrowserRelease && <span>{updatedAt ? `概览更新于 ${date(updatedAt)}` : "仅展示已采集的真实记录"}</span>}</div>
     {data?.count === 0 && releaseMode === "current" && knownRelease(selectedRelease) && <p className="admin-notice admin-empty-current" role="status">当前发布暂无可比较样本。可切换到「全部保留」或单个历史版本排障。</p>}
     {releaseMode === "current" && filters.source === "server" && serverRelease === "unknown" && <p className="admin-notice" role="status">后端当前版本未知，无法按「当前发布」比较；当前显示全部保留样本。</p>}
@@ -358,7 +390,7 @@ export default function Admin() {
       {filters.traffic === "unmarked" && data.traffic_filter && <p className="admin-scope-caption">未标记流量也可能包含历史测试。已标记的测试批次可在「仅测试流量」下查看。</p>}
       {filters.source === "browser" && <p className="admin-notice">浏览器上报可能缺失或被修改，独立于后端成功率与 Token 计量。朗读任务首声含等待文字与音频准备，不含之前的识别；整轮首声从检测到说话结束起计。</p>}
       {(!data.collection.active || data.collection.dropped_since_restart > 0 || data.collection.write_errors_since_restart > 0) && <p className="admin-notice" role="status">采集存在缺口：本进程启动后丢弃 {data.collection.dropped_since_restart} 条，写入失败 {data.collection.write_errors_since_restart} 次。{!data.collection.active && "采集未启用。"}</p>}
-      {data.collection.at_capacity && <p className="admin-notice">此来源已达到 {data.collection.source_budget?.toLocaleString()} 条保留上限，时间窗可能不完整。以下统计基于当前保留记录。</p>}
+      {data.collection.at_capacity && <p className="admin-notice">此来源已达到 {data.collection.source_budget?.toLocaleString()} 条保留上限，时间窗可能不完整。{data.collection.oldest_at && `最早保留 ${date(data.collection.oldest_at)}（北京时间）。`}</p>}
       {!diagnostics && data.collection.sources?.browser?.at_capacity && <p className="admin-notice">浏览器体验已达到 {number(data.collection.sources.browser.source_budget)} 条保留上限，语音体验的时间窗可能不完整。</p>}
       <section className="admin-metrics" aria-label="运行指标">
         <article><span><Activity size={16} />{filters.source === "server" ? "保留请求数" : "上报样本"}</span><strong>{number(data.count)}</strong><small>保留 {data.collection.retention_days} 天 · {data.collection.cleanup?.active ? '自动清理' : '写入时清理'}</small></article>
@@ -404,16 +436,18 @@ export default function Admin() {
         <select aria-label="调用状态" value={filters.outcome} onChange={e => update({ outcome: e.target.value })}><option value="">全部状态</option>{Object.entries(labels).map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select>
       </div></div>
       {listError && !checkingBrowserRelease && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{listError}</span><button onClick={refresh}>重试</button></p>}
-      <div className="admin-table-wrap" aria-busy={listLoading}><table><thead><tr><th>时间 · 北京</th><th>业务操作</th><th>状态</th><th>耗时</th>{filters.source === "server" && <><th>模型 / 类型</th><th>费用参考</th></>}<th>Trace</th></tr></thead><tbody>
-        {rows.map(row => <tr key={row.trace_id} data-outcome={row.outcome}><td><time dateTime={row.started_at}>{date(row.started_at)}</time></td><td className="admin-operation-cell"><strong>{names[row.operation] ?? row.operation}</strong><small>版本 {releaseLabel(row.release)}</small></td><td><span className={`admin-badge ${row.outcome}`}>{labels[row.outcome] ?? row.outcome}</span></td><td className="admin-duration">{ms(row.duration_ms)}</td>{filters.source === "server" && <><td>{modelLabel(row)}</td><td className="admin-row-cost" title="按已采集用量与公开单价参考；未计价不代表零费用">{referenceCost(row.cost_min_cny, row.cost_max_cny)}</td></>}<td><button aria-label={`查看调用 ${row.trace_id.slice(0, 8)}`} onClick={() => void inspect(row.trace_id)}>{row.trace_id.slice(0, 8)} <ArrowRight size={14} /></button></td></tr>)}
+      <div className="admin-table-wrap" role="region" aria-label="调用记录表格" tabIndex={0} aria-busy={listLoading}><table><thead><tr><th scope="col">时间 · 北京</th><th scope="col">业务操作</th><th scope="col">状态</th><th scope="col">耗时</th>{filters.source === "server" && <><th scope="col">模型 / 类型</th><th scope="col">费用参考</th></>}<th scope="col">Trace</th></tr></thead><tbody>
+        {rows.map(row => <tr key={row.trace_id} data-outcome={row.outcome}><td><time dateTime={row.started_at}>{date(row.started_at)}</time></td><td className="admin-operation-cell"><strong>{names[row.operation] ?? row.operation}</strong><small>版本 {releaseLabel(row.release)}{row.audience === "guest" && " · 游客"}</small></td><td><span className={`admin-badge ${row.outcome}`}>{labels[row.outcome] ?? row.outcome}</span></td><td className="admin-duration">{ms(row.duration_ms)}</td>{filters.source === "server" && <><td>{modelLabel(row)}</td><td className="admin-row-cost" title="按已采集用量与公开单价参考；未计价不代表零费用">{referenceCost(row.cost_min_cny, row.cost_max_cny)}</td></>}<td><button type="button" aria-label={`查看调用 ${row.trace_id.slice(0, 8)}`} onClick={event => void inspect(row.trace_id, event.currentTarget)}>{row.trace_id.slice(0, 8)} <ArrowRight size={14} /></button></td></tr>)}
         {!rows.length && <tr><td colSpan={filters.source === "server" ? 7 : 5} className="admin-empty">{listLoading ? "正在读取调用记录…" : listError ? "列表读取失败，可点击上方重试。" : "暂无调用记录。可切换业务操作、状态或时间范围；这里不会生成演示数据。"}</td></tr>}
       </tbody></table></div>
       <div className="admin-pagination"><span>{listLoading ? "列表更新中 · " : ""}第 {total ? offset + 1 : 0}–{Math.min(offset + rows.length, total)} 条 / {total} · 状态筛选仅影响列表</span><div><button aria-label="上一页" disabled={listLoading || offset === 0} onClick={() => setOffset(v => Math.max(0, v - 50))}><ArrowLeft size={15} /></button><button aria-label="下一页" disabled={listLoading || offset + 50 >= total} onClick={() => setOffset(v => v + 50)}><ArrowRight size={15} /></button></div></div>
     </section>}
     {data && <footer className="admin-footnote"><ShieldCheck size={13} /><div>UTC 记录 · 北京时间展示 · 保留策略 {data.collection.retention_days} 天 / {data.collection.max_records.toLocaleString()} 条 · {data.collection.oldest_at ? `最早保留 ${date(data.collection.oldest_at)}` : "暂无保留数据"}
+      {sourceRetention?.retained !== undefined && <p>此来源共保留 {number(sourceRetention.retained)} 条，包含所有版本和流量。</p>}
       {data.collection.cleanup?.active && <p>启动、每 {data.collection.cleanup.interval_seconds / 3600} 小时及写入时自动清理；实例休眠后在下次启动补清理。上次成功 {data.collection.cleanup.last_success_at ? date(data.collection.cleanup.last_success_at) : '尚未完成'}。{data.collection.cleanup.failures_since_restart > 0 && `本进程清理失败 ${data.collection.cleanup.failures_since_restart} 次。`}</p>}
       <p>分位数基于保留样本，历史失败保留供追踪。</p></div></footer>}
-    {detail && <TraceDetail detail={detail} onInspect={id => void inspect(id)} onClose={() => { detailController.current?.abort(); setDetail(null); }} />}
+    </div>
+    {detail && <TraceDetail detail={detail} onInspect={id => void inspect(id)} onClose={closeDetail} />}
     </>}
   </main>;
 }
@@ -455,30 +489,43 @@ function ExperienceOverview({ experience, onPlaybackDetails }: { experience: Adm
 }
 
 function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onInspect: (id: string) => void; onClose: () => void }) {
+  const closeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => { closeButton.current?.focus(); }, [detail.trace_id]);
   useEffect(() => {
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     document.addEventListener("keydown", escape);
     return () => document.removeEventListener("keydown", escape);
   }, [onClose]);
   const failed = detail.outcome === "error" || detail.outcome === "timeout";
+  const cancelled = detail.source === "browser" && detail.outcome === "cancelled";
+  const diagnostic = detail.spans?.find(span => span.name === detail.operation)?.attributes;
+  const asrReason = typeof diagnostic?.asr_reason === "string" ? asrReasonLabels[diagnostic.asr_reason] : undefined;
+  const interrupted = diagnostic?.error_code === "canceled" || diagnostic?.error_code === "interrupted";
+  const timedOutWhilePaused = diagnostic?.reason === "completion_timeout" && Number(diagnostic.pause_count) > 0;
+  const browserDiagnosis = asrReason ?? (cancelled
+    ? interrupted ? "浏览器语音引擎报告朗读被中断。触发来源未采集。" : "浏览器报告此任务已取消。触发来源未采集。"
+    : timedOutWhilePaused ? "朗读曾进入暂停状态，之后未在限时内结束。暂停由谁触发尚未采集。"
+      : "此浏览器样本没有可确认的失败原因。可结合下方阶段和同一轮调用排查。");
   const failedSpans = (detail.spans ?? []).filter(span => span.outcome === "error" || span.outcome === "timeout");
   const diagnosticText = (span: NonNullable<AdminTrace["spans"]>[number]) =>
     Object.entries(span.attributes ?? {}).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value)).map(([key, value]) => `${key}=${String(value)}`).join(" · ");
-  return <aside className="admin-detail" aria-label="调用详情"><header><div><span className="admin-eyebrow">调用详情</span><h2>{names[detail.operation] ?? detail.operation}</h2></div><button aria-label="关闭调用详情" onClick={onClose}><X size={20} /></button></header>
+  return <aside className="admin-detail" aria-label="调用详情"><header><div><span className="admin-eyebrow">调用详情</span><h2>{names[detail.operation] ?? detail.operation}</h2></div><button ref={closeButton} type="button" aria-label="关闭调用详情" onClick={onClose}><X size={20} /></button></header>
     <div className="admin-detail-status"><span className={`admin-badge ${detail.outcome}`}>{labels[detail.outcome] ?? detail.outcome}</span><time dateTime={detail.started_at}>{date(detail.started_at)}</time></div>
     <code className="admin-trace-id">{detail.trace_id}</code>
+    {detail.interaction_id && <p className="admin-interaction-id">交互编号 <code>{detail.interaction_id}</code></p>}
     <div className="admin-trace-root"><div><span>总耗时</span><strong>{ms(detail.duration_ms)}</strong></div>{detail.source === "server" && <div><span>模型 / 类型</span><b>{modelLabel(detail)}</b></div>}</div>
     {detail.source === "server" && <p className="admin-detail-cost">费用参考：{referenceCost(detail.cost_min_cny, detail.cost_max_cny)}<small>依据当前公开价与已知用量区间，未计价不代表零费用。</small></p>}
     <dl className="admin-detail-meta"><div><dt>采集来源</dt><dd>{detail.source === "browser" ? "浏览器上报" : "后端请求"}</dd></div><div><dt>响应</dt><dd>{detail.source === "browser" ? "不适用 HTTP 状态" : detail.http_status == null ? "HTTP 状态未采集" : `HTTP ${detail.http_status}`}</dd></div><div><dt>发布版本</dt><dd>{releaseLabel(detail.release)}{isTestRelease(detail.release) && "（测试样本）"}</dd></div>{detail.test_run_id && <div><dt>测试批次</dt><dd>{detail.test_run_id}</dd></div>}{detail.source === "server" && <div><dt>模型首文本</dt><dd>{ms(detail.ttft_ms)}</dd></div>}</dl>
-    {failed && <section className="admin-failure-context"><h3><TriangleAlert size={16} />失败线索</h3>
-      {detail.source === "browser" ? <p>此失败由浏览器上报，请结合关联的后端调用排查；上报可能缺失或被修改。</p>
+    {detail.audience === "guest" && <p className="admin-detail-cost">游客练习请求<small>近 7 天的保留样本按发生时间计入用户运营。</small></p>}
+    {(failed || cancelled) && <section className="admin-failure-context"><h3><TriangleAlert size={16} />{cancelled ? "取消线索" : "失败线索"}</h3>
+      {detail.source === "browser" ? <p>{browserDiagnosis}</p>
         : detail.error_type ? <><div className="admin-error-types"><code>{detail.error_type}</code>{detail.error_cause_type && <><ArrowRight size={13} /><code>{detail.error_cause_type}</code></>}</div><p>已采集异常类名；可按调用时间和编号核对服务端日志。</p></>
         : detail.http_status != null && detail.http_status >= 400 ? <p>服务返回 HTTP {detail.http_status}，响应中的具体错误内容未留存。</p>
         : <p>此记录未采集异常类型，无法仅凭耗时判断原因；请结合时间和路径核对服务端日志。</p>}
       {!!failedSpans.length && <div className="admin-failure-diagnostics"><h4>阶段诊断</h4>{failedSpans.map(span => <p key={span.id}><strong>{span.name}</strong><span>{diagnosticText(span) || "未采集更多阶段参数"}</span></p>)}</div>}
-      <small>历史失败保留用于追踪，不代表接口当前仍在报错。</small>
+      {failed && <small>历史失败保留用于追踪，不代表接口当前仍在报错。</small>}
     </section>}
-    {!!detail.related?.length && <section className="admin-related"><h3>同一轮交互</h3><p>各端时钟独立，分别查看，不跨端累加。</p>{detail.related.map(row => <button key={row.trace_id} onClick={() => onInspect(row.trace_id)}><span>{names[row.operation] ?? row.operation}<small>{row.source === "browser" ? "浏览器上报" : "后端请求"}</small></span><b>{ms(row.duration_ms)}</b></button>)}</section>}
+    {!!detail.related?.length && <section className="admin-related"><h3>同一轮交互</h3><p>各端时钟独立，分别查看，不跨端累加。</p>{detail.related.map(row => <button key={row.trace_id} type="button" onClick={() => onInspect(row.trace_id)}><span>{names[row.operation] ?? row.operation}<small>{row.source === "browser" ? "浏览器上报" : "后端请求"} · {labels[row.outcome] ?? row.outcome}</small></span><b>{ms(row.duration_ms)}</b></button>)}</section>}
     <h3 className="admin-waterfall-title">阶段耗时</h3><p className="admin-waterfall-note">以下阶段共享该端的单调时钟，重叠阶段不累加为总耗时。</p>
     <div className="admin-waterfall">{detail.spans?.length ? detail.spans.map(span => <article key={span.id}><div><strong>{span.name}</strong><span>{ms(span.duration_ms)} · {spanLabels[span.outcome] ?? span.outcome}</span></div>
       <div className="admin-span-track"><i className={span.outcome} style={{ marginLeft: `${Math.min(99, span.offset_ms / Math.max(1, detail.duration_ms) * 100)}%`, width: `${Math.max(0.5, Math.min(100, span.duration_ms / Math.max(1, detail.duration_ms) * 100))}%` }} /></div>

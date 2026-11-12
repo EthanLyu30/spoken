@@ -6,6 +6,7 @@ import { openDirectAsrStream } from "./directAsr";
 import { getInteraction, measureAsrStream, reportTiming } from "./telemetry";
 import { assertAuthGeneration, getAuthGeneration } from "./authToken";
 import { AsrQuotaError, asrProviderError, isAsrQuotaCooling, isAsrQuotaError } from "./asrQuota";
+import { asrFailure } from "./asrDiagnostics";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -52,13 +53,11 @@ export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us", 
     });
     return measureAsrStream(stream, "direct", signal);
   } catch (error) {
-    if (isAsrQuotaError(error)) throw error;
-    const cancelled = signal?.aborted || generation !== getAuthGeneration() ||
-      ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError");
     reportTiming("asr.attempt", performance.now() - directStarted, {
-      engine: "xfyun", transport: "direct", interactionId, stage: "open", attempt: 1,
-      outcome: cancelled ? "cancelled" : "error", fallback_reason: "unavailable",
+      engine: "xfyun", transport: "direct", interactionId, stage: "open", attempt: 1, fallback_reason: "unavailable",
+      ...asrFailure(error, signal, generation !== getAuthGeneration()),
     });
+    if (isAsrQuotaError(error)) throw error;
     assertAuthGeneration(generation, signal);
     signal?.throwIfAborted();
     if ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError") throw error;
@@ -76,8 +75,8 @@ export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us", 
     return measureAsrStream(stream, "relay", signal);
   } catch (error) {
     reportTiming("asr.attempt", performance.now() - relayStarted, {
-      engine: "xfyun", transport: "relay", interactionId, stage: "open", attempt: 2,
-      outcome: signal?.aborted ? "cancelled" : "error", fallback_reason: "unavailable",
+      engine: "xfyun", transport: "relay", interactionId, stage: "open", attempt: 2, fallback_reason: "unavailable",
+      ...asrFailure(error, signal, generation !== getAuthGeneration()),
     });
     throw error;
   }

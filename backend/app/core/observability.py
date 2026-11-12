@@ -13,9 +13,11 @@ import re
 from time import perf_counter
 from threading import Lock
 from starlette.requests import ClientDisconnect
+from starlette.datastructures import Headers
 
 from app.core.config import get_settings
 from app.core.performance import numeric, server_timing, elapsed
+from app.services.monitoring import GUEST_REQUEST_OPERATIONS, guest_request_subject
 
 def current_release() -> str:
     """The commit actually running in this process, never a telemetry guess."""
@@ -326,4 +328,7 @@ class TelemetryMiddleware:
             trace.operation = f'{scope.get("method", "GET")} {canonical}'
             sink = getattr(scope["app"].state, "telemetry_sink", None)
             if sink:
-                sink.submit(trace.record())
+                record = trace.record()
+                if trace.operation in GUEST_REQUEST_OPERATIONS and not test_run_id:
+                    record["guest_subject_hash"] = guest_request_subject(Headers(scope=scope))
+                sink.submit(record)

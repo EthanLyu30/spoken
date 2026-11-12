@@ -21,6 +21,14 @@ export interface AdminGuestActivity {
   hours: number; active_browsers: number; sessions: number; pronunciation: number;
   interviews: number; word_collections: number; word_reviews: number;
 }
+export interface AdminGuestRequests {
+  first_sample_at: string | null;
+  at_capacity: boolean;
+  windows: {
+    hours: number; active_browsers: number; requests: number; failed: number; cancelled: number;
+    by_kind: Record<"dialogue" | "asr" | "pronunciation" | "interview" | "feedback", number>;
+  }[];
+}
 export interface AdminExperience {
   stages: (Percentiles & { operation: string; samples: number })[];
   playback: {
@@ -38,7 +46,7 @@ export interface AdminOverview {
   operations: string[]; facets?: { operations: string[]; models: string[]; releases: string[] };
   trend: { time: string; operation: string; count: number; p95: number | null }[];
   collection: { active: boolean; retention_days: number; max_records: number; source_budget?: number; at_capacity?: boolean; oldest_at: string | null; dropped_since_restart: number; write_errors_since_restart: number;
-    sources?: Partial<Record<"server" | "browser", { source_budget: number; at_capacity: boolean }>>;
+    sources?: Partial<Record<"server" | "browser", { source_budget: number; at_capacity: boolean; retained?: number; oldest_at?: string | null }>>;
     cleanup?: { active: boolean; interval_seconds: number; last_success_at: string | null; failures_since_restart: number } };
 }
 export interface AdminUser {
@@ -50,11 +58,13 @@ export interface AdminUsersPage {
   activation_24h: { eligible: number; completed: number };
   visitors: AdminVisitors;
   guest_activity?: AdminGuestActivity;
+  guest_requests?: AdminGuestRequests;
 }
 export type AdminUserSort = "activity" | "registered";
 export interface AdminTrace {
   interaction_id?: string | null; related?: AdminTrace[];
   trace_id: string; started_at: string; operation: string; source: string; outcome: string;
+  audience?: "guest";
   duration_ms: number; http_status: number | null; ttft_ms: number | null; model: string | null;
   error_type?: string | null; error_cause_type?: string | null; test_run_id?: string | null;
   cost_min_cny?: number | null; cost_max_cny?: number | null;

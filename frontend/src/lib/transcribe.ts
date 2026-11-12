@@ -6,6 +6,7 @@ import { getInteraction, bindInteraction, reportTiming, type Transport } from ".
 import { isAsrQuotaError } from "./asrQuota";
 import { withTimeout } from "./requestTimeout";
 import { assertAuthGeneration, getAuthGeneration } from "./authToken";
+import { asrFailure } from "./asrDiagnostics";
 
 interface TranscriptionBackends {
   isMoonshineReady: () => boolean;
@@ -70,16 +71,20 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
   const onTransport = (actual: "direct" | "buffered") => { transport = actual; };
   const queue: ArrayBuffer[] = [];
   const control = new AbortController();
-  if (signal?.aborted) control.abort();
+  if (signal?.aborted) control.abort(signal.reason);
   const interactionId = getInteraction(signal);
   if (interactionId) bindInteraction(control.signal, interactionId);
-  const abort = () => control.abort();
+  const abort = () => control.abort(signal?.reason);
   signal?.addEventListener("abort", abort, { once: true });
   const opened = openAsrStream(
     { onPartial: (text) => { latest = text; } },
     "en_us",
     control.signal,
   ).then((openedStream) => {
+    if (control.signal.aborted) {
+      openedStream.close();
+      return null;
+    }
     stream = openedStream;
     transport = openedStream.transport ?? "unknown";
     for (const pcm of queue) openedStream.send(pcm);
@@ -95,15 +100,22 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
     },
     async finish(pcm, finishSignal) {
       closed = true;
-      const cancel = () => control.abort();
+      bindInteraction(control.signal, getInteraction(finishSignal) ?? interactionId);
+      const cancel = () => control.abort(finishSignal?.reason);
       finishSignal?.addEventListener("abort", cancel, { once: true });
+      const recover = async () => {
+        const text = (await postAsr(pcm, control.signal, onTransport)).trim();
+        control.signal.throwIfAborted();
+        return text;
+      };
       try {
         const openedStream = stream ?? await opened;
         control.signal.throwIfAborted();
         finishSignal?.throwIfAborted();
-        if (!openedStream) return (await postAsr(pcm, finishSignal, onTransport)).trim();
+        if (!openedStream) return await recover();
         try {
           const text = (await openedStream.finishUtterance()).trim();
+          control.signal.throwIfAborted();
           if (!text && latest.trim()) throw new IncompleteTranscriptionError(latest.trim());
           return text;
         } catch (error) {
@@ -117,8 +129,8 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
           // A deploy can close the relay mid-utterance. Prefer the complete
           // recording; an unconfirmed partial must never be auto-submitted.
           try {
-            const recovered = (await postAsr(pcm, finishSignal, onTransport)).trim();
-            if (recovered) return recovered;
+            const recovered = await recover();
+            if (recovered || !partial) return recovered;
           } catch (recoveryError) {
             if (isAsrQuotaError(recoveryError)) {
               if (partial) recoveryError.partialText = partial;
@@ -126,16 +138,16 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
             }
             if (finishSignal?.aborted || control.signal.aborted ||
                 (recoveryError instanceof Error && recoveryError.name === "AbortError")) throw recoveryError;
+            if (!partial) throw recoveryError;
           }
-          if (partial) throw new IncompleteTranscriptionError(partial);
-          throw error;
+          throw new IncompleteTranscriptionError(partial);
         } finally {
           openedStream.close();
         }
       } finally {
         finishSignal?.removeEventListener("abort", cancel);
         signal?.removeEventListener("abort", abort);
-        if (finishSignal?.aborted) control.abort();
+        if (finishSignal?.aborted) control.abort(finishSignal.reason);
       }
     },
     close() {
@@ -200,7 +212,7 @@ export async function transcribeSpeech(
       engine: measurement.engine,
       interactionId: getInteraction(turnSignal),
       transport: useLive ? live?.transport ?? "unknown" : measurement.transport,
-      outcome: text ? "ok" : "error",
+      ...(text ? { outcome: "ok" } : { outcome: "error", asr_reason: "empty" }),
     });
     return text;
   } catch (error) {
@@ -208,7 +220,7 @@ export async function transcribeSpeech(
     reportTiming("asr.transcribe", performance.now() - start, {
       engine: measurement.engine, interactionId: getInteraction(turnSignal),
       transport: useLive ? live?.transport ?? "unknown" : measurement.transport,
-      outcome: signal?.aborted || generation !== getAuthGeneration() ? "cancelled" : "error",
+      ...asrFailure(error, turnSignal ?? signal, generation !== getAuthGeneration()),
     });
     throw error;
   }

@@ -145,6 +145,31 @@ describe("voice call ASR engine boundaries", () => {
     } finally { call.end(); }
   });
 
+  it("reports an ASR deadline as a timeout and returns to listening with a retry message", async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetcher);
+    const onError = vi.fn();
+    const onPhase = vi.fn();
+    const reply = vi.fn();
+    const call = await startVoiceCall({ onPhase, onError, reply, preferLocalAsr: () => true,
+      transcribe: (_pcm, _engine, signal) => new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+    });
+    try {
+      pushMs(500, 0.1);
+      pushMs(1000, 0);
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(reply).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledWith("语音识别等待超时，请再说一次。");
+      expect(onPhase).toHaveBeenLastCalledWith("listening");
+      expect(fetcher.mock.calls.map(([, options]) => JSON.parse(options.body))).toContainEqual(
+        expect.objectContaining({ operation: "voice.complete", outcome: "timeout" }),
+      );
+    } finally { call.end(); vi.useRealTimers(); }
+  });
+
   it("keeps a locally-selected utterance off the iFlytek stream", async () => {
     vi.stubGlobal("AudioContext", FakeAudioContext);
     const track = { onended: null, stop: vi.fn() };

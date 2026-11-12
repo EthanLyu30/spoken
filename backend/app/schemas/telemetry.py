@@ -19,12 +19,13 @@ class BrowserTiming(BaseModel):
                        "speech.voice_resolution", "speech.final_text_to_audio", "speech.native_start", "speech.native_end", "speech.cloud_fetch", "speech.play_start",
                        "pronunciation.click_to_result", "pronunciation.stop_to_result"]
     duration_ms: float = Field(ge=0, le=3_600_000, strict=True)
-    outcome: Literal["ok", "error", "cancelled"] = "ok"
+    outcome: Literal["ok", "error", "timeout", "cancelled"] = "ok"
     engine: Literal["local", "xfyun", "browser", "unknown"] = "unknown"
     transport: Literal["direct", "relay", "buffered", "local", "unknown"] = "unknown"
     interaction_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     release: str = Field(default="unknown", max_length=80, pattern=r"^[A-Za-z0-9._-]+$")
     test_run_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    event_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
     reason: Literal["started", "startup_timeout", "end_before_start", "speech_error", "speak_exception", "cancelled",
                     "end", "native_error", "completion_timeout"] | None = None
@@ -47,11 +48,17 @@ class BrowserTiming(BaseModel):
     audio_bytes: int | None = Field(default=None, ge=0, le=5_760_000, strict=True)
     result_class: Literal["empty", "nonempty"] | None = None
     provider_code: int | None = Field(default=None, ge=1, le=99999, strict=True)
+    asr_reason: Literal["empty", "incomplete", "timeout", "disconnect", "provider_error",
+                        "http_error", "unavailable", "cancelled", "unknown"] | None = None
     entry: Literal["turn_correction", "follow_read"] | None = None
 
     @model_validator(mode="after")
     def operation_fields_only(self):
         supplied = self.model_fields_set - GLOBAL_DIAGNOSTIC_FIELDS
+        if "asr_reason" in supplied:
+            expected = {"cancelled": "cancelled", "timeout": "timeout"}.get(self.asr_reason, "error")
+            if not self.operation.startswith("asr.") or self.outcome != expected or self.asr_reason is None:
+                raise ValueError("invalid recognition failure classification")
         if self.operation != "speech.native_end" and self.duration_ms > 300_000:
             raise ValueError("duration_ms exceeds the operation limit")
         native_start_only = {"state_before", "state_after", "voice_type", "voice_matched"}

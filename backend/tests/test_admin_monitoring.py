@@ -134,10 +134,75 @@ def test_admin_user_list_returns_accounts_but_not_admin_identity(client):
     assert client.get('/api/admin/users', headers=ordinary).status_code == 403
 
 
+def test_guest_requests_are_visible_without_a_visit_or_saved_session(client):
+    from app.models.telemetry import TelemetryRecord
+    from app.services.monitoring import visit_digest
+
+    owner = account(client, admin=True)
+    guest_id = uuid.uuid4().hex
+    params = {"scenario_id": "cafe", "messages": []}
+    url = "/api/admin/users"
+    baseline = client.get(url, headers=owner).json()
+    first_guest_trace = client.post("/api/chat", headers={"X-Client-Id": guest_id}, json=params)
+    assert first_guest_trace.status_code == 200
+    for scenario, headers, status in [
+        ("unknown", {"X-Client-Id": guest_id}, 404),
+        ("cafe", {"X-Client-Id": guest_id, "X-Test-Run-Id": "marked"}, 200),
+        ("cafe", {**owner, "X-Client-Id": guest_id}, 200),
+        ("cafe", {"Authorization": "Bearer invalid", "X-Client-Id": guest_id}, 200),
+        ("cafe", {"X-Client-Id": "anon"}, 200),
+        ("cafe", {}, 200),
+    ]:
+        assert client.post("/api/chat", headers=headers, json=params | {"scenario_id": scenario}).status_code == status
+    assert client.get("/api/interview/sets", headers={"X-Client-Id": guest_id}).status_code == 200
+
+    response = client.get(url, headers=owner)
+    body = response.json()
+    for before, after in zip(baseline["guest_requests"]["windows"], body["guest_requests"]["windows"]):
+        assert after["active_browsers"] - before["active_browsers"] == 1
+        assert after["requests"] - before["requests"] == 2
+        assert after["failed"] - before["failed"] == 1
+        assert after["by_kind"]["dialogue"] - before["by_kind"]["dialogue"] == 2
+    assert body["guest_activity"] == baseline["guest_activity"]
+    assert body["visitors"]["guest_uv"] == baseline["visitors"]["guest_uv"]
+    digest = visit_digest(get_settings().jwt_secret, "guest", guest_id)
+    assert guest_id not in response.text and digest not in response.text
+    detail = client.get("/api/admin/traces/" + first_guest_trace.headers["x-trace-id"], headers=owner)
+    assert detail.json()["audience"] == "guest"
+    assert guest_id not in detail.text and digest not in detail.text
+    with SessionLocal() as db:
+        db.execute(delete(TelemetryRecord).where(TelemetryRecord.guest_subject_hash == digest))
+        db.commit()
+
+
+def test_browser_retries_keep_one_sample_and_a_safe_asr_reason(client, monkeypatch):
+    import json
+
+    owner = account(client, admin=True)
+    release = uuid.uuid4().hex
+    body = {"operation": "asr.transcribe", "duration_ms": 610, "release": release,
+            "outcome": "error", "engine": "xfyun", "transport": "direct",
+            "event_id": uuid.uuid4().hex, "asr_reason": "empty"}
+    monkeypatch.setattr(get_settings(), "cors_origins", "http://localhost:5173")
+    headers = {"Content-Type": "text/plain;charset=UTF-8", "Origin": "http://localhost:5173"}
+    for _ in range(2):
+        assert client.post("/api/telemetry/client", content=json.dumps(body), headers=headers).status_code == 202
+    assert client.post("/api/telemetry/client", content=json.dumps(body), headers={
+        **headers, "Origin": "https://unrelated.example",
+    }).status_code == 403
+    assert client.post("/api/telemetry/client", json=body | {"asr_reason": "private error"}).status_code == 422
+    assert client.post("/api/telemetry/client", json=body | {"operation": "speech.complete"}).status_code == 422
+    rows = client.get("/api/admin/traces", headers=owner, params={"release": release, "source": "browser"}).json()
+    assert rows["total"] == 1
+    detail = client.get(f"/api/admin/traces/{rows['items'][0]['trace_id']}", headers=owner).json()
+    assert detail["spans"][0]["attributes"]["asr_reason"] == "empty"
+    assert rows["items"][0]["trace_id"] != body["event_id"]
+
+
 def test_user_page_counts_all_accounts_and_sorts_by_durable_activity(client):
     from sqlalchemy import create_engine, event
     from sqlalchemy.orm import Session
-    from app.api.admin import list_users
+    from app.services.monitoring import registered_users
     from app.db import Base
     from app.models.progress import LearningEvent
     from app.models.telemetry import AdminAccount
@@ -174,7 +239,7 @@ def test_user_page_counts_all_accounts_and_sorts_by_durable_activity(client):
         db.commit()
         queries = []
         event.listen(engine, "before_cursor_execute", lambda *args: queries.append(args[2]))
-        result = list_users(db, limit=20, offset=0, search="", sort="activity")
+        result = registered_users(db, limit=20, offset=0, search="", sort="activity")
         assert result["registered"] == result["total"] == 105
         assert len(result["items"]) == 20
         assert result["items"][0]["id"] == 1
@@ -183,8 +248,9 @@ def test_user_page_counts_all_accounts_and_sorts_by_durable_activity(client):
             "hours": 168, "active_browsers": 2, "sessions": 1, "pronunciation": 1,
             "interviews": 1, "word_collections": 1, "word_reviews": 1,
         }
-        assert len(queries) <= 6
-        filtered = list_users(db, limit=20, offset=0, search="u105@", sort="registered")
+        # One grouped request query and one retention query in addition to the existing summaries.
+        assert len(queries) <= 8
+        filtered = registered_users(db, limit=20, offset=0, search="u105@", sort="registered")
         assert filtered["registered"] == 105
         assert filtered["total"] == 1
         assert filtered["guest_activity"] == result["guest_activity"]

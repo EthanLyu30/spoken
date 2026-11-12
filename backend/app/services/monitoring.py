@@ -4,7 +4,7 @@ import hmac
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import String, case, cast, delete, literal, select, func
+from sqlalchemy import String, and_, case, cast, delete, literal, select, func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -13,9 +13,20 @@ from app.models.monitoring import MonitoringState, SiteVisit
 from app.models.practice import PracticeRecord
 from app.models.progress import LearningEvent
 from app.models.session import PracticeSession
-from app.models.telemetry import AdminAccount
+from app.models.telemetry import AdminAccount, TelemetryRecord
 from app.models.user import User
 from app.models.word import WordEntry
+from app.services.telemetry import retained_sources
+
+
+GUEST_REQUEST_KINDS = {
+    "dialogue": ("POST /api/chat", "POST /api/chat/stream"),
+    "asr": ("POST /api/asr/session", "POST /api/asr"),
+    "pronunciation": ("POST /api/pronunciation",),
+    "interview": ("POST /api/interview/score",),
+    "feedback": ("POST /api/turn-correction", "POST /api/feedback", "POST /api/hint"),
+}
+GUEST_REQUEST_OPERATIONS = frozenset(operation for operations in GUEST_REQUEST_KINDS.values() for operation in operations)
 
 
 def utcnow():
@@ -53,6 +64,16 @@ def prune_visits(db, now):
 
 def visit_digest(secret: str, kind: str, client_id: str) -> str:
     return hmac.new(secret.encode(), f'spoken-visitors-v1/{kind}/{client_id}'.encode(), hashlib.sha256).hexdigest()
+
+
+def guest_request_subject(headers):
+    secret = get_settings().jwt_secret
+    if not secret or "authorization" in headers:
+        return None
+    client_id = headers.get("x-client-id", "").strip()
+    if not client_id or len(client_id) > 64 or client_id.lower() == "anon" or client_id.lower().startswith("u:"):
+        return None
+    return visit_digest(secret, "guest", client_id)
 
 
 def record_visit(db, client_id, *, at=None):
@@ -118,6 +139,36 @@ def guest_learning_summary(db, *, since, hours):
     return {"hours": hours, **counts}
 
 
+def guest_request_summary(db, now):
+    record = TelemetryRecord
+    periods = (24, 168)
+    columns = [func.min(record.started_at).label("first_sample_at")]
+    for hours in periods:
+        within = record.started_at >= now - timedelta(hours=hours)
+        columns.extend([
+            func.count(func.distinct(case((within, record.guest_subject_hash)))).label(f"browsers_{hours}"),
+            func.count(case((within, 1))).label(f"requests_{hours}"),
+            func.count(case((and_(within, record.outcome.in_(("error", "timeout"))), 1))).label(f"failed_{hours}"),
+            func.count(case((and_(within, record.outcome == "cancelled"), 1))).label(f"cancelled_{hours}"),
+        ])
+        columns.extend(func.count(case((and_(within, record.operation.in_(operations)), 1))).label(f"{kind}_{hours}")
+                       for kind, operations in GUEST_REQUEST_KINDS.items())
+    counts = db.execute(select(*columns).where(
+        record.source == "server", record.started_at >= now - timedelta(hours=168),
+        record.guest_subject_hash.is_not(None), record.test_run_id.is_(None),
+    )).mappings().one()
+    first = counts["first_sample_at"]
+    return {
+        "first_sample_at": first.isoformat(timespec="seconds") + "Z" if first else None,
+        "at_capacity": retained_sources(db)["server"]["at_capacity"],
+        "windows": [{
+            "hours": hours, "active_browsers": counts[f"browsers_{hours}"], "requests": counts[f"requests_{hours}"],
+            "failed": counts[f"failed_{hours}"], "cancelled": counts[f"cancelled_{hours}"],
+            "by_kind": {kind: counts[f"{kind}_{hours}"] for kind in GUEST_REQUEST_KINDS},
+        } for hours in periods],
+    }
+
+
 def registered_users(db, *, limit, offset, search, sort):
     now = utcnow()
     hours = 168
@@ -177,5 +228,6 @@ def registered_users(db, *, limit, offset, search, sort):
         "activation_24h": {"eligible": mature, "completed": activated},
         "visitors": visitor_summary(db, hours=hours),
         "guest_activity": guest_learning_summary(db, since=week_ago, hours=hours),
+        "guest_requests": guest_request_summary(db, now),
         "note": "访客数据按设备隔离且只保留哈希计数，无法反查具体身份。",
     }

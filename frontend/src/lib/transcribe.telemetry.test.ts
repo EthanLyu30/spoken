@@ -51,6 +51,38 @@ it("reports an aborted cloud attempt as cancelled and never returns its late tra
   expect(samples).toEqual([expect.objectContaining({ operation: "asr.transcribe", outcome: "cancelled" })]);
 });
 
+it("distinguishes an empty direct result from cancellation or a provider failure", async () => {
+  backends.open.mockResolvedValue({ transport: "direct", send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn().mockResolvedValue("") });
+  await expect(transcribeSpeech(pcm, undefined, "cloud", createLiveTranscription())).resolves.toBe("");
+  expect(samples).toContainEqual(expect.objectContaining({ operation: "asr.transcribe", transport: "direct", outcome: "error", asr_reason: "empty" }));
+  expect(backends.cloud).not.toHaveBeenCalled();
+});
+
+it("reports the recorded provider code without its message", async () => {
+  backends.cloud.mockRejectedValue(Object.assign(new Error("private provider message"), { providerCode: 11201 }));
+  await expect(transcribeSpeech(pcm, undefined, "cloud")).rejects.toThrow();
+  expect(samples).toContainEqual(expect.objectContaining({ outcome: "error", asr_reason: "provider_error", provider_code: 11201 }));
+  expect(JSON.stringify(samples)).not.toContain("private");
+});
+
+it("reports a closed recorder stream as cancelled even without an outer signal", async () => {
+  backends.open.mockResolvedValue({ transport: "direct", send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn() });
+  const live = createLiveTranscription();
+  live.close();
+  await expect(transcribeSpeech(pcm, undefined, "cloud", live)).rejects.toMatchObject({ name: "AbortError" });
+  expect(samples).toContainEqual(expect.objectContaining({ outcome: "cancelled", asr_reason: "cancelled" }));
+});
+
+it("keeps a deadline separate from cancellation when the transport throws AbortError", async () => {
+  const controller = new AbortController();
+  backends.cloud.mockImplementation(async () => {
+    controller.abort(new DOMException("deadline", "TimeoutError"));
+    throw new DOMException("socket aborted", "AbortError");
+  });
+  await expect(transcribeSpeech(pcm, controller.signal, "cloud")).rejects.toThrow();
+  expect(samples).toContainEqual(expect.objectContaining({ outcome: "timeout", asr_reason: "timeout" }));
+});
+
 it.each(["direct", "relay"] as const)("reports the actual %s live connection in the end-to-end recognition sample", async transport => {
   backends.open.mockResolvedValue({ transport, send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn().mockResolvedValue("complete transcript") });
   await expect(transcribeSpeech(pcm, undefined, "cloud", createLiveTranscription())).resolves.toBe("complete transcript");

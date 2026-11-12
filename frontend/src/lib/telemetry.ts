@@ -1,4 +1,5 @@
 import type { AsrStream } from "./asrStream";
+import { ASR_REASONS, asrFailure, type AsrReason } from "./asrDiagnostics";
 
 export const NATIVE_ERRORS = ["canceled", "interrupted", "audio-busy", "audio-hardware", "network", "synthesis-unavailable", "synthesis-failed", "language-unavailable", "voice-unavailable", "text-too-long", "invalid-argument", "not-allowed", "unknown"] as const;
 export interface NativeDiagnostic {
@@ -24,6 +25,7 @@ interface AsrAttemptDiagnostic {
   audio_bytes?: number;
   result_class?: "empty" | "nonempty";
   provider_code?: number;
+  asr_reason?: AsrReason;
 }
 interface PronunciationDiagnostic {
   entry?: "turn_correction" | "follow_read";
@@ -55,17 +57,55 @@ export function traceHeaders(target?: object | null): Record<string, string> {
   return { ...(id ? { "X-Interaction-Id": id } : {}), ...(run ? { "X-Test-Run-Id": run } : {}) };
 }
 
+async function sendTiming(fetcher: typeof fetch, payload: object): Promise<number | undefined> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const response = await fetcher(`${BASE}/api/telemetry/client`, {
+      method: "POST", headers: { "Content-Type": "text/plain;charset=UTF-8" },
+      credentials: "omit", body: JSON.stringify(payload), signal: controller.signal, keepalive: true,
+    });
+    return response?.status;
+  } catch { return undefined; }
+  finally { clearTimeout(timer); }
+}
+
+async function deliverTiming(sample: { operation: Operation; outcome: string }, diagnostics: Record<string, unknown>) {
+  const fetcher = globalThis.fetch.bind(globalThis);
+  const eventId = newInteractionId();
+  const payload = { ...sample, ...diagnostics, ...(eventId ? { event_id: eventId } : {}) };
+  let status = await sendTiming(fetcher, payload);
+  if (eventId && (status === undefined || status === 408 || status >= 500)) {
+    await new Promise(resolve => setTimeout(resolve, 750));
+    status = await sendTiming(fetcher, payload);
+  }
+  if (status !== 422) return;
+  // Older API versions reject new fields before accepting an event.
+  const legacy = { ...sample, outcome: sample.outcome === "timeout" ? "error" : sample.outcome };
+  const { asr_reason: reason, ...previousDiagnostics } = diagnostics;
+  if (eventId || reason !== undefined || sample.outcome === "timeout") {
+    status = await sendTiming(fetcher, { ...legacy, ...previousDiagnostics });
+  }
+  if (status === 422 && sample.operation === "speech.complete" && Object.keys(previousDiagnostics).length > 0) {
+    await sendTiming(fetcher, legacy);
+  }
+}
+
 /** Best effort and deliberately unauthenticated: no content or identity payload. */
 export function reportTiming(operation: Operation, durationMs: number, options: {
-  outcome?: "ok" | "error" | "cancelled"; engine?: Engine; transport?: Transport; interactionId?: string;
+  outcome?: "ok" | "error" | "timeout" | "cancelled"; engine?: Engine; transport?: Transport; interactionId?: string;
   reason?: NativeDiagnostic["reason"] | NativeEndDiagnostic["reason"];
   playback_started?: boolean;
 } & Omit<NativeDiagnostic, "reason"> & Omit<NativeEndDiagnostic, "reason"> & AsrAttemptDiagnostic & PronunciationDiagnostic = {}): void {
   const maxDuration = operation === "speech.native_end" ? 3_600_000 : 300_000;
   if (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > maxDuration) return;
   const diagnostics: Record<string, unknown> = {};
-  if (operation.startsWith("asr.") && typeof options.provider_code === "number" && Number.isInteger(options.provider_code) && options.provider_code > 0) {
-    diagnostics.provider_code = options.provider_code;
+  if (operation.startsWith("asr.")) {
+    if (options.asr_reason && ASR_REASONS.includes(options.asr_reason)) diagnostics.asr_reason = options.asr_reason;
+    if (typeof options.provider_code === "number" && Number.isInteger(options.provider_code) &&
+        options.provider_code > 0 && options.provider_code <= 99_999) {
+      diagnostics.provider_code = options.provider_code;
+    }
   }
   const integer = (value: number | undefined, min: number, max: number) =>
     typeof value === "number" && Number.isInteger(value) && value >= min && value <= max ? value : undefined;
@@ -113,44 +153,33 @@ export function reportTiming(operation: Operation, durationMs: number, options: 
     const audioBytes = integer(options.audio_bytes, 0, 5_760_000);
     if (audioBytes !== undefined) diagnostics.audio_bytes = audioBytes;
   }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2_000);
+  const run = testRunId();
   const sample = { operation, duration_ms: durationMs, outcome: options.outcome ?? "ok",
     release: import.meta.env.VITE_RELEASE ?? "unknown",
-    ...(testRunId() ? { test_run_id: testRunId() } : {}),
+    ...(run ? { test_run_id: run } : {}),
     engine: options.engine ?? "unknown", transport: options.transport ?? "unknown",
     ...(options.interactionId && /^[a-f0-9]{32}$/.test(options.interactionId) ? { interaction_id: options.interactionId } : {}),
   };
-  const send = (payload: object) => fetch(`${BASE}/api/telemetry/client`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-    signal: controller.signal, keepalive: true,
-  });
-  try {
-    void Promise.resolve(send({ ...sample, ...diagnostics })).then(response => {
-      // A legacy server rejects the new playback fields before storing anything.
-      if (response?.status === 422 && operation === "speech.complete" &&
-          Object.keys(diagnostics).length > 0 && !controller.signal.aborted) return send(sample);
-    }).catch(() => undefined).finally(() => clearTimeout(timer));
-  } catch { clearTimeout(timer); /* instrumentation must not affect recording or playback */ }
+  void deliverTiming(sample, diagnostics).catch(() => undefined);
 }
 
 export function measureAsrStream(stream: AsrStream, transport: "direct" | "relay", signal?: AbortSignal): AsrStream {
   let closed = false;
   const measured: AsrStream = {
     transport,
-    send: (pcm) => stream.send(pcm), close: () => { closed = true; stream.close(); },
+    send: (pcm) => stream.send(pcm), close: (error) => { closed = true; stream.close(error); },
     finishUtterance: async () => {
       const start = performance.now();
-      const interactionId = getInteraction(measured);
+      const interactionId = getInteraction(measured) ?? getInteraction(signal);
       try {
         const text = await stream.finishUtterance();
         reportTiming("asr.finalize", performance.now() - start, { engine: "xfyun", transport, interactionId,
-          outcome: closed || signal?.aborted ? "cancelled" : text.trim() ? "ok" : "error" });
+          ...(closed || signal?.aborted ? asrFailure(undefined, signal, closed)
+            : text.trim() ? { outcome: "ok" } : { outcome: "error", asr_reason: "empty" }) });
         return text;
       } catch (error) {
         reportTiming("asr.finalize", performance.now() - start, { engine: "xfyun", transport, interactionId,
-          outcome: closed || signal?.aborted || (error instanceof DOMException && error.name === "AbortError") ? "cancelled" : "error",
-          provider_code: typeof (error as { providerCode?: unknown }).providerCode === "number" ? (error as { providerCode: number }).providerCode : undefined });
+          ...asrFailure(error, signal, closed) });
         throw error;
       }
     },

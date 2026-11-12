@@ -13,6 +13,7 @@ import { bindInteraction, newInteractionId, reportTiming } from "./telemetry";
 import { assertAuthGeneration, getAuthGeneration, subscribeAuthGeneration } from "./authToken";
 import { asrTurnBudgetMs } from "./transcribe";
 import { ASR_QUOTA_MESSAGE, isAsrQuotaError } from "./asrQuota";
+import { asrFailure } from "./asrDiagnostics";
 
 export type CallPhase = "listening" | "thinking" | "speaking";
 
@@ -30,7 +31,7 @@ export interface CallCallbacks {
   onPartial?: (text: string) => void;
   /**
    * Generate Pip's reply to `userText` AND speak it (sentence-by-sentence).
-   * Resolves once the whole reply has finished playing. `onSpeaking` fires when
+   * Resolves once playback settles, with "cancelled" if it was interrupted. `onSpeaking` fires when
    * the first audio is about to play, so the caller can flip the phase chip from
    * "thinking" to "speaking". Folding generation + speech into one step lets the
    * first sentence play while the rest is still being generated.
@@ -40,7 +41,7 @@ export interface CallCallbacks {
     pcm: ArrayBuffer,
     onSpeaking: () => void,
     signal: AbortSignal,
-  ) => Promise<void>;
+  ) => Promise<void | "cancelled">;
   /**
    * Barge-in: the user started talking over Pip. Called while in the "speaking"
    * phase; the caller should stop the in-flight read-aloud so the user can take
@@ -184,14 +185,15 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     if (ended || identityGeneration !== getAuthGeneration()) return;
     const startedAt = performance.now();
     const interactionId = turnInteractionId ?? newInteractionId();
-    let outcome: "ok" | "error" | "cancelled" = "ok";
+    let outcome: "ok" | "error" | "timeout" | "cancelled" = "ok";
+    let recognizing = true;
     let firstAudio = false;
     const generation = ++turnGeneration;
     const controller = new AbortController();
     turnController = controller;
     const { signal } = controller;
     bindInteraction(signal, interactionId);
-    const asrTimer = setTimeout(() => controller.abort(), asrTurnBudgetMs(pcm) + 8_000);
+    const asrTimer = setTimeout(() => controller.abort(new DOMException("Recognition deadline", "TimeoutError")), asrTurnBudgetMs(pcm) + 8_000);
     if (asr) bindInteraction(asr, interactionId);
     busy = true;
     bargeFrames = [];
@@ -219,11 +221,12 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
       }
       assertAuthGeneration(identityGeneration, signal);
       clearTimeout(asrTimer);
+      recognizing = false;
       if (text && !ended && !signal.aborted) {
         // reply() generates and speaks the answer; it flips us to "speaking"
         // (via the callback) as soon as the first sentence starts. That's also
         // when we arm barge-in so the user can talk over Pip.
-        await cb.reply(text, pcm, () => {
+        const playback = await cb.reply(text, pcm, () => {
           if (ended || signal.aborted || generation !== turnGeneration) return;
           if (!firstAudio) {
             firstAudio = true;
@@ -233,13 +236,16 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
           bargeMs = 0;
           cb.onPhase("speaking");
         }, signal);
+        if (playback === "cancelled") outcome = "cancelled";
       } else outcome = signal.aborted || ended ? "cancelled" : "error";
     } catch (error) {
-      outcome = signal.aborted || ended ? "cancelled" : "error";
-      if (!ended && !signal.aborted) cb.onError(isAsrQuotaError(error) ? ASR_QUOTA_MESSAGE : "这一句没接上，继续说就好～");
+      outcome = asrFailure(error, signal, ended).outcome;
+      if (outcome === "timeout") cb.onError(recognizing ? "语音识别等待超时，请再说一次。" : "回复等待超时，请再试一次。");
+      else if (outcome === "error") cb.onError(isAsrQuotaError(error) ? ASR_QUOTA_MESSAGE : "这一句没接上，继续说就好～");
     } finally {
       clearTimeout(asrTimer);
-      reportTiming("voice.complete", performance.now() - startedAt, { interactionId, outcome: signal.aborted ? "cancelled" : outcome });
+      reportTiming("voice.complete", performance.now() - startedAt, { interactionId,
+        outcome: signal.aborted ? asrFailure(undefined, signal, ended).outcome : outcome });
       if (generation === turnGeneration) {
         busy = false;
         speaking = false;

@@ -9,12 +9,27 @@ it("submits only bounded numeric timing and declared metadata, never business co
   reportTiming("asr.finalize", 920, { engine: "xfyun", transport: "direct" });
   expect(fetcher).toHaveBeenCalledOnce();
   const [, options] = fetcher.mock.calls[0];
-  expect(JSON.parse(options.body)).toEqual({ operation: "asr.finalize", duration_ms: 920, outcome: "ok", engine: "xfyun", transport: "direct", release: "development" });
+  expect(JSON.parse(options.body)).toEqual({ event_id: expect.stringMatching(/^[a-f0-9]{32}$/), operation: "asr.finalize", duration_ms: 920, outcome: "ok", engine: "xfyun", transport: "direct", release: "development" });
+  expect(options.headers["Content-Type"]).toMatch(/^text\/plain/i);
   expect(options.headers).not.toHaveProperty("Authorization");
   reportTiming("asr.finalize", Number.NaN);
   reportTiming("asr.finalize", -1);
   reportTiming("asr.finalize", 300001);
   expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it("retries a temporary collector failure once with the same event id", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+  vi.stubGlobal("fetch", fetcher);
+  vi.useFakeTimers();
+  try {
+    reportTiming("asr.transcribe", 610, { engine: "xfyun", transport: "direct" });
+    await vi.runAllTimersAsync();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const [first, second] = fetcher.mock.calls.map(([, options]) => JSON.parse(options.body));
+    expect(first.event_id).toMatch(/^[a-f0-9]{32}$/);
+    expect(second).toEqual(first);
+  } finally { vi.useRealTimers(); }
 });
 
 it("telemetry network failures never change a successful ASR result", async () => {
@@ -23,18 +38,30 @@ it("telemetry network failures never change a successful ASR result", async () =
   expect(await wrapped.finishUtterance()).toBe("a private transcript");
 });
 
-it("retries a rejected playback diagnostic once in the legacy format", async () => {
+it("preserves playback diagnostics when the older server rejects only the event id", async () => {
   const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, { status: 422 }))
+    .mockResolvedValueOnce(new Response(null, { status: 202 }));
+  vi.stubGlobal("fetch", fetcher);
+  reportTiming("speech.complete", 200, { engine: "browser", playback_started: true });
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  const [, fallback] = fetcher.mock.calls.map(([, options]) => JSON.parse(options.body));
+  expect(fallback).toHaveProperty("playback_started", true);
+  expect(fallback).not.toHaveProperty("event_id");
+});
+
+it("supports a server that also predates playback diagnostics", async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, { status: 422 }))
+    .mockResolvedValueOnce(new Response(null, { status: 422 }))
     .mockResolvedValueOnce(new Response(null, { status: 202 }));
   vi.stubGlobal("fetch", fetcher);
   const interactionId = "a".repeat(32);
   reportTiming("speech.complete", 200, { engine: "browser", interactionId, playback_started: true, reason: "end_before_start" });
-  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
-  const [first, second] = fetcher.mock.calls.map(([, options]) => JSON.parse(options.body));
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3));
+  const [first, , fallback] = fetcher.mock.calls.map(([, options]) => JSON.parse(options.body));
   expect(first).toMatchObject({ playback_started: true, reason: "end_before_start" });
-  expect(second).toMatchObject({ operation: "speech.complete", duration_ms: 200, outcome: "ok", interaction_id: interactionId });
-  expect(second).not.toHaveProperty("playback_started");
-  expect(second).not.toHaveProperty("reason");
+  expect(fallback).toMatchObject({ operation: "speech.complete", duration_ms: 200, outcome: "ok", interaction_id: interactionId });
+  expect(fallback).not.toHaveProperty("playback_started");
+  expect(fallback).not.toHaveProperty("reason");
 });
 
 it("carries the automation test run and provider code without content", async () => {
