@@ -23,6 +23,40 @@
 .skip-to-content:focus {
   transform: none;
 }
+.chart-data-details > summary {
+  width: fit-content;
+  max-width: 100%;
+  min-height: 44px;
+  padding-block: 10px;
+  color: var(--coral-deep);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 24px;
+}
+.chart-data-scroll {
+  max-height: min(20rem, 55vh);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.chart-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+.chart-data-table :is(th, td) {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.chart-data-table th[scope="col"] {
+  background: var(--surface-2);
+}
 .profile-load-state {
   display: flex;
   flex-direction: column;

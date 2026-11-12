@@ -46,6 +46,10 @@ function date(iso: string) {
       });
 }
 
+function scenarioTitle(id: string) {
+  return getScenario(id)?.titleZh ?? (id === "custom" ? "自定义场景" : id);
+}
+
 export default function Progress() {
   const navigate = useNavigate();
   const account = useAuth((s) => s.user?.id);
@@ -68,6 +72,7 @@ export default function Progress() {
   const includesPractice = filter !== "session";
   const historyFailed = (includesSessions && sessionsFailed) || (includesPractice && practiceFailed);
   const historyPending = (includesSessions && data.sessionsPending) || (includesPractice && data.practicePending);
+  const [trendOpen, setTrendOpen] = useState(false);
   const [radarOpen, setRadarOpen] = useState(false);
   const [review, setReview] = useState<{
     owner: string;
@@ -97,6 +102,7 @@ export default function Progress() {
   const total = stats ? stats.total_sessions + stats.total_practice : null;
   const goal = stats?.today_goal ?? 3;
   const today = stats?.today_count;
+  const trendSessions = useMemo(() => [...sessions].reverse(), [sessions]);
   const lineOption = useMemo<EChartsOption>(
     () => ({
       grid: { left: 32, right: 18, top: 20, bottom: 28 },
@@ -104,9 +110,7 @@ export default function Progress() {
       xAxis: {
         type: "category",
         boundaryGap: false,
-        data: [...sessions]
-          .reverse()
-          .map((s) => date(s.created_at).split(" ")[0]),
+        data: trendSessions.map((s) => date(s.created_at).split(" ")[0]),
         axisLabel: { color: tokens.muted, hideOverlap: true, fontSize: 10 },
         axisLine: { lineStyle: { color: tokens.border } },
         axisTick: { show: false },
@@ -122,7 +126,7 @@ export default function Progress() {
         {
           type: "line",
           smooth: true,
-          data: [...sessions].reverse().map((s) => s.overall),
+          data: trendSessions.map((s) => s.overall),
           symbolSize: 6,
           lineStyle: { color: tokens.coral, width: 3 },
           itemStyle: { color: tokens.coral },
@@ -130,7 +134,7 @@ export default function Progress() {
         },
       ],
     }),
-    [sessions],
+    [trendSessions],
   );
   const radarOption = useMemo<EChartsOption>(
     () => ({
@@ -162,9 +166,7 @@ export default function Progress() {
       key: "s" + s.id,
       id: s.id,
       kind: "session",
-      title:
-        getScenario(s.scenario_id)?.titleZh ??
-        (s.scenario_id === "custom" ? "自定义场景" : s.scenario_id),
+      title: scenarioTitle(s.scenario_id),
       score: s.overall,
       scale: 100,
       at: s.created_at,
@@ -328,13 +330,33 @@ export default function Progress() {
               <span className="learning-unit">场景对话 · /100</span>
             </div>
             {sessions.length > 0 ? (
-              <Suspense
-                fallback={
-                  <div className="chart-placeholder">正在绘制你的练习趋势…</div>
-                }
-              >
-                <EChart option={lineOption} height={230} />
-              </Suspense>
+              <>
+                <Suspense fallback={<div className="chart-placeholder">正在绘制你的练习趋势…</div>}>
+                  <EChart option={lineOption} height={230} />
+                </Suspense>
+                <details className="chart-data-details" open={trendOpen} onToggle={(event) => setTrendOpen(event.currentTarget.open)}>
+                  <summary>查看场景对话趋势数据</summary>
+                  {trendOpen && (
+                    <div className="chart-data-scroll" role="region" aria-label="场景对话趋势数据" tabIndex={0}>
+                      <table className="chart-data-table">
+                        <caption className="sr-only">场景对话趋势</caption>
+                        <thead>
+                          <tr><th scope="col">练习时间</th><th scope="col">场景</th><th scope="col">总分（满分 100）</th></tr>
+                        </thead>
+                        <tbody>
+                          {trendSessions.map((session) => (
+                            <tr key={session.id}>
+                              <td>{date(session.created_at)}</td>
+                              <td>{scenarioTitle(session.scenario_id)}</td>
+                              <td>{session.overall}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </details>
+              </>
             ) : (
               <div className="learning-chart-empty">
                 <ChartNoAxesCombined />
@@ -412,17 +434,26 @@ export default function Progress() {
             )}
             {latest?.scores.length ? (
               <details
+                className="chart-data-details"
+                open={radarOpen}
                 onToggle={(event) => setRadarOpen(event.currentTarget.open)}
               >
                 <summary>查看最近一次能力雷达</summary>
                 {radarOpen && (
-                  <Suspense
-                    fallback={
-                      <div className="chart-placeholder">正在绘制能力雷达…</div>
-                    }
-                  >
-                    <EChart option={radarOption} height={230} />
-                  </Suspense>
+                  <>
+                    <Suspense fallback={<div className="chart-placeholder">正在绘制能力雷达…</div>}>
+                      <EChart option={radarOption} height={230} />
+                    </Suspense>
+                    <table className="chart-data-table">
+                      <caption className="sr-only">最近一次能力评分</caption>
+                      <thead><tr><th scope="col">能力</th><th scope="col">得分（满分 100）</th></tr></thead>
+                      <tbody>
+                        {latest.scores.map((score) => (
+                          <tr key={score.key}><th scope="row">{score.label_zh}</th><td>{score.score}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
                 )}
               </details>
             ) : null}

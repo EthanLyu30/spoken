@@ -98,6 +98,7 @@ export default function Admin() {
   const setFilters = diagnostics ? setDiagnosticFilters : setOverviewFilters;
   const setReleaseMode = diagnostics ? setDiagnosticReleaseMode : setOverviewReleaseMode;
   const [overviewData, setData] = useState<AdminOverview | null>(null);
+  const [trendOpen, setTrendOpen] = useState(false);
   const [traceRows, setRows] = useState<AdminTrace[]>([]);
   const [traceTotal, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -411,7 +412,34 @@ export default function Admin() {
         onPlaybackDetails={openPlaybackDiagnostics} />}
       <section className={`admin-panels${filters.source === "browser" ? " admin-panels-single" : ""}`}>
         <article className="admin-panel admin-trend"><div className="admin-panel-heading"><h2>耗时趋势</h2><span>每小时 P95 · 按业务分别统计</span></div>
-          {data.trend.length ? <EChart height={176} option={chart} /> : <div className="admin-chart-empty"><Clock3 size={23} /><strong>当前筛选还没有耗时样本</strong><span>可调整业务或时间范围；采集到真实请求后展示趋势。</span></div>}
+          {data.trend.length ? (
+            <>
+              <EChart height={176} option={chart} />
+              <details className="chart-data-details" open={trendOpen} onToggle={(event) => setTrendOpen(event.currentTarget.open)}>
+                <summary>查看每小时耗时数据</summary>
+                {trendOpen && (
+                  <div className="chart-data-scroll" role="region" aria-label="每小时耗时数据" tabIndex={0}>
+                    <table className="chart-data-table">
+                      <caption className="sr-only">每小时耗时趋势（北京时间）</caption>
+                      <thead>
+                        <tr><th scope="col">时间 · 北京</th><th scope="col">业务操作</th><th scope="col">记录数</th><th scope="col">P95（毫秒）</th></tr>
+                      </thead>
+                      <tbody>
+                        {data.trend.map((point) => (
+                          <tr key={point.time + point.operation}>
+                            <td><time dateTime={point.time}>{date(point.time)}</time></td>
+                            <td>{names[point.operation] ?? point.operation}</td>
+                            <td>{number(point.count)}</td>
+                            <td>{point.p95 == null ? "无数据" : number(point.p95)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </details>
+            </>
+          ) : <div className="admin-chart-empty"><Clock3 size={23} /><strong>当前筛选还没有耗时样本</strong><span>可调整业务或时间范围；采集到真实请求后展示趋势。</span></div>}
           <div className="admin-status-line"><span>取消 <b>{data.cancelled}</b> 次，单独记录</span><span>各业务耗时独立观察</span></div>
         </article>
         {filters.source === "server" && <article className="admin-panel admin-usage"><div className="admin-panel-heading"><h2><Database size={16} />模型与费用</h2>{data.pricing && <code className="admin-model-name">{data.pricing.configured_model}</code>}</div>

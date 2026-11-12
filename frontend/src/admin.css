@@ -95,6 +95,9 @@
 .admin-panel-heading{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .admin-panel-heading h2{font-size:15px;font-weight:800;margin:0;display:flex;align-items:center;gap:8px;line-height:1.4}
 .admin-panel-heading h2 span,.admin-panel-heading>span{font-size:12px;color:var(--admin-muted);font-weight:400}
+.admin-trend .chart-data-details{margin:0 18px 12px}
+.admin-trend .chart-data-table{white-space:normal}
+.admin-trend .chart-data-table :is(th,td){padding:8px 10px}
 .admin-status-line{display:flex;justify-content:space-between;gap:12px;padding:9px 18px;border-top:1px solid #f0e8df;font-size:12px;color:var(--admin-muted)}
 .admin-status-line b{font-weight:700;color:#65513f;padding:0 3px;font-variant-numeric:tabular-nums}
 .admin-chart-empty{min-height:176px;display:flex;flex-direction:column;gap:9px;align-items:center;justify-content:center;color:#9a846f;padding:20px;text-align:center}

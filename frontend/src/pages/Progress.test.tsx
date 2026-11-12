@@ -1,11 +1,14 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { PracticeRecord } from "../lib/api";
+import type { PracticeRecord, ProgressSessions, SessionSummary } from "../lib/api";
 
-const mock = vi.hoisted(() => ({ records: [] as PracticeRecord[], errors: [] as string[], reload: vi.fn() }));
+const mock = vi.hoisted(() => ({
+  records: [] as PracticeRecord[], sessions: [] as SessionSummary[],
+  latest: null as ProgressSessions["latest"], errors: [] as string[], reload: vi.fn(),
+}));
 vi.mock("../hooks/useProgressData", () => ({ useProgressData: () => ({
-  sessions: [], practice: mock.records, stats: null, insights: null, latest: null,
+  sessions: mock.sessions, practice: mock.records, stats: null, insights: null, latest: mock.latest,
   status: mock.errors.includes("sessions") ? "error" : "ready", errors: mock.errors,
   sessionsPending: false, practicePending: false, statsPending: false, reload: mock.reload,
 }) }));
@@ -25,9 +28,42 @@ function show() {
 }
 beforeEach(() => {
   mock.records = [];
+  mock.sessions = [];
+  mock.latest = null;
   mock.errors = [];
   mock.reload.mockClear();
   useAuth.setState({ user: null });
+});
+
+it("provides the plotted conversations and latest ability scores as named tables", async () => {
+  mock.sessions = [
+    { id: 2, scenario_id: "hotel", overall: 83, created_at: "2026-11-12T08:00:00Z" },
+    { id: 1, scenario_id: "cafe", overall: 70, created_at: "2026-11-11T08:00:00Z" },
+  ];
+  mock.latest = {
+    id: 2,
+    scores: [
+      { key: "fluency", label_en: "Fluency", label_zh: "流利度", score: 85 },
+      { key: "grammar", label_en: "Grammar", label_zh: "语法", score: 0 },
+    ],
+  };
+  show();
+
+  fireEvent.click(screen.getByText("查看场景对话趋势数据", { selector: "summary" }));
+  const trend = await screen.findByRole("table", { name: "场景对话趋势" });
+  const [, earlier, later] = within(trend).getAllByRole("row");
+  expect(within(earlier).getByRole("cell", { name: "咖啡馆点单" })).toBeVisible();
+  expect(within(earlier).getByRole("cell", { name: "70" })).toBeVisible();
+  expect(within(later).getByRole("cell", { name: "酒店入住" })).toBeVisible();
+  expect(within(later).getByRole("cell", { name: "83" })).toBeVisible();
+
+  fireEvent.click(screen.getByText("查看最近一次能力雷达", { selector: "summary" }));
+  const scores = await screen.findByRole("table", { name: "最近一次能力评分" });
+  const [, fluency, grammar] = within(scores).getAllByRole("row");
+  expect(within(fluency).getByRole("rowheader", { name: "流利度" })).toBeVisible();
+  expect(within(fluency).getByRole("cell", { name: "85" })).toBeVisible();
+  expect(within(grammar).getByRole("rowheader", { name: "语法" })).toBeVisible();
+  expect(within(grammar).getByRole("cell", { name: "0" })).toBeVisible();
 });
 
 it.each(["sessions", "practice"])("offers a retry when %s fail instead of inviting a first practice", (source) => {
