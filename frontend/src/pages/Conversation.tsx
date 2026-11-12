@@ -739,18 +739,16 @@ export default function Conversation() {
               ? "idle"
               : "listening";
 
-  const stageStatus =
-    callPhase === "speaking"
-      ? "Pip 在说…"
-      : callPhase === "thinking"
-        ? "Pip 正在想…"
-        : callPhase === "listening"
-          ? "在听你说…（说完停顿一下我就接话）"
-          : loading
-            ? "Pip 正在想怎么回答…"
-            : booting
-              ? "正在连接 Pip…"
-              : "准备好了就开口，Pip 会陪你聊下去";
+  const stageStatus = callPhase ? {
+    speaking: "Pip 在说…",
+    thinking: "Pip 正在想…",
+    listening: "在听你说…（说完停顿一下我就接话）",
+  }[callPhase] : callStarting ? "正在连接麦克风…"
+    : recording ? "正在录音，结束后开始识别。"
+    : transcribing ? "正在识别录音…"
+    : loading ? "Pip 正在想怎么回答…"
+    : booting ? "正在连接 Pip…"
+    : "准备好了就开口，Pip 会陪你聊下去";
 
   return (
     <div
@@ -839,7 +837,7 @@ export default function Conversation() {
             </div>
             <p
               role="status"
-              aria-live="polite"
+              aria-atomic="true"
               className="mt-1 font-display text-base font-semibold text-ink"
             >
               {stageStatus}
@@ -873,17 +871,13 @@ export default function Conversation() {
               </div>
             )}
             {inCall && liveCaption && (
-              <p
-                aria-live="polite"
-                aria-atomic="true"
-                className="mt-2 max-w-xl rounded-2xl bg-surface px-4 py-2 text-sm italic text-ink/70 shadow-soft"
-              >
-                {liveCaption}
+              <p className="mt-2 max-w-xl rounded-2xl bg-surface px-4 py-2 text-sm italic text-ink/70 shadow-soft">
+                <span className="sr-only">实时转写预览 </span><span lang="en">{liveCaption}</span>
               </p>
             )}
           </div>
 
-          <main className="practice-log min-h-0 flex-1 space-y-5 overflow-y-auto">
+          <main id="spoken-main" tabIndex={-1} aria-label="对话记录" className="practice-log min-h-0 flex-1 space-y-5 overflow-y-auto">
             {messages.map((m, i) => (
               <ChatBubble
                 key={i}

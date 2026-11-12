@@ -34,6 +34,7 @@ export default function App() {
   const resolutionError = useAuth((s) => s.resolutionError);
   const focused = location.pathname.startsWith("/practice/");
   const section = location.pathname.split("/")[1] || "home";
+  const hasSkipTarget = focused || ["/", "/scenes", "/custom", "/interview"].includes(location.pathname);
   // Account resolution must never hide the routes: Home, Scenes and practice
   // remain usable while `/auth/me` validates in the background. Only an
   // unresolved credential shows a non-blocking notice.
@@ -43,6 +44,14 @@ export default function App() {
       <SiteVisitTracker />
       <SpeechPlaybackError />
       <div className={`app-route route-${section}`}>
+        {hasSkipTarget && (
+          <a className="skip-to-content" href="#spoken-main" onClick={(event) => {
+            const content = document.getElementById("spoken-main");
+            if (!content) return;
+            event.preventDefault();
+            content.focus();
+          }}>跳到主要内容</a>
+        )}
         {authNotice && (
           <div
             className={`auth-notice${resolutionError ? " auth-notice-error" : ""}`}
@@ -69,7 +78,7 @@ export default function App() {
         <RouteErrorBoundary key={location.pathname}>
         <Suspense
           fallback={
-            <div role="status" className="route-loading">
+            <div role="status" className="route-loading" id={hasSkipTarget ? "spoken-main" : undefined} tabIndex={hasSkipTarget ? -1 : undefined}>
               正在打开页面…
             </div>
           }

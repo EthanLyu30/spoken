@@ -43,7 +43,7 @@ export default function CustomScenePage() {
     <div className="min-h-screen pb-24">
       <PlayfulBackground />
 
-      <main className="mx-auto w-full max-w-2xl px-5 py-6 custom-page">
+      <main id="spoken-main" tabIndex={-1} className="mx-auto w-full max-w-2xl px-5 py-6 custom-page">
         <div className="ui-page-head">
           <div>
             <p className="eyebrow">CUSTOM SCENE</p>

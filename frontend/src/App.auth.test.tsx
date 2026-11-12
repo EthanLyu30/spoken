@@ -1,11 +1,12 @@
 import { useEffect } from "react";
 import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
 const lifecycle = vi.hoisted(() => ({ mounts: 0, unmounts: 0 }));
 vi.mock("./pages/Home", () => ({ default: function Home() {
   useEffect(() => { lifecycle.mounts++; return () => { lifecycle.unmounts++; }; }, []);
-  return <div>Owner home</div>;
+  return <main id="spoken-main" tabIndex={-1}>Owner home</main>;
 } }));
 vi.mock("./components/dictionary/DictionaryProvider", () => ({ DictionaryProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 vi.mock("./components/SiteVisitTracker", () => ({ SiteVisitTracker: () => null }));
@@ -19,6 +20,15 @@ beforeEach(() => {
   lifecycle.mounts = 0; lifecycle.unmounts = 0;
 });
 const mount = () => render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><App /></MemoryRouter>);
+it("lets a keyboard user skip directly to the landing page content", async () => {
+  const user = userEvent.setup();
+  mount();
+  await user.tab();
+  expect(screen.getByRole("link", { name: "跳到主要内容" })).toHaveFocus();
+  await user.keyboard("{Enter}");
+  expect(screen.getByRole("main")).toHaveFocus();
+});
+
 it("keeps routes usable while account resolution runs", async () => {
   mount(); await screen.findByText("Owner home");
   act(() => { setToken("unresolved"); });

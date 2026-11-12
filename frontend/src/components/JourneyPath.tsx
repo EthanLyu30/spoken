@@ -23,7 +23,7 @@ export function JourneyPath({ scenarios }: { scenarios: Scenario[] }) {
                 </span>
                 <span className="stop-label">
                   <strong>{s.titleZh}</strong>
-                  <span>{s.title}</span>
+                  <span lang="en">{s.title}</span>
                   <small>
                     {difficultyLabel(s.difficulty)} · {s.minutes} 分钟 · +
                     {xpReward(s.difficulty, s.minutes)} XP

@@ -3,13 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ getInterviewSets: vi.fn(), begin: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getInterviewSets: vi.fn(), begin: vi.fn(), session: {} as Record<string, unknown> }));
 vi.mock("../lib/api", async (original) => ({
   ...await original<typeof import("../lib/api")>(),
   getInterviewSets: mocks.getInterviewSets,
 }));
 vi.mock("../hooks/useInterviewSession", () => ({
-  useInterviewSession: () => ({ phase: "intro", begin: mocks.begin }),
+  useInterviewSession: () => ({ phase: "intro", begin: mocks.begin, ...mocks.session }),
 }));
 import Interview from "./Interview";
 
@@ -45,6 +45,7 @@ const catalogue = [
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getInterviewSets.mockResolvedValue(catalogue);
+  mocks.session = {};
 });
 
 async function setup() {
@@ -134,4 +135,29 @@ it("uses actual imported counts and offers a source switch when a collection is 
   expect(screen.getByRole("button", { name: "开始这组练习" })).toBeEnabled();
   await user.click(screen.getByText("系列收录说明"));
   expect(screen.getByText(/博主系列已收录 0 组，ETS 公开样题 5 组/)).toBeInTheDocument();
+});
+
+it("announces only recording milestones and moves focus to answer review", async () => {
+  mocks.session = { phase: "quiz", qPhase: "recording", mode: "practice", idx: 0, left: 45, answers: [],
+    deck: { topic: "咖啡馆", topic_en: "Coffee shops", questions: ["What do you like to order?"], hints: ["Describe a drink."] } };
+  const page = () => <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><Interview /></MemoryRouter>;
+  const view = render(page());
+  const status = screen.getByRole("status");
+  expect(status).toHaveTextContent("第 1 题，录音已开始");
+  expect(screen.getByRole("heading", { name: "What do you like to order?" })).toHaveAttribute("lang", "en");
+  mocks.session.left = 44;
+  view.rerender(page());
+  expect(status).toHaveTextContent("第 1 题，录音已开始");
+  mocks.session.left = 10;
+  view.rerender(page());
+  expect(status).toHaveTextContent("进入最后 10 秒");
+  mocks.session.left = 9;
+  view.rerender(page());
+  expect(status).toHaveTextContent("进入最后 10 秒");
+  mocks.session.qPhase = "review";
+  mocks.session.draft = "I like a latte.";
+  view.rerender(page());
+  expect(status).toHaveTextContent("核对你的回答");
+  expect(screen.getByText("确认你的回答")).toHaveFocus();
+  expect(screen.getByRole("textbox", { name: /确认你的回答/ })).toHaveValue("I like a latte.");
 });

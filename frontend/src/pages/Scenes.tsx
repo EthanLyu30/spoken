@@ -22,7 +22,7 @@ export default function Scenes() {
     .filter((s): s is Scenario => !!s);
   return (
     <div className="min-h-screen pb-24">
-      <main className="mx-auto scene-page">
+      <main id="spoken-main" tabIndex={-1} className="mx-auto scene-page">
         <div className="ui-page-head">
           <div>
             <p className="eyebrow">SCENE PRACTICE</p>
@@ -31,23 +31,26 @@ export default function Scenes() {
           </div>
           <SceneTabs />
         </div>
-        <div className="chapter-bar">
+        <div className="chapter-bar" role="group" aria-label="闯关章节">
           {chapters.map((item, i) => (
             <button
               type="button"
               key={item.title}
               aria-pressed={active === i}
+              aria-controls="scene-journey"
               className={active === i ? "active" : ""}
               onClick={() => setActive(i)}
             >
               {item.titleZh}
             </button>
           ))}
-          <span>
-            {chapter.title} · {selected.length} 关
+          <span role="status" aria-atomic="true">
+            {chapter.titleZh} · {selected.length} 关
           </span>
         </div>
-        <JourneyPath scenarios={selected} key={chapter.title} />
+        <section id="scene-journey" aria-label={`${chapter.titleZh}闯关地图`}>
+          <JourneyPath scenarios={selected} key={chapter.title} />
+        </section>
         {otherScenes.length > 0 && (
           <section className="ui-section additional-scenes">
             <h2>更多场景</h2>
@@ -56,7 +59,7 @@ export default function Scenes() {
                 <Link to={`/practice/${s.id}`} key={s.id}>
                   <span>
                     <strong>{s.titleZh}</strong>
-                    <small>{s.title}</small>
+                    <small lang="en">{s.title}</small>
                   </span>
                   <ArrowRight />
                 </Link>

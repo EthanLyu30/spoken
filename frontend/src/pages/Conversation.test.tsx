@@ -152,6 +152,7 @@ it("streams push-to-talk audio into ASR instead of replaying the clip after stop
   render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
   await screen.findByText("Hello");
   await user.click(screen.getByRole("button", { name: "开始录音" }));
+  expect(screen.getByRole("status")).toHaveTextContent("正在录音");
   act(() => emit?.(new ArrayBuffer(1280)));
   await user.click(await screen.findByRole("button", { name: "结束录音" }));
   await waitFor(() => expect(mocks.streamChat).toHaveBeenCalled());

@@ -20,3 +20,17 @@ it("retains every catalogue scene across chapter changes and keeps custom scenes
     expect(screen.getByRole("link", { name: new RegExp(scene.titleZh) })).toHaveAttribute("href", `/practice/${scene.id}`);
   }
 });
+
+it("identifies the active chapter and exposes its updated list to assistive technology", async () => {
+  const user = userEvent.setup();
+  render(<MemoryRouter><Scenes /></MemoryRouter>);
+  const chapter = chapters[1];
+  const control = screen.getByRole("button", { name: chapter.titleZh });
+  control.focus();
+  await user.keyboard("{Enter}");
+  expect(control).toHaveFocus();
+  expect(control).toHaveAttribute("aria-pressed", "true");
+  const list = screen.getByRole("region", { name: `${chapter.titleZh}闯关地图` });
+  expect(control).toHaveAttribute("aria-controls", list.id);
+  expect(screen.getByRole("status")).toHaveTextContent(`${chapter.titleZh} · ${chapter.ids.length} 关`);
+});

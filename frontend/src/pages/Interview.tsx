@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -66,9 +66,24 @@ export default function Interview() {
   const etsCount = sets.filter((entry) => entry.collection === "ets").length;
   const { phase, deck, idx, qPhase, error } = session;
   const active = phase !== "intro" && phase !== "results";
+  const reviewLabel = useRef<HTMLLabelElement>(null);
+  useEffect(() => {
+    if (phase === "quiz" && qPhase === "review") reviewLabel.current?.focus();
+  }, [phase, qPhase, idx]);
+  const questionStatus = {
+    ready: "可以开始回答",
+    listening: "正在播放题目",
+    starting: "正在连接麦克风",
+    recording: session.left <= 10 ? "进入最后 10 秒" : "录音已开始",
+    transcribing: "正在识别回答",
+    review: "请核对你的回答",
+  }[qPhase];
   return (
     <div className="min-h-screen pb-24 interview-page-v2">
-      <main className="mx-auto">
+      <main id="spoken-main" tabIndex={-1} className="mx-auto">
+        <p className="sr-only" role="status" aria-atomic="true">
+          {phase === "quiz" && `第 ${idx + 1} 题，${questionStatus}`}
+        </p>
         {phase === "intro" && (
           <>
             <header className="interview-heading-v2">
@@ -277,7 +292,7 @@ export default function Interview() {
                     45 秒作答
                   </span>
                 </div>
-                <h2>{deck.questions[idx]}</h2>
+                <h2 lang="en">{deck.questions[idx]}</h2>
                 {session.mode === "practice" && (
                   <div className="interview-question-tools">
                     <button onClick={() => speakText(deck.questions[idx])}>
@@ -330,11 +345,12 @@ export default function Interview() {
                     </>
                   ) : qPhase === "review" ? (
                     <>
-                      <label htmlFor="interview-transcript">
+                      <label ref={reviewLabel} tabIndex={-1} htmlFor="interview-transcript">
                         确认你的回答<span>可修正识别错误</span>
                       </label>
                       <textarea
                         id="interview-transcript"
+                        lang="en"
                         value={session.draft}
                         maxLength={4000}
                         onChange={(e) => session.setDraft(e.target.value)}
@@ -426,6 +442,7 @@ export default function Interview() {
                   {stages.map((stage, i) => (
                     <li
                       key={stage}
+                      aria-current={i === idx ? "step" : undefined}
                       className={
                         i === idx ? "active" : i < idx ? "complete" : ""
                       }

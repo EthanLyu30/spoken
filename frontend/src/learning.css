@@ -447,7 +447,7 @@
 }
 .interview-source-chip {
   font-size: 10px;
-  color: var(--leaf);
+  color: var(--leaf-deep);
   padding: 5px 9px;
   background: #eef3e8;
   border-radius: 20px;
@@ -606,7 +606,7 @@
 }
 .interview-topic-source {
   display: block;
-  color: #ac8b70;
+  color: var(--muted);
   font-size: 9px;
   margin-top: 7px;
 }
@@ -741,7 +741,7 @@
   font-size: 13px;
 }
 .interview-start-panel li > span {
-  color: #ae8d72;
+  color: var(--muted);
   font-size: 10px;
 }
 .interview-start-panel .ui-button {
@@ -990,15 +990,15 @@
   display: grid;
   place-items: center;
   font-size: 10px;
-  color: #a78b74;
+  color: var(--muted);
 }
 .interview-run-sidebar li.active > span {
-  background: var(--coral);
+  background: var(--coral-deep);
   color: white;
 }
 .interview-run-sidebar li.complete > span {
   background: #e6eee2;
-  color: var(--leaf);
+  color: var(--leaf-deep);
 }
 .interview-run-sidebar strong {
   font-size: 12px;
@@ -1119,7 +1119,7 @@
     padding: 20px 0 24px;
     background: none;
   }
-  .hero-inner h1 {
+  .app-route .home-page .hero-inner h1 {
     font-size: clamp(31px, 9vw, 39px);
     margin-top: 11px;
     letter-spacing: -1.5px;
@@ -1473,14 +1473,24 @@
     height: 180px;
     background-size: auto 260px;
   }
-  .hero-actions .ui-button,
-  .hero-actions .ui-secondary {
-    font-size: 11px;
-    padding-inline: 7px;
+  .hero-actions {
+    grid-template-columns: minmax(0, 1fr);
   }
-  .hero-actions svg {
-    width: 15px;
-    height: 15px;
+  .interview-mobile-quickstart {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+  }
+  .interview-mobile-quickstart > span,
+  .interview-modes > button > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .interview-modes strong {
+    flex-wrap: wrap;
+  }
+  .interview-modes p {
+    font-size: 12px;
   }
   .interview-topic-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

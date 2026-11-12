@@ -38,7 +38,7 @@ export function ChatBubble({
             : { background: "#f7eee2", color: "var(--ink)" }
         }
       >
-        <p className="text-[0.66rem] font-bold uppercase tracking-wide opacity-70">
+        <p className="text-[0.66rem] font-bold uppercase tracking-wide text-muted">
           {isPip ? "Pip" : "You"}
         </p>
         <p className="mt-0.5 leading-snug">
@@ -51,7 +51,7 @@ export function ChatBubble({
                 type="button"
                 onClick={onSpeak}
                 aria-label="朗读"
-                className="inline-flex w-fit items-center gap-1 text-[0.66rem] font-bold uppercase tracking-wide opacity-60 transition-opacity hover:opacity-100"
+                className="inline-flex w-fit items-center gap-1 text-[0.66rem] font-bold uppercase tracking-wide text-muted transition-colors hover:text-ink"
               >
                 <Volume2 className="h-3.5 w-3.5" />
                 朗读
