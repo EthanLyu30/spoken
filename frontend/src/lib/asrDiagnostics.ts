@@ -1,4 +1,6 @@
 /** Only bounded categories and numeric provider codes leave the browser. */
+export const ASR_OPERATIONS = ["asr.transcribe", "asr.finalize", "asr.attempt"] as const;
+export const ASR_STAGES = ["authorize", "open", "stream", "stream_final", "whole_clip", "http_buffered"] as const;
 export const ASR_REASONS = [
   "empty", "incomplete", "timeout", "disconnect", "provider_error",
   "http_error", "unavailable", "cancelled", "user_cancelled", "quota_cooldown", "unknown",

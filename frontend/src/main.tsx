@@ -8,9 +8,14 @@ import "./ui.css";
 import "./learning.css";
 import { bootstrapLocalSpeechModels } from "./lib/localSpeech/bootstrap";
 import { initializeAuthSync } from "./lib/authSync";
+import { initializeAsrTelemetryRecovery } from "./lib/telemetry";
 
 const cleanupAuthSync = initializeAuthSync();
-if (import.meta.hot) import.meta.hot.dispose(cleanupAuthSync);
+const stopAsrTelemetryRecovery = initializeAsrTelemetryRecovery();
+if (import.meta.hot) import.meta.hot.dispose(() => {
+  cleanupAuthSync();
+  stopAsrTelemetryRecovery();
+});
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
