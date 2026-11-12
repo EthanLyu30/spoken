@@ -334,6 +334,85 @@ def test_replayed_asr_uses_occurrence_bucket_and_keeps_first_receipt(client, mon
     assert (last_hour["errors"], last_hour["timeouts"]) == (0, 1)
 
 
+def test_marked_telemetry_uses_spare_capacity_without_displacing_unmarked_history(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.models.telemetry import TelemetryRecord
+    from app.services import telemetry
+
+    engine = create_engine("sqlite://")
+    try:
+        TelemetryRecord.__table__.create(engine)
+        sessions = sessionmaker(bind=engine)
+        monkeypatch.setattr(telemetry, "SessionLocal", sessions)
+        monkeypatch.setattr(get_settings(), "telemetry_max_records", 100)
+        now = utcnow()
+
+        def records(source, count, *, batch=None):
+            return [{"trace_id": uuid.uuid4().hex, "started_at": now, "source": source,
+                     "operation": "qa.retention", "outcome": "ok", "duration_ms": 1, "test_run_id": batch}
+                    for _ in range(count)]
+
+        unmarked = records("server", 68) + records("browser", 23)
+        marked = records("server", 30, batch="load-test") + records("browser", 30, batch="load-test")
+        telemetry.persist_batch(unmarked)
+        telemetry.persist_batch(marked)
+
+        with sessions() as db:
+            expected_ids = {row["trace_id"] for row in unmarked}
+            retained_ids = set(db.scalars(select(TelemetryRecord.trace_id).where(TelemetryRecord.test_run_id.is_(None))))
+            assert retained_ids == expected_ids
+            state = telemetry.retained_sources(db)
+            assert state["server"]["test_budget"] == state["server"]["test_retained"] == 7
+            assert state["browser"]["test_budget"] == state["browser"]["test_retained"] == 2
+            assert state["server"]["retained"] == 75 and state["browser"]["retained"] == 25
+
+        additions = records("server", 7) + records("browser", 2)
+        telemetry.persist_batch(additions)
+        telemetry.persist_batch(records("server", 30, batch="while-full") + records("browser", 30, batch="while-full"))
+        with sessions() as db:
+            assert set(db.scalars(select(TelemetryRecord.trace_id))) == {row["trace_id"] for row in unmarked + additions}
+            state = telemetry.retained_sources(db)
+            assert state["server"]["test_retained"] == state["browser"]["test_retained"] == 0
+            assert state["server"]["retained"] + state["browser"]["retained"] == 100
+    finally:
+        engine.dispose()
+
+
+def test_admin_coverage_uses_matching_records_across_the_whole_filtered_list(client):
+    from app.services.telemetry import persist_batch
+
+    owner = account(client, admin=True)
+    now = utcnow().replace(microsecond=0)
+    batch = uuid.uuid4().hex
+    sample = {"source": "browser", "operation": "asr.transcribe", "outcome": "error", "duration_ms": 610,
+              "release": "qa-coverage-" + batch, "test_run_id": batch, "is_replay": True}
+
+    def record(minutes, **fields):
+        return sample | {"trace_id": uuid.uuid4().hex, "started_at": now - timedelta(minutes=minutes)} | fields
+
+    persist_batch([
+        record(5, outcome="timeout"), record(15), record(25),
+        record(125), record(30, release="other-coverage"), record(1, test_run_id=None),
+        record(40, test_run_id="different-batch"), record(50, operation="asr.finalize"), record(2, is_replay=False),
+    ])
+    scope = {"source": "browser", "operation": sample["operation"], "release": sample["release"],
+             "hours": 2, "traffic": "test", "test_run_id": batch, "delivery": "replay"}
+
+    def iso(minutes):
+        return (now - timedelta(minutes=minutes)).isoformat(timespec="milliseconds") + "Z"
+
+    overview = client.get("/api/admin/overview", params=scope, headers=owner).json()
+    assert overview["count"] == 3
+    assert overview["coverage"] == {"oldest_at": iso(25), "newest_at": iso(5)}
+    page = client.get("/api/admin/traces", params=scope | {"outcome": "error", "limit": 1, "offset": 1}, headers=owner).json()
+    assert page["total"] == 2 and len(page["items"]) == 1
+    assert page["coverage"] == {"oldest_at": iso(25), "newest_at": iso(15)}
+    empty = client.get("/api/admin/overview", params=scope | {"test_run_id": "missing-batch"}, headers=owner).json()
+    assert empty["coverage"] == {"oldest_at": None, "newest_at": None}
+
+
 def test_asr_replay_filter_keeps_the_first_delivery_and_excludes_legacy_records(client):
     owner = account(client, admin=True)
     occurrence = datetime.now(timezone.utc) - timedelta(minutes=65)
@@ -355,7 +434,7 @@ def test_asr_replay_filter_keeps_the_first_delivery_and_excludes_legacy_records(
     assert [row["is_replay"] for row in rows["items"]] == [None, False, True]
     filtered = scope | {"delivery": "replay"}
     result = client.get("/api/admin/traces", params=filtered, headers=owner).json()
-    assert result == {"total": 1, "items": rows["items"][-1:]}
+    assert result["total"] == 1 and result["items"] == rows["items"][-1:]
     stats = client.get("/api/admin/overview", params=filtered, headers=owner).json()
     assert stats["delivery_filter"] is True
     assert stats["count"] == stats["errors"] == 1

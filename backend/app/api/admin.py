@@ -13,7 +13,7 @@ from app.db import get_db
 from app.models.user import User
 from app.models.telemetry import TelemetryRecord
 from app.services.monitoring import registered_users
-from app.services.telemetry import conditions, experience_summary, is_admin, overview, retained_sources, serialize
+from app.services.telemetry import conditions, experience_summary, is_admin, overview, retained_sources, sample_coverage, serialize
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -100,13 +100,16 @@ async def list_traces(request: Request, options: dict = Depends(filters), db: Se
 
 
 def _list(options, db, limit, offset, slow_first):
-    query = select(TelemetryRecord).where(*conditions(**options))
+    scope = conditions(**options)
+    query = select(TelemetryRecord).where(*scope)
     order = TelemetryRecord.started_at.desc() if options.get("source") == "browser" else TelemetryRecord.id.desc()
     if slow_first:
         order = TelemetryRecord.duration_ms.desc()
     records = db.scalars(query.order_by(order, TelemetryRecord.id.desc()).limit(limit).offset(offset)).all()
-    total = db.scalar(select(func.count()).select_from(TelemetryRecord).where(*conditions(**options)))
-    return {"items": [serialize(r) for r in records], "total": total}
+    total, oldest, newest = db.execute(select(
+        func.count(TelemetryRecord.id), func.min(TelemetryRecord.started_at), func.max(TelemetryRecord.started_at),
+    ).where(*scope)).one()
+    return {"items": [serialize(r) for r in records], "total": total, "coverage": sample_coverage(oldest, newest)}
 
 
 @router.get("/traces/{trace_id}", dependencies=[Depends(get_admin_user)])

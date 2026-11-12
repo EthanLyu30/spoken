@@ -44,7 +44,12 @@ export interface AdminAsrReplays {
   delay_samples: number;
   median_delay_ms: number | null;
 }
+export interface AdminSampleCoverage {
+  oldest_at: string | null;
+  newest_at: string | null;
+}
 export interface AdminOverview {
+  coverage?: AdminSampleCoverage;
   asr_replays?: AdminAsrReplays;
   visitors?: AdminVisitors;
   experience?: AdminExperience;
@@ -56,7 +61,7 @@ export interface AdminOverview {
   operations: string[]; facets?: { operations: string[]; models: string[]; releases: string[] };
   trend: { time: string; operation: string; count: number; p95: number | null }[];
   collection: { active: boolean; retention_days: number; max_records: number; source_budget?: number; at_capacity?: boolean; oldest_at: string | null; dropped_since_restart: number; write_errors_since_restart: number;
-    sources?: Partial<Record<"server" | "browser", { source_budget: number; at_capacity: boolean; retained?: number; oldest_at?: string | null }>>;
+    sources?: Partial<Record<"server" | "browser", { source_budget: number; at_capacity: boolean; retained?: number; oldest_at?: string | null; test_budget?: number; test_retained?: number }>>;
     cleanup?: { active: boolean; interval_seconds: number; last_success_at: string | null; failures_since_restart: number } };
 }
 export interface AdminUser {
@@ -82,6 +87,11 @@ export interface AdminTrace {
   input_tokens: number | null; output_tokens: number | null; release: string;
   spans?: { id: string; parent_id: string | null; name: string; offset_ms: number; duration_ms: number;
     outcome: string; attributes: Record<string, string | number | boolean> }[];
+}
+export interface AdminTracePage {
+  items: AdminTrace[];
+  total: number;
+  coverage?: AdminSampleCoverage;
 }
 export class AdminApiError extends Error {
   constructor(public status: number) { super(`运行数据加载失败（${status}）`); }
@@ -124,7 +134,7 @@ export function getAdminOverview(filters: AdminFilters, signal?: AbortSignal, in
 }
 export const getAdminTraces = (filters: AdminFilters, offset: number, slow: boolean, signal?: AbortSignal) => {
   const params = query(filters); params.set("offset", String(offset)); params.set("slow_first", String(slow));
-  return read<{ items: AdminTrace[]; total: number }>(`/traces?${params}`, signal);
+  return read<AdminTracePage>(`/traces?${params}`, signal);
 };
 export const getAdminTrace = (id: string, signal?: AbortSignal) => read<AdminTrace>(`/traces/${encodeURIComponent(id)}`, signal);
 export function getAdminUsers(options: { offset: number; search: string; sort: AdminUserSort }, signal?: AbortSignal) {

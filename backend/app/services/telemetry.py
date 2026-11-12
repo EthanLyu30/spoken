@@ -21,6 +21,8 @@ from app.models.telemetry import AdminAccount, AdminBootstrap, TelemetryRecord
 from app.models.user import User
 
 
+TEST_RETENTION_DIVISOR = 10
+
 def is_admin(db: Session, user_id: int) -> bool:
     return db.get(AdminAccount, user_id) is not None
 
@@ -79,27 +81,46 @@ def source_budgets():
 
 
 def retained_sources(db):
-    rows = {source: (count, oldest) for source, count, oldest in db.execute(
-        select(TelemetryRecord.source, func.count(), func.min(TelemetryRecord.started_at))
-        .group_by(TelemetryRecord.source)
+    rows = {source: (count, tests, oldest) for source, count, tests, oldest in db.execute(
+        select(TelemetryRecord.source, func.count(), func.count(TelemetryRecord.test_run_id),
+               func.min(TelemetryRecord.started_at)).group_by(TelemetryRecord.source)
     )}
     sources = {}
     for source, budget in source_budgets().items():
-        count, oldest = rows.get(source, (0, None))
+        count, tests, oldest = rows.get(source, (0, 0, None))
         sources[source] = {"source_budget": budget, "retained": count, "at_capacity": count >= budget,
+                           "test_budget": budget // TEST_RETENTION_DIVISOR, "test_retained": tests,
                            "oldest_at": oldest.isoformat(timespec="seconds") + "Z" if oldest else None}
     return sources
 
 
+def _trim_trace_partition(db, source, *, marked: bool, limit: int) -> None:
+    record = TelemetryRecord
+    test_scope = record.test_run_id.is_not(None) if marked else record.test_run_id.is_(None)
+    partition = (record.source == source, test_scope)
+    first_excess = (select(record.id).where(*partition)
+                    .order_by(record.id.desc()).offset(limit).limit(1).scalar_subquery())
+    db.execute(delete(record).where(*partition, record.id <= first_excess).execution_options(synchronize_session=False))
+
+
 def _prune_traces(db, now) -> None:
-    settings = get_settings()
-    cutoff = now - timedelta(days=settings.telemetry_retention_days)
-    db.execute(delete(TelemetryRecord).where(TelemetryRecord.started_at < cutoff))
+    if db.get_bind().dialect.name == "postgresql":
+        # Serialize capacity pruning through commit across writers and cleanup.
+        db.connection().exec_driver_sql("SELECT pg_advisory_xact_lock(783461903)")
+    record = TelemetryRecord
+    cutoff = now - timedelta(days=get_settings().telemetry_retention_days)
+    db.execute(delete(record).where(record.started_at < cutoff))
+    counts = {source: (total, tests) for source, total, tests in db.execute(
+        select(record.source, func.count(), func.count(record.test_run_id)).group_by(record.source)
+    )}
     for source, budget in source_budgets().items():
-        oldest = db.scalar(select(TelemetryRecord.id).where(TelemetryRecord.source == source)
-            .order_by(TelemetryRecord.id.desc()).offset(budget).limit(1))
-        if oldest is not None:
-            db.execute(delete(TelemetryRecord).where(TelemetryRecord.source == source, TelemetryRecord.id <= oldest))
+        total, tests = counts.get(source, (0, 0))
+        unmarked = total - tests
+        test_limit = min(budget // TEST_RETENTION_DIVISOR, max(0, budget - unmarked))
+        if tests > test_limit:
+            _trim_trace_partition(db, source, marked=True, limit=test_limit)
+        if unmarked > budget:
+            _trim_trace_partition(db, source, marked=False, limit=budget)
 
 
 def persist_batch(records: list[dict]) -> None:
@@ -375,6 +396,12 @@ def _asr_replay_summary(db, **filters):
         "median_delay_ms": median(delays) if delays else None,
     }
 
+def sample_coverage(oldest: datetime | None, newest: datetime | None) -> dict[str, str | None]:
+    return {
+        "oldest_at": oldest.isoformat(timespec="milliseconds") + "Z" if oldest is not None else None,
+        "newest_at": newest.isoformat(timespec="milliseconds") + "Z" if newest is not None else None,
+    }
+
 
 def overview(db, **filters):
     from app.services.model_pricing import pricing_summary
@@ -396,6 +423,10 @@ def overview(db, **filters):
                                   .distinct().order_by(column).limit(100)).all())
               for name, column in (("operations", TelemetryRecord.operation), ("models", TelemetryRecord.model), ("releases", TelemetryRecord.release))}
     result = {"source": source, "count": len(rows), "facets": facets,
+        "coverage": sample_coverage(
+            min((row.started_at for row in rows), default=None),
+            max((row.started_at for row in rows), default=None),
+        ),
         "pricing": pricing_summary(rows, source=source),
         "success_rate": sum(r.outcome == "ok" for r in completed) / len(completed) if completed else None,
         "errors": sum(r.outcome == "error" for r in rows), "timeouts": sum(r.outcome == "timeout" for r in rows),

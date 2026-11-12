@@ -793,6 +793,45 @@ it("shows the ASR replay summary for the selected time, release and traffic", as
   expect(within(card()).getByText("暂无有效时间样本")).toBeVisible();
 });
 
+it("shows the sample dates for the selected traffic and list status", async () => {
+  const earliest = "2026-11-10T09:00:00.000Z";
+  const latest = "2026-11-12T11:30:00.000Z";
+  const errorOnly = "2026-11-11T10:15:00.000Z";
+  const blank = { oldest_at: null, newest_at: null };
+  fetcher.mockImplementation(async (url: string) => {
+    const request = new URL(url, "http://localhost");
+    const filters = request.searchParams;
+    const browser = filters.get("source") === "browser";
+    const onlyTests = filters.get("traffic") === "test";
+    const coverage = onlyTests ? blank : { oldest_at: earliest, newest_at: latest };
+    if (request.pathname.endsWith("/overview")) return Response.json(browser
+      ? { ...overview, source: "browser", coverage, traffic_filter: true,
+          collection: { ...overview.collection, sources: { browser: {
+            source_budget: 5000, at_capacity: false, retained: 1000, test_retained: 500, test_budget: 500,
+          } } } }
+      : overview);
+    return Response.json({ items: [], total: 0,
+      coverage: onlyTests || filters.get("outcome") !== "error" ? coverage
+        : { oldest_at: errorOnly, newest_at: errorOnly } });
+  });
+
+  show();
+  fireEvent.click(screen.getByRole("tab", { name: "浏览器体验" }));
+  const range = await screen.findByText(/当前筛选样本范围/);
+  expect([...range.querySelectorAll("time")].map(time => time.dateTime)).toEqual([earliest, latest]);
+  expect(range).toHaveTextContent(/11\/10.*17:00:00.*11\/12.*19:30:00/);
+  expect(screen.getByText(/测试记录 500 \/ 500 条/)).toBeVisible();
+
+  fireEvent.change(screen.getByLabelText("调用状态"), { target: { value: "error" } });
+  const failed = await screen.findByText(/调用列表样本范围/);
+  expect([...failed.querySelectorAll("time")].map(time => time.dateTime)).toEqual([errorOnly]);
+  expect(screen.queryByText(/当前筛选样本范围/)).not.toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("流量范围"), { target: { value: "test" } });
+  expect(await screen.findByText(/调用列表样本范围.*暂无匹配记录/)).toBeVisible();
+  expect(screen.getByText(/已达到测试记录上限/)).toBeVisible();
+});
+
 it("rejects malformed Trace IDs before requesting a private detail", async () => {
   show(); await screen.findByText(/暂无调用记录/); fetcher.mockClear();
   fireEvent.change(screen.getByLabelText("Trace ID"), { target: { value: "not-a-trace-id" } });

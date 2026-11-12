@@ -5,9 +5,10 @@ import { useAuth } from "../store/auth";
 import { EChart } from "../components/EChart";
 import { AdminUsers } from "../components/AdminUsers";
 import { modelLabel, referenceCost } from '../lib/adminFormatting';
-import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, getDeployedBrowserRelease, type AdminAsrReplays, type AdminDelivery, type AdminExperience, type AdminFilters, type AdminOverview, type AdminTrace, type AdminTraffic } from "../lib/adminApi";
+import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, getDeployedBrowserRelease, type AdminAsrReplays, type AdminDelivery, type AdminExperience, type AdminFilters, type AdminOverview, type AdminSampleCoverage, type AdminTrace, type AdminTracePage, type AdminTraffic } from "../lib/adminApi";
 import "../admin.css";
 
+const emptyTracePage: AdminTracePage = { items: [], total: 0 };
 const defaults: AdminFilters = { hours: 24, source: "server", operation: "", model: "", release: "", outcome: "", traffic: "unmarked", testRunId: "", delivery: "all" };
 const knownRelease = (release: string | null) => release && release !== "unknown" ? release : undefined;
 type ReleaseMode = "current" | "all" | "history";
@@ -113,8 +114,7 @@ export default function Admin() {
   const setReleaseMode = diagnostics ? setDiagnosticReleaseMode : setOverviewReleaseMode;
   const [overviewData, setData] = useState<AdminOverview | null>(null);
   const [trendOpen, setTrendOpen] = useState(false);
-  const [traceRows, setRows] = useState<AdminTrace[]>([]);
-  const [traceTotal, setTotal] = useState(0);
+  const [tracePage, setTracePage] = useState<AdminTracePage>(emptyTracePage);
   const [offset, setOffset] = useState(0);
   const [slow, setSlow] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -147,13 +147,16 @@ export default function Admin() {
   const browserRelease = publishedBrowserRelease?.scope === browserReleaseScope ? publishedBrowserRelease.release : null;
   const checkingBrowserRelease = Boolean(browserReleaseScope) && browserRelease === null;
   const data = checkingBrowserRelease ? null : overviewData;
-  const rows = checkingBrowserRelease ? [] : traceRows;
-  const total = checkingBrowserRelease ? 0 : traceTotal;
+  const { items: rows, total, coverage: listCoverage } = checkingBrowserRelease ? emptyTracePage : tracePage;
   const listLoading = checkingBrowserRelease || loadingList;
   const filters = useMemo(() => browserCurrent
     ? { ...selectedFilters, release: knownRelease(browserRelease) ?? "" }
     : selectedFilters, [browserCurrent, browserRelease, selectedFilters]);
   const sourceRetention = data?.collection.sources?.[filters.source];
+  const testBudget = sourceRetention?.test_budget;
+  const testRetained = sourceRetention?.test_retained;
+  const useListCoverage = diagnostics && (Boolean(filters.outcome) || !data?.coverage);
+  const coverage = useListCoverage ? listCoverage : data?.coverage;
   const loading = checkingBrowserRelease || overviewLoading || listLoading;
   useEffect(() => {
     if (!browserReleaseScope) { setPublishedBrowserRelease(null); return; }
@@ -167,7 +170,7 @@ export default function Admin() {
     scopeController.current?.abort();
     detailController.current?.abort();
     setDeniedAccount(userId ?? null);
-    setData(null); setUpdatedAt(null); setRows([]); setTotal(0); setDetail(null);
+    setData(null); setUpdatedAt(null); setTracePage(emptyTracePage); setDetail(null);
     hasOverview.current = false; hasList.current = false;
   }, [userId]);
   const inspect = useCallback(async (id: string, trigger?: HTMLElement) => {
@@ -213,7 +216,7 @@ export default function Admin() {
     const readOverview = !keepOverview || previousRevision.current !== revision;
     previousScope.current = scope; previousList.current = listScope;
     if (!keepOverview || !canRead) { setData(null); setUpdatedAt(null); setOverviewError(""); hasOverview.current = false; }
-    if (!keepList || !canRead) { setRows([]); setTotal(0); setListError(""); hasList.current = false; }
+    if (!keepList || !canRead) { setTracePage(emptyTracePage); setListError(""); hasList.current = false; }
     setDetail(null); setDetailLoading(false); setError("");
     detailController.current?.abort();
     if (canRead && !denied && view !== "users") {
@@ -244,7 +247,7 @@ export default function Admin() {
       if (diagnostics) void getAdminTraces(filters, offset, slow, controller.signal)
         .then(list => {
           if (!live || controller.signal.aborted) return;
-          setRows(list.items); setTotal(list.total); setListError(""); hasList.current = true;
+          setTracePage(list); setListError(""); hasList.current = true;
           if (inspectFirst && list.items[0]) void inspect(list.items[0].trace_id);
         }).catch((err: unknown) => {
           if (!live || controller.signal.aborted) return;
@@ -394,6 +397,7 @@ export default function Admin() {
     <div id={diagnostics ? "admin-source-panel" : undefined} role={diagnostics ? "tabpanel" : undefined}
       aria-labelledby={diagnostics ? `admin-source-${filters.source}` : undefined}>
     <div className="admin-scope-caption"><span>{filters.operation ? names[filters.operation] ?? filters.operation : "全部业务概览"}{diagnostics && !filters.operation && " · 性能比较请先选同一种操作"} · {versionLabel}{filters.testRunId && ` · 批次 ${filters.testRunId}`}</span>{!checkingBrowserRelease && <span>{updatedAt ? `概览更新于 ${date(updatedAt)}` : "仅展示已采集的真实记录"}</span>}</div>
+    {coverage && <SampleRange coverage={coverage} listOnly={useListCoverage} />}
     {data?.count === 0 && releaseMode === "current" && knownRelease(selectedRelease) && <p className="admin-notice admin-empty-current" role="status">当前发布暂无可比较样本。可切换到「全部保留」或单个历史版本排障。</p>}
     {releaseMode === "current" && filters.source === "server" && serverRelease === "unknown" && <p className="admin-notice" role="status">后端当前版本未知，无法按「当前发布」比较；当前显示全部保留样本。</p>}
     {checkingBrowserRelease && <p className="admin-loading" role="status">正在核对线上前端发布版本…</p>}
@@ -411,6 +415,8 @@ export default function Admin() {
       {filters.source === "browser" && <p className="admin-notice">浏览器上报可能缺失或被修改，独立于后端成功率与 Token 计量。朗读任务首声含等待文字与音频准备，不含之前的识别；整轮首声从检测到说话结束起计。</p>}
       {(!data.collection.active || data.collection.dropped_since_restart > 0 || data.collection.write_errors_since_restart > 0) && <p className="admin-notice" role="status">采集存在缺口：本进程启动后丢弃 {data.collection.dropped_since_restart} 条，写入失败 {data.collection.write_errors_since_restart} 次。{!data.collection.active && "采集未启用。"}</p>}
       {data.collection.at_capacity && <p className="admin-notice">此来源已达到 {data.collection.source_budget?.toLocaleString()} 条保留上限，时间窗可能不完整。{data.collection.oldest_at && `最早保留 ${date(data.collection.oldest_at)}（北京时间）。`}</p>}
+      {filters.traffic === "test" && testBudget != null && testRetained != null && testRetained >= testBudget &&
+        <p className="admin-notice">此来源已达到测试记录上限 {number(testBudget)} 条，时间窗可能不完整。</p>}
       {!diagnostics && data.collection.sources?.browser?.at_capacity && <p className="admin-notice">浏览器体验已达到 {number(data.collection.sources.browser.source_budget)} 条保留上限，语音体验的时间窗可能不完整。</p>}
       <section className="admin-metrics" aria-label="运行指标">
         <article><span><Activity size={16} />{filters.source === "server" ? "保留请求数" : "上报样本"}</span><strong>{number(data.count)}</strong><small>保留 {data.collection.retention_days} 天 · {data.collection.cleanup?.active ? '自动清理' : '写入时清理'}</small></article>
@@ -493,6 +499,7 @@ export default function Admin() {
     </section>}
     {data && <footer className="admin-footnote"><ShieldCheck size={13} /><div>UTC 记录 · 北京时间展示 · 保留策略 {data.collection.retention_days} 天 / {data.collection.max_records.toLocaleString()} 条 · {data.collection.oldest_at ? `最早保留 ${date(data.collection.oldest_at)}` : "暂无保留数据"}
       {sourceRetention?.retained !== undefined && <p>此来源共保留 {number(sourceRetention.retained)} 条，包含所有版本和流量。</p>}
+      {testBudget != null && testRetained != null && <p>此来源测试记录 {number(testRetained)} / {number(testBudget)} 条，使用来源剩余空间。</p>}
       {data.collection.cleanup?.active && <p>启动、每 {data.collection.cleanup.interval_seconds / 3600} 小时及写入时自动清理；实例休眠后在下次启动补清理。上次成功 {data.collection.cleanup.last_success_at ? date(data.collection.cleanup.last_success_at) : '尚未完成'}。{data.collection.cleanup.failures_since_restart > 0 && `本进程清理失败 ${data.collection.cleanup.failures_since_restart} 次。`}</p>}
       <p>分位数基于保留样本，历史失败保留供追踪。</p></div></footer>}
     </div>
@@ -507,6 +514,17 @@ const stageNames: Record<string, string> = {
   "chat.complete": "浏览器请求至全文返回",
   "speech.request_to_audio": "提交至播放开始回调",
 };
+
+function SampleRange({ coverage, listOnly }: { coverage: AdminSampleCoverage; listOnly: boolean }) {
+  const { oldest_at, newest_at } = coverage;
+  return <p className="admin-scope-caption"><span>
+    {listOnly ? "调用列表样本范围" : "当前筛选样本范围"} · {oldest_at && newest_at ? <>
+      <time dateTime={oldest_at}>{date(oldest_at)}</time>
+      {newest_at !== oldest_at && <> 至 <time dateTime={newest_at}>{date(newest_at)}</time></>}
+      （北京时间）
+    </> : "暂无匹配记录"}
+  </span></p>;
+}
 
 const replayPercent = new Intl.NumberFormat("zh-CN", { style: "percent", maximumFractionDigits: 2 });
 
