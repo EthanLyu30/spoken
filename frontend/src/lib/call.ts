@@ -13,7 +13,7 @@ import { bindInteraction, newInteractionId, reportTiming } from "./telemetry";
 import { assertAuthGeneration, getAuthGeneration, subscribeAuthGeneration } from "./authToken";
 import { asrTurnBudgetMs } from "./transcribe";
 import { ASR_QUOTA_MESSAGE, isAsrQuotaError } from "./asrQuota";
-import { asrFailure } from "./asrDiagnostics";
+import { asrFailure, AsrUserCancellation } from "./asrDiagnostics";
 
 export type CallPhase = "listening" | "thinking" | "speaking";
 
@@ -52,7 +52,7 @@ export interface CallCallbacks {
 }
 
 export interface VoiceCall {
-  end: () => void;
+  end: (reason?: "user") => void;
 }
 
 const SILENCE_THRESHOLD = 0.012; // RMS below this counts as silence
@@ -164,6 +164,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   let utteranceUsesLocalAsr = false;
   let cloudFramesSent = 0;
   let turnInteractionId: string | undefined;
+  let turnCaptureStartedAt = 0;
 
   const reset = () => {
     collected = [];
@@ -176,8 +177,10 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   };
 
   const selectAsr = () => {
+    turnCaptureStartedAt = performance.now();
     utteranceUsesLocalAsr = cb.preferLocalAsr?.() ?? false;
     if (utteranceUsesLocalAsr) invalidateCloudStream();
+    else if (asr) bindInteraction(asr, turnInteractionId);
     else void ensureStream(turnInteractionId);
   };
 
@@ -442,13 +445,21 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     if (!ended) cb.onError("麦克风重连失败，请切回打字，或重新开始通话。");
   }
 
-  function end() {
+  function end(source?: "user") {
     if (ended) return;
+    const reason = source === "user" ? new AsrUserCancellation() : undefined;
+    if (reason && started) {
+      reportTiming("asr.attempt", performance.now() - turnCaptureStartedAt, {
+        interactionId: turnInteractionId, stage: "stream", attempt: asr?.transport === "relay" ? 2 : 1,
+        engine: utteranceUsesLocalAsr ? "local" : "xfyun", transport: utteranceUsesLocalAsr ? "local" : asr?.transport,
+        ...asrFailure(reason),
+      });
+    }
     ended = true;
     unsubscribeIdentity();
-    lifetime.abort();
+    lifetime.abort(reason);
     turnGeneration += 1;
-    turnController?.abort();
+    turnController?.abort(reason);
     clearInterval(keepAlive);
     keepAlive = undefined;
     invalidateCloudStream();
@@ -456,7 +467,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
   }
   // Installed before microphone acquisition; a late grant must release tracks
   // even when React has not yet cleaned up the old call component.
-  unsubscribeIdentity = subscribeAuthGeneration(end);
+  unsubscribeIdentity = subscribeAuthGeneration(() => end());
   // Initial setup (errors propagate to the caller, which shows a hint).
   try {
     if (!(await acquireMic()) || !(await buildGraph())) throw new DOMException("Call cancelled", "AbortError");

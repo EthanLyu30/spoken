@@ -29,6 +29,8 @@ const asrReasonLabels: Record<string, string> = {
   http_error: "整段录音识别的 HTTP 请求失败。",
   unavailable: "识别通道暂不可用。",
   cancelled: "录音或识别任务已取消。取消动作的触发来源未采集。",
+  user_cancelled: "用户点击结束通话，本轮录音识别随之取消。",
+  quota_cooldown: "识别额度冷却期间跳过了请求。",
   unknown: "未采集到可分类的识别失败原因。",
 };
 const measurementLabels: Record<string, string> = {
@@ -41,7 +43,8 @@ const measurementLabels: Record<string, string> = {
 const names: Record<string, string> = {
   "POST /api/chat/stream": "场景对话 · 流式回复", "POST /api/chat": "场景对话 · 普通回复",
   "POST /api/interview/score": "Interview · 四题评分", "POST /api/asr": "录音识别",
-  "POST /api/asr/session": "直连识别 · 授权", "POST /api/tts/stream": "语音合成 · 流式",
+  "POST /api/asr/session": "直连识别 · 授权", "WS /api/asr/stream": "流式识别 · 后端中继",
+  "asr.attempt": "语音识别 · 通道尝试", "POST /api/tts/stream": "语音合成 · 流式",
   "POST /api/tts": "语音合成", "asr.finalize": "语音识别 · 收尾等待",
   "POST /api/tts/prepare": "云语音 · 按需预连接",
   "asr.transcribe": "录音识别 · 浏览器总耗时", "speech.first_audio": "语音播放 · 建队列至开始回调",

@@ -6,7 +6,8 @@ vi.mock("./localSpeech/runtime", () => ({ isLocalSpeechModelReady: () => true,lo
 vi.mock("./localSpeech/moonshine", () => ({ transcribeWithMoonshine: backends.local }));
 vi.mock("../store/voice", () => ({ useVoice: { getState: () => ({ engine: "local" }) } }));
 import { createLiveTranscription, transcribeSpeech } from "./transcribe";
-import { bindInteraction } from "./telemetry";
+import { bindInteraction, getInteraction } from "./telemetry";
+import { AsrQuotaError, markAsrQuota, resetAsrQuotaForTest } from "./asrQuota";
 
 let samples: Record<string, unknown>[];
 const pcm = new Int16Array([0, 2000, -2000]).buffer;
@@ -22,7 +23,7 @@ beforeEach(() => {
     return new Response(null, { status: 202 });
   });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { resetAsrQuotaForTest(); vi.unstubAllGlobals(); });
 
 it("keeps an utterance selected for cloud on cloud even if a local model is ready", async () => {
   const controller = new AbortController();
@@ -106,4 +107,25 @@ it("reports failed recovery on its actual route without uploading partial text",
   await expect(transcribeSpeech(pcm, undefined, "cloud", createLiveTranscription())).rejects.toMatchObject({ name: "IncompleteTranscriptionError" });
   expect(samples).toContainEqual(expect.objectContaining({ operation: "asr.transcribe", transport: "buffered", outcome: "error" }));
   expect(JSON.stringify(samples)).not.toMatch(/private|incomplete answer/);
+});
+
+it("correlates a live open and failed recording even when no caller id was supplied", async () => {
+  const error = markAsrQuota();
+  backends.open.mockRejectedValue(error);
+  const live = createLiveTranscription();
+  await expect(transcribeSpeech(pcm, undefined, "cloud", live)).rejects.toBe(error);
+  const openId = getInteraction(backends.open.mock.calls[0][2]);
+  expect(openId).toMatch(/^[a-f0-9]{32}$/);
+  expect(backends.cloud).not.toHaveBeenCalled();
+  expect(samples).toContainEqual(expect.objectContaining({
+    operation: "asr.transcribe", interaction_id: openId, outcome: "error",
+    asr_reason: "provider_error", provider_code: 11201,
+  }));
+});
+
+it("does not report a new provider error code when local quota cooling prevents an upload", async () => {
+  backends.cloud.mockRejectedValue(new AsrQuotaError());
+  await expect(transcribeSpeech(pcm, undefined, "cloud")).rejects.toMatchObject({ name: "AsrQuotaError" });
+  expect(samples[0]).toMatchObject({ outcome: "error", asr_reason: "quota_cooldown" });
+  expect(samples[0]).not.toHaveProperty("provider_code");
 });

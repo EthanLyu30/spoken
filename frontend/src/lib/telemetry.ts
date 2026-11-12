@@ -1,5 +1,5 @@
 import type { AsrStream } from "./asrStream";
-import { ASR_REASONS, asrFailure, type AsrReason } from "./asrDiagnostics";
+import { ASR_FALLBACK_REASONS, ASR_REASONS, asrFailure, type AsrFallbackReason, type AsrReason } from "./asrDiagnostics";
 
 export const NATIVE_ERRORS = ["canceled", "interrupted", "audio-busy", "audio-hardware", "network", "synthesis-unavailable", "synthesis-failed", "language-unavailable", "voice-unavailable", "text-too-long", "invalid-argument", "not-allowed", "unknown"] as const;
 export interface NativeDiagnostic {
@@ -19,9 +19,9 @@ export interface NativeEndDiagnostic {
   visibility_state?: "visible" | "hidden" | "unknown";
 }
 interface AsrAttemptDiagnostic {
-  stage?: "authorize" | "open" | "stream_final" | "whole_clip" | "http_buffered";
+  stage?: "authorize" | "open" | "stream" | "stream_final" | "whole_clip" | "http_buffered";
   attempt?: number;
-  fallback_reason?: "none" | "timeout" | "disconnect" | "provider_error" | "empty" | "http_error" | "unavailable" | "unknown";
+  fallback_reason?: AsrFallbackReason;
   audio_bytes?: number;
   result_class?: "empty" | "nonempty";
   provider_code?: number;
@@ -57,34 +57,46 @@ export function traceHeaders(target?: object | null): Record<string, string> {
   return { ...(id ? { "X-Interaction-Id": id } : {}), ...(run ? { "X-Test-Run-Id": run } : {}) };
 }
 
-async function sendTiming(fetcher: typeof fetch, payload: object): Promise<number | undefined> {
+async function sendTiming(fetcher: typeof fetch, payload: object): Promise<Response | undefined> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8_000);
   try {
-    const response = await fetcher(`${BASE}/api/telemetry/client`, {
+    return await fetcher(`${BASE}/api/telemetry/client`, {
       method: "POST", headers: { "Content-Type": "text/plain;charset=UTF-8" },
       credentials: "omit", body: JSON.stringify(payload), signal: controller.signal, keepalive: true,
     });
-    return response?.status;
   } catch { return undefined; }
   finally { clearTimeout(timer); }
 }
+
+const MAX_DEFERRED_ASR_RETRIES = 16;
+let deferredAsrRetries = 0;
 
 async function deliverTiming(sample: { operation: Operation; outcome: string }, diagnostics: Record<string, unknown>) {
   const fetcher = globalThis.fetch.bind(globalThis);
   const eventId = newInteractionId();
   const payload = { ...sample, ...diagnostics, ...(eventId ? { event_id: eventId } : {}) };
-  let status = await sendTiming(fetcher, payload);
+  const response = await sendTiming(fetcher, payload);
+  let status = response?.status;
   if (eventId && (status === undefined || status === 408 || status >= 500)) {
     await new Promise(resolve => setTimeout(resolve, 750));
-    status = await sendTiming(fetcher, payload);
+    status = (await sendTiming(fetcher, payload))?.status;
+  } else if (eventId && status === 429 && sample.operation.startsWith("asr.") && sample.outcome !== "ok" &&
+      deferredAsrRetries < MAX_DEFERRED_ASR_RETRIES) {
+    const seconds = Number(response?.headers?.get("Retry-After") ?? 60);
+    const delayMs = Math.max(1, Math.min(60, Number.isFinite(seconds) ? seconds : 60)) * 1000;
+    deferredAsrRetries++;
+    try {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      status = (await sendTiming(fetcher, payload))?.status;
+    } finally { deferredAsrRetries--; }
   }
   if (status !== 422) return;
   // Older API versions reject new fields before accepting an event.
   const legacy = { ...sample, outcome: sample.outcome === "timeout" ? "error" : sample.outcome };
   const { asr_reason: reason, ...previousDiagnostics } = diagnostics;
   if (eventId || reason !== undefined || sample.outcome === "timeout") {
-    status = await sendTiming(fetcher, { ...legacy, ...previousDiagnostics });
+    status = (await sendTiming(fetcher, { ...legacy, ...previousDiagnostics }))?.status;
   }
   if (status === 422 && sample.operation === "speech.complete" && Object.keys(previousDiagnostics).length > 0) {
     await sendTiming(fetcher, legacy);
@@ -141,10 +153,10 @@ export function reportTiming(operation: Operation, durationMs: number, options: 
     }
     if (["visible", "hidden", "unknown"].includes(options.visibility_state ?? "")) diagnostics.visibility_state = options.visibility_state;
   } else if (operation === "asr.attempt") {
-    if (["authorize", "open", "stream_final", "whole_clip", "http_buffered"].includes(options.stage ?? "")) diagnostics.stage = options.stage;
+    if (["authorize", "open", "stream", "stream_final", "whole_clip", "http_buffered"].includes(options.stage ?? "")) diagnostics.stage = options.stage;
     const attempt = integer(options.attempt, 1, 10);
     if (attempt !== undefined) diagnostics.attempt = attempt;
-    if (["none", "timeout", "disconnect", "provider_error", "empty", "http_error", "unavailable", "unknown"].includes(options.fallback_reason ?? "")) diagnostics.fallback_reason = options.fallback_reason;
+    if (options.fallback_reason && ASR_FALLBACK_REASONS.includes(options.fallback_reason)) diagnostics.fallback_reason = options.fallback_reason;
     const audioBytes = integer(options.audio_bytes, 0, 5_760_000);
     if (audioBytes !== undefined) diagnostics.audio_bytes = audioBytes;
     if (["empty", "nonempty"].includes(options.result_class ?? "")) diagnostics.result_class = options.result_class;

@@ -13,7 +13,7 @@ export class AsrProviderError extends Error {
 
 export class AsrQuotaError extends Error {
   partialText?: string;
-  constructor(readonly providerCode = ASR_QUOTA_CODE, readonly detail = "") {
+  constructor(readonly providerCode?: number, readonly detail = "") {
     super(ASR_QUOTA_MESSAGE);
     this.name = "AsrQuotaError";
   }

@@ -701,7 +701,7 @@ export default function Conversation() {
 
   function endCall() {
     callAttemptRef.current += 1;
-    callRef.current?.end();
+    callRef.current?.end("user");
     callRef.current = null;
     setCallPhase(null);
     setLiveCaption("");

@@ -2,7 +2,7 @@ import { postAsr } from "./api";
 import { openAsrStream, type AsrStream } from "./asrStream";
 import { isLocalSpeechModelReady, localSpeechCoordinator } from "./localSpeech/runtime";
 import { useVoice } from "../store/voice";
-import { getInteraction, bindInteraction, reportTiming, type Transport } from "./telemetry";
+import { getInteraction, bindInteraction, newInteractionId, reportTiming, type Transport } from "./telemetry";
 import { isAsrQuotaError } from "./asrQuota";
 import { withTimeout } from "./requestTimeout";
 import { assertAuthGeneration, getAuthGeneration } from "./authToken";
@@ -41,6 +41,8 @@ export async function transcribeSpeechWith(
 }
 
 export interface LiveTranscription {
+  /** The id assigned when this microphone turn started. */
+  readonly interactionId?: string;
   /** Actual latest route, including complete-recording recovery. */
   readonly transport?: Transport;
   /** Feed captured PCM while the microphone is still recording. */
@@ -66,13 +68,14 @@ export class IncompleteTranscriptionError extends Error {
 export function createLiveTranscription(signal?: AbortSignal): LiveTranscription {
   let stream: AsrStream | null = null;
   let closed = false;
+  let openError: unknown;
   let latest = "";
   let transport: Transport = "unknown";
   const onTransport = (actual: "direct" | "buffered") => { transport = actual; };
   const queue: ArrayBuffer[] = [];
   const control = new AbortController();
   if (signal?.aborted) control.abort(signal.reason);
-  const interactionId = getInteraction(signal);
+  const interactionId = getInteraction(signal) ?? newInteractionId();
   if (interactionId) bindInteraction(control.signal, interactionId);
   const abort = () => control.abort(signal?.reason);
   signal?.addEventListener("abort", abort, { once: true });
@@ -90,8 +93,9 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
     for (const pcm of queue) openedStream.send(pcm);
     queue.length = 0;
     return openedStream;
-  }).catch(() => null);
+  }).catch(error => { openError = error; return null; });
   return {
+    interactionId,
     get transport() { return transport; },
     send(pcm) {
       if (closed) return;
@@ -100,7 +104,7 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
     },
     async finish(pcm, finishSignal) {
       closed = true;
-      bindInteraction(control.signal, getInteraction(finishSignal) ?? interactionId);
+      bindInteraction(control.signal, interactionId ?? getInteraction(finishSignal));
       const cancel = () => control.abort(finishSignal?.reason);
       finishSignal?.addEventListener("abort", cancel, { once: true });
       const recover = async () => {
@@ -112,7 +116,10 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
         const openedStream = stream ?? await opened;
         control.signal.throwIfAborted();
         finishSignal?.throwIfAborted();
-        if (!openedStream) return await recover();
+        if (!openedStream) {
+          if (isAsrQuotaError(openError)) throw openError;
+          return await recover();
+        }
         try {
           const text = (await openedStream.finishUtterance()).trim();
           control.signal.throwIfAborted();
@@ -175,7 +182,8 @@ export async function transcribeSpeech(
   const generation = getAuthGeneration();
   const start = performance.now();
   const turnSignal = withTimeout(signal, asrTurnBudgetMs(pcm));
-  if (turnSignal) bindInteraction(turnSignal, getInteraction(signal));
+  const interactionId = live?.interactionId ?? getInteraction(signal) ?? newInteractionId();
+  if (turnSignal) bindInteraction(turnSignal, interactionId);
   const measurement: { engine: "local" | "xfyun" | "unknown"; transport: Transport } = { engine: "unknown", transport: "unknown" };
   // A live stream wins unless the learner explicitly prepared the local model.
   // The stream already contains the whole utterance, so there is no replay.
@@ -210,7 +218,7 @@ export async function transcribeSpeech(
     assertAuthGeneration(generation, turnSignal);
     reportTiming("asr.transcribe", performance.now() - start, {
       engine: measurement.engine,
-      interactionId: getInteraction(turnSignal),
+      interactionId,
       transport: useLive ? live?.transport ?? "unknown" : measurement.transport,
       ...(text ? { outcome: "ok" } : { outcome: "error", asr_reason: "empty" }),
     });
@@ -218,7 +226,7 @@ export async function transcribeSpeech(
   } catch (error) {
     if (live && !useLive) live.close();
     reportTiming("asr.transcribe", performance.now() - start, {
-      engine: measurement.engine, interactionId: getInteraction(turnSignal),
+      engine: measurement.engine, interactionId,
       transport: useLive ? live?.transport ?? "unknown" : measurement.transport,
       ...asrFailure(error, turnSignal ?? signal, generation !== getAuthGeneration()),
     });

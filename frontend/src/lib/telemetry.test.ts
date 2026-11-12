@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { reportTiming, measureAsrStream, bindInteraction, getInteraction, traceHeaders } from "./telemetry";
+import { AsrUserCancellation } from "./asrDiagnostics";
 
 afterEach(() => { delete (globalThis as { __TEST_RUN_ID__?: string }).__TEST_RUN_ID__; vi.unstubAllGlobals(); });
 
@@ -29,6 +30,25 @@ it("retries a temporary collector failure once with the same event id", async ()
     const [first, second] = fetcher.mock.calls.map(([, options]) => JSON.parse(options.body));
     expect(first.event_id).toMatch(/^[a-f0-9]{32}$/);
     expect(second).toEqual(first);
+  } finally { vi.useRealTimers(); }
+});
+
+it("retries a rate-limited ASR failure without losing its reason, code or interaction", async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, { status: 429, headers: { "Retry-After": "2" } }))
+    .mockResolvedValueOnce(new Response(null, { status: 202 }));
+  vi.stubGlobal("fetch", fetcher);
+  vi.useFakeTimers();
+  try {
+    reportTiming("asr.transcribe", 610, {
+      outcome: "error", asr_reason: "provider_error", provider_code: 10005, interactionId: "d".repeat(32),
+    });
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(fetcher).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const [first, retry] = fetcher.mock.calls.map(([, init]) => JSON.parse(init.body));
+    expect(retry).toEqual(first);
+    expect(retry).toMatchObject({ asr_reason: "provider_error", provider_code: 10005, interaction_id: "d".repeat(32) });
   } finally { vi.useRealTimers(); }
 });
 
@@ -118,6 +138,26 @@ it("recognizes direct-provider signal cancellation even when the raw stream reso
   expect(JSON.parse(fetcher.mock.calls[0][1].body).outcome).toBe("cancelled");
 });
 
+
+it("recognizes a user hangup during finalize despite a generic socket close", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+  vi.stubGlobal("fetch", fetcher);
+  const controller = new AbortController();
+  const id = "c".repeat(32);
+  bindInteraction(controller.signal, id);
+  const measured = measureAsrStream({
+    send() {}, close() {},
+    finishUtterance: () => new Promise((_resolve, reject) => {
+      controller.signal.addEventListener("abort", () => reject(new Error("ASR connection closed")));
+    }),
+  }, "relay", controller.signal);
+  const pending = measured.finishUtterance();
+  controller.abort(new AsrUserCancellation());
+  await expect(pending).rejects.toThrow("ASR connection closed");
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({
+    operation: "asr.finalize", outcome: "cancelled", asr_reason: "user_cancelled", interaction_id: id,
+  });
+});
 
 it("accepts long native terminal timings without relaxing other operations", () => {
   const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));

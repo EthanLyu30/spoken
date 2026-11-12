@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openRelayAsrStream } from "./asrStream";
 import { setToken } from "./authToken";
+import { bindInteraction } from "./telemetry";
 import { isAsrQuotaCooling, resetAsrQuotaForTest } from "./asrQuota";
 
 class Socket {
@@ -32,6 +33,28 @@ async function ready(onClose = vi.fn()) {
 describe("streaming ASR final boundaries", () => {
   beforeEach(() => { resetAsrQuotaForTest(); vi.useFakeTimers(); Socket.instances = []; vi.stubGlobal("WebSocket", Socket); });
   afterEach(() => { resetAsrQuotaForTest(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+  it("sends the current interaction before each utterance on a trace-aware relay", async () => {
+    const opening = openRelayAsrStream({ onPartial: vi.fn() });
+    const socket = Socket.instances.at(-1)!;
+    socket.onopen?.();
+    expect(JSON.parse(String(socket.sent[0]))).toMatchObject({ type: "start", trace_context: true });
+    socket.message({ type: "ready", trace_context: true });
+    const stream = await opening;
+    for (const id of ["a".repeat(32), "b".repeat(32)]) {
+      bindInteraction(stream, id);
+      const pcm = new ArrayBuffer(1280);
+      stream.send(pcm);
+      stream.send(pcm);
+      expect(socket.sent.slice(-3)).toEqual([
+        JSON.stringify({ type: "turn", interaction_id: id }), pcm, pcm,
+      ]);
+      const final = stream.finishUtterance();
+      socket.message({ type: "final", text: "ok" });
+      await expect(final).resolves.toBe("ok");
+    }
+    stream.close();
+  });
 
   it("preserves 11201 before relay readiness as a quota error", async () => {
     const opening = openRelayAsrStream({ onPartial: vi.fn() });

@@ -5,7 +5,9 @@ vi.mock("./directAsr", () => ({ transcribeDirect: direct.transcribe, openDirectA
 import { postAsr } from "./api";
 import { openAsrStream } from "./asrStream";
 import { MAX_AUDIO_BYTES } from "./audioLimits";
-import { AsrQuotaError, isAsrQuotaCooling, markAsrQuota, resetAsrQuotaForTest } from "./asrQuota";
+import { AsrProviderError, AsrQuotaError, isAsrQuotaCooling, markAsrQuota, resetAsrQuotaForTest } from "./asrQuota";
+import { bindInteraction } from "./telemetry";
+import type { AsrStreamCallbacks } from "./asrStream";
 
 describe("cloud ASR routing", () => {
   beforeEach(() => { direct.transcribe.mockReset(); direct.open.mockReset(); resetAsrQuotaForTest(); vi.stubGlobal("fetch", vi.fn()); });
@@ -76,6 +78,51 @@ describe("cloud ASR routing", () => {
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ detail: `iFlytek ASR error ${code}: provider rejected` }), { status: 503 }));
     await expect(postAsr(new ArrayBuffer(1280))).rejects.toMatchObject({ name: "AsrProviderError", providerCode: code });
     expect(isAsrQuotaCooling()).toBe(false);
+  });
+
+  it("keeps the HTTP deadline as a timeout even when fetch rejects with AbortError", async () => {
+    direct.transcribe.mockRejectedValue(new Error("network unavailable"));
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(deadline.signal);
+    const signal = new AbortController().signal;
+    bindInteraction(signal, "a".repeat(32));
+    vi.mocked(fetch).mockImplementation(async url => {
+      if (String(url).endsWith("/api/asr")) {
+        deadline.abort(new DOMException("Recognition deadline", "TimeoutError"));
+        throw new DOMException("fetch aborted", "AbortError");
+      }
+      return new Response(null, { status: 202 });
+    });
+    try {
+      await expect(postAsr(new ArrayBuffer(1280), signal)).rejects.toMatchObject({ name: "TimeoutError" });
+      const samples = vi.mocked(fetch).mock.calls
+        .filter(([url]) => String(url).endsWith("/api/telemetry/client"))
+        .map(([, init]) => JSON.parse(String(init?.body)));
+      expect(samples).toContainEqual(expect.objectContaining({
+        stage: "http_buffered", outcome: "timeout", asr_reason: "timeout", interaction_id: "a".repeat(32),
+      }));
+    } finally { timeout.mockRestore(); }
+  });
+
+  it("records a provider failure during live capture even if finalize never runs", async () => {
+    let callbacks!: AsrStreamCallbacks;
+    direct.open.mockImplementation(async (cb: AsrStreamCallbacks) => {
+      callbacks = cb;
+      return { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn() };
+    });
+    vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 202 }));
+    const signal = new AbortController().signal;
+    bindInteraction(signal, "a".repeat(32));
+    const stream = await openAsrStream({ onPartial: vi.fn() }, "en_us", signal);
+    bindInteraction(stream, "b".repeat(32));
+    stream.send(new ArrayBuffer(1280));
+    callbacks.onClose?.(new AsrProviderError(10005, "private provider details"));
+    const samples = vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(samples).toContainEqual(expect.objectContaining({
+      operation: "asr.attempt", stage: "stream", outcome: "error", asr_reason: "provider_error",
+      provider_code: 10005, interaction_id: "b".repeat(32),
+    }));
+    expect(JSON.stringify(samples)).not.toContain("private provider details");
   });
 
   it("does not upload a cancelled utterance to either transport", async () => {

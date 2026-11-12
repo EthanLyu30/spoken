@@ -95,6 +95,26 @@ describe("voice call ASR engine boundaries", () => {
     } finally { call.end(); }
   });
 
+  it("records an explicit hangup during capture as user cancellation in the same turn", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetcher);
+    const opened = { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn(), transport: "direct" };
+    mocks.openAsrStream.mockResolvedValue(opened);
+    const call = await startVoiceCall({ onPhase: vi.fn(), transcribe: vi.fn(), reply: vi.fn(), onError: vi.fn() });
+    try {
+      pushFrame(0.1);
+      const turnId = getInteraction(mocks.openAsrStream.mock.calls[0][2]);
+      await vi.waitFor(() => expect(getInteraction(opened)).toBe(turnId));
+      call.end("user");
+      expect(opened.finishUtterance).not.toHaveBeenCalled();
+      const reports = fetcher.mock.calls.map(([, init]) => JSON.parse(init.body));
+      expect(reports).toContainEqual(expect.objectContaining({
+        operation: "asr.attempt", stage: "stream", outcome: "cancelled",
+        asr_reason: "user_cancelled", interaction_id: turnId,
+      }));
+    } finally { call.end(); }
+  });
+
   it("releases a delayed microphone grant after the original call identity changes", async () => {
     const { setToken } = await import("./authToken");
     setToken("call-mic-a");

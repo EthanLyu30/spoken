@@ -15,7 +15,7 @@ import { ReadResource } from "./readResource";
 import { traceHeaders, getInteraction, reportTiming } from "./telemetry";
 import { assertAudioWithinLimit } from "./audioLimits";
 import { AsrQuotaError, asrProviderError, isAsrQuotaCooling, isAsrQuotaError } from "./asrQuota";
-import { asrFailure, type AsrReason } from "./asrDiagnostics";
+import { asrFailure, asrFallbackReason, type AsrFallbackReason } from "./asrDiagnostics";
 export { withTimeout } from "./requestTimeout";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -1018,7 +1018,7 @@ export async function postAsr(
   assertAuthGeneration(generation, signal);
   if (isAsrQuotaCooling()) throw new AsrQuotaError();
   const interactionId = getInteraction(signal);
-  let fallbackReason: Exclude<AsrReason, "incomplete" | "cancelled">;
+  let fallbackReason: AsrFallbackReason;
   const directStarted = performance.now();
   onTransport?.("direct");
   try {
@@ -1033,7 +1033,7 @@ export async function postAsr(
     return text;
   } catch (error) {
     const failure = asrFailure(error, signal, generation !== getAuthGeneration());
-    fallbackReason = failure.asr_reason === "cancelled" || failure.asr_reason === "incomplete" ? "unknown" : failure.asr_reason;
+    fallbackReason = asrFallbackReason(failure.asr_reason);
     reportTiming("asr.attempt", performance.now() - directStarted, {
       engine: "xfyun", transport: "direct", interactionId, stage: "whole_clip", attempt: 1,
       audio_bytes: pcm.byteLength, fallback_reason: fallbackReason, ...failure,
@@ -1045,6 +1045,7 @@ export async function postAsr(
     if (isAsrQuotaCooling()) throw new AsrQuotaError();
   }
   const bufferedStarted = performance.now();
+  const requestSignal = withTimeout(signal, 45_000);
   onTransport?.("buffered");
   try {
     const headers = { "Content-Type": "application/octet-stream", "X-Client-Id": getClientId(), ...authHeader(), ...traceHeaders(signal) };
@@ -1053,9 +1054,9 @@ export async function postAsr(
       method: "POST",
       headers,
       body: pcm,
-      signal: withTimeout(signal, 45_000),
+      signal: requestSignal,
     });
-    assertAuthGeneration(generation, signal);
+    assertAuthGeneration(generation, requestSignal);
     if (!res.ok) {
       let detail = "";
       try {
@@ -1064,10 +1065,13 @@ export async function postAsr(
       } catch { /* non-JSON provider error */ }
       const provider = detail.match(/iFlytek ASR error (\d+)/);
       if (provider) throw asrProviderError(Number(provider[1]), detail);
+      if (res.status === 408 || res.status === 504 || /timed? ?out|超时/i.test(detail)) {
+        throw new DOMException("Recognition deadline", "TimeoutError");
+      }
       throw new Error(`asr failed: ${res.status}`);
     }
     const data = (await res.json()) as { text: string };
-    assertAuthGeneration(generation, signal);
+    assertAuthGeneration(generation, requestSignal);
     const hasText = Boolean(data.text.trim());
     reportTiming("asr.attempt", performance.now() - bufferedStarted, {
       engine: "xfyun", transport: "buffered", interactionId, stage: "http_buffered", attempt: 2,
@@ -1079,9 +1083,9 @@ export async function postAsr(
     reportTiming("asr.attempt", performance.now() - bufferedStarted, {
       engine: "xfyun", transport: "buffered", interactionId, stage: "http_buffered", attempt: 2,
       audio_bytes: pcm.byteLength, fallback_reason: fallbackReason,
-      ...asrFailure(error, signal, generation !== getAuthGeneration()),
+      ...asrFailure(error, requestSignal, generation !== getAuthGeneration()),
     });
-    assertAuthGeneration(generation, signal);
+    assertAuthGeneration(generation, requestSignal);
     throw error;
   }
 }

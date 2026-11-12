@@ -21,14 +21,18 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
     const token = getToken();
     const headers = { "X-Client-Id": getClientId(), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...traceHeaders(signal) };
     assertAuthGeneration(generation, signal);
-    const response = await fetch(`${BASE_URL}/api/asr/session`, {
-      method: "POST", headers,
-      signal: withTimeout(signal, 3_000), cache: "no-store",
+    const authorizationSignal = withTimeout(signal, 3_000);
+    const session = await fetch(`${BASE_URL}/api/asr/session`, {
+      method: "POST", headers, signal: authorizationSignal, cache: "no-store",
+    }).then(async response => {
+      assertAuthGeneration(generation, authorizationSignal);
+      if (!response.ok) throw new Error("ASR authorization unavailable");
+      return await response.json() as { url: string; app_id: string };
+    }).catch(error => {
+      authorizationSignal?.throwIfAborted();
+      throw error;
     });
-    assertAuthGeneration(generation, signal);
-    if (!response.ok) throw new Error("ASR authorization unavailable");
-    const session = await response.json() as { url: string; app_id: string };
-    assertAuthGeneration(generation, signal);
+    assertAuthGeneration(generation, authorizationSignal);
     // Another request may have exhausted the same AppID's quota while this
     // signature request was in flight; never open a new provider socket.
     if (isAsrQuotaCooling()) throw new AsrQuotaError();
@@ -57,18 +61,18 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
         retired = true;
         clearTimeout(readyTimer);
         const cancelled = signal?.aborted || generation !== getAuthGeneration();
-        const reason = error ?? (cancelled ? cancelledError() : new Error("ASR connection closed"));
+        const reason = error ?? (cancelled ? signal?.reason ?? cancelledError() : new Error("ASR connection closed"));
         terminalError = reason;
         if (pendingFinal) settle("", reason);
         signal?.removeEventListener("abort", onAbort);
         try { ws.close(); } catch { /* already disconnected */ }
-        if (ready) cb.onClose?.(reason);
+        if (ready) cb.onClose?.(error ?? (cancelled ? reason : undefined));
         else reject(reason);
       };
-      const onAbort = () => close(cancelledError());
+      const onAbort = () => close(signal?.reason ?? cancelledError());
       const cancelled = () => {
         if (!signal?.aborted && generation === getAuthGeneration()) return false;
-        close(cancelledError());
+        close(signal?.reason ?? cancelledError());
         return true;
       };
       const fail = (failure: string | Error = "ASR connection failed") => {
@@ -110,7 +114,7 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
             finalTimer = setTimeout(() => fail("ASR final timed out"), 5_000);
           } catch { fail("ASR finalization failed"); }
         }),
-        close: () => close(),
+        close,
       };
       ws.onopen = () => { if (cancelled() || retired) return; ready = true; clearTimeout(readyTimer); resolve(api); };
       ws.onmessage = (event) => {
@@ -148,7 +152,7 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
       };
       const readyTimer = setTimeout(() => fail("ASR connection timed out"), 2_500);
       signal?.addEventListener("abort", onAbort, { once: true });
-      if (signal?.aborted) close(cancelledError());
+      if (signal?.aborted) onAbort();
     });
   } catch (error) {
     if (!signal?.aborted && generation === getAuthGeneration() && !((error instanceof Error || error instanceof DOMException) && error.name === "AbortError")) unavailableUntil = Date.now() + 30_000;
