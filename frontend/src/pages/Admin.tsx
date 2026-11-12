@@ -5,7 +5,7 @@ import { useAuth } from "../store/auth";
 import { EChart } from "../components/EChart";
 import { AdminUsers } from "../components/AdminUsers";
 import { modelLabel, referenceCost } from '../lib/adminFormatting';
-import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, getDeployedBrowserRelease, type AdminDelivery, type AdminExperience, type AdminFilters, type AdminOverview, type AdminTrace, type AdminTraffic } from "../lib/adminApi";
+import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, getDeployedBrowserRelease, type AdminAsrReplays, type AdminDelivery, type AdminExperience, type AdminFilters, type AdminOverview, type AdminTrace, type AdminTraffic } from "../lib/adminApi";
 import "../admin.css";
 
 const defaults: AdminFilters = { hours: 24, source: "server", operation: "", model: "", release: "", outcome: "", traffic: "unmarked", testRunId: "", delivery: "all" };
@@ -62,10 +62,8 @@ const names: Record<string, string> = {
   "voice.first_audio": "整轮语音 · 说话结束至播放开始回调", "voice.complete": "整轮语音 · 完成（含播放）",
 };
 const ms = (n: number | null | undefined) => n == null ? "—" : n >= 1000 ? `${(n / 1000).toFixed(2)} s` : `${Math.round(n)} ms`;
-function replayDelay(occurredAt?: string | null, receivedAt?: string | null) {
-  if (!occurredAt || !receivedAt) return "未采集";
-  const delay = Date.parse(receivedAt) - Date.parse(occurredAt);
-  if (!Number.isFinite(delay) || delay < 0) return "未采集";
+function formatReplayDelay(delay: number | null) {
+  if (delay == null || !Number.isFinite(delay) || delay < 0) return "未采集";
   if (delay < 60_000) return ms(delay);
   const seconds = Math.floor(delay / 1000);
   const parts: [number, string][] = [
@@ -429,6 +427,8 @@ export default function Admin() {
           </div>
         </article>
       </section>
+      {filters.source === "browser" && data.asr_replays && <AsrReplaySummary summary={data.asr_replays}
+        onlyReplays={filters.delivery === "replay"} />}
       {!diagnostics && data.experience && <ExperienceOverview experience={data.experience}
         onPlaybackDetails={openPlaybackDiagnostics} />}
       <section className={`admin-panels${filters.source === "browser" ? " admin-panels-single" : ""}`}>
@@ -508,6 +508,28 @@ const stageNames: Record<string, string> = {
   "speech.request_to_audio": "提交至播放开始回调",
 };
 
+const replayPercent = new Intl.NumberFormat("zh-CN", { style: "percent", maximumFractionDigits: 2 });
+
+function AsrReplaySummary({ summary, onlyReplays }: { summary: AdminAsrReplays; onlyReplays: boolean }) {
+  const { count, failed_count, unclassified_count, delay_samples, median_delay_ms } = summary;
+  return <section className="admin-panel admin-replay-summary" aria-labelledby="admin-replay-heading">
+    <div className="admin-panel-heading"><h2 id="admin-replay-heading">补报统计</h2>
+      <span>按发生时间统计{onlyReplays && " · 比例基于全部上报"}</span></div>
+    <dl>
+      <div><dt>补报条数</dt><dd>{number(count)}</dd></div>
+      <div><dt>占识别失败和超时</dt><dd>
+        {failed_count ? replayPercent.format(count / failed_count) : "—"}
+        <small>{failed_count ? `${number(count)} / ${number(failed_count)} 条` : "暂无识别失败和超时记录"}</small>
+        {unclassified_count > 0 && <small>{number(unclassified_count)} 条上报方式未知</small>}
+      </dd></div>
+      <div><dt>收到间隔中位数</dt><dd>
+        {median_delay_ms == null ? "—" : formatReplayDelay(median_delay_ms)}
+        <small>{delay_samples ? `${number(delay_samples)} 条有时间记录` : "暂无有效时间样本"}</small>
+      </dd></div>
+    </dl>
+  </section>;
+}
+
 function ExperienceOverview({ experience, onPlaybackDetails }: { experience: AdminExperience; onPlaybackDetails: () => void }) {
   const { stages, playback } = experience;
   const samples = playback.completed + playback.failed + playback.cancelled;
@@ -559,6 +581,8 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
   const diagnosticText = (span: NonNullable<AdminTrace["spans"]>[number]) =>
     Object.entries(span.attributes ?? {}).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value)).map(([key, value]) => `${key}=${String(value)}`).join(" · ");
   const receivedAt = detail.received_at ?? detail.started_at;
+  const deliveryDelay = detail.occurred_at && detail.received_at
+    ? Date.parse(detail.received_at) - Date.parse(detail.occurred_at) : null;
   return <aside className="admin-detail" aria-label="调用详情"><header><div><span className="admin-eyebrow">调用详情</span><h2>{names[detail.operation] ?? detail.operation}</h2></div><button ref={closeButton} type="button" aria-label="关闭调用详情" onClick={onClose}><X size={20} /></button></header>
     <div className="admin-detail-status"><span className={`admin-badge ${detail.outcome}`}>{labels[detail.outcome] ?? detail.outcome}</span>{detail.is_replay && <span className="admin-badge replay">补报</span>}{detail.source === "server" && <time dateTime={detail.started_at}>{date(detail.started_at)}</time>}</div>
     <code className="admin-trace-id">{detail.trace_id}</code>
@@ -569,7 +593,7 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
       {detail.source === "browser" && <>
         <div><dt>发生时间</dt><dd>{detail.occurred_at ? <time dateTime={detail.occurred_at}>{date(detail.occurred_at)}</time> : "未采集"}</dd></div>
         <div><dt>收到时间</dt><dd><time dateTime={receivedAt}>{date(receivedAt)}</time></dd></div>
-        {detail.is_replay && <div><dt>发生至收到</dt><dd>{replayDelay(detail.occurred_at, detail.received_at)}</dd></div>}
+        {detail.is_replay && <div><dt>发生至收到</dt><dd>{formatReplayDelay(deliveryDelay)}</dd></div>}
       </>}
       <div><dt>响应</dt><dd>{detail.source === "browser" ? "不适用 HTTP 状态" : detail.http_status == null ? "HTTP 状态未采集" : `HTTP ${detail.http_status}`}</dd></div><div><dt>发布版本</dt><dd>{releaseLabel(detail.release)}{isTestRelease(detail.release) && "（测试样本）"}</dd></div>{detail.test_run_id && <div><dt>测试批次</dt><dd>{detail.test_run_id}</dd></div>}{detail.source === "server" && <div><dt>模型首文本</dt><dd>{ms(detail.ttft_ms)}</dd></div>}</dl>
     {detail.audience === "guest" && <p className="admin-detail-cost">游客练习请求<small>近 7 天的保留样本按发生时间计入用户运营。</small></p>}

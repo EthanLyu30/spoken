@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import hashlib
+from statistics import median
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -355,8 +356,29 @@ def serialize(record, *, detail=False):
     return out
 
 
+def _asr_replay_summary(db, **filters):
+    # Compare replays with all ASR failures in the selected scope.
+    scope = filters | {"delivery": "all", "outcome": None}
+    rows = db.execute(select(TelemetryRecord.is_replay, TelemetryRecord.started_at, TelemetryRecord.received_at).where(
+        *conditions(**scope),
+        TelemetryRecord.operation.startswith("asr."),
+        TelemetryRecord.outcome.in_(("error", "timeout")),
+    )).all()
+    replays = [row for row in rows if row.is_replay]
+    delays = [(row.received_at - row.started_at).total_seconds() * 1000 for row in replays
+              if row.received_at is not None and row.received_at >= row.started_at]
+    return {
+        "count": len(replays),
+        "failed_count": len(rows),
+        "unclassified_count": sum(row.is_replay is None for row in rows),
+        "delay_samples": len(delays),
+        "median_delay_ms": median(delays) if delays else None,
+    }
+
+
 def overview(db, **filters):
     from app.services.model_pricing import pricing_summary
+    source = filters.get("source", "server")
     rows = db.execute(select(TelemetryRecord.duration_ms, TelemetryRecord.ttft_ms,
         TelemetryRecord.outcome, TelemetryRecord.input_tokens, TelemetryRecord.output_tokens,
         TelemetryRecord.started_at, TelemetryRecord.operation, TelemetryRecord.model).where(*conditions(**filters))).all()
@@ -367,14 +389,14 @@ def overview(db, **filters):
         key = row.started_at.replace(minute=0, second=0, microsecond=0).isoformat() + "Z"
         bucket = buckets.setdefault((key, row.operation), [])
         bucket.append(row)
-    facet_filters = conditions(hours=filters.get("hours", 24), source=filters.get("source", "server"),
+    facet_filters = conditions(hours=filters.get("hours", 24), source=source,
                                traffic=filters.get("traffic", "all"), test_run_id=filters.get("test_run_id"),
                                delivery=filters.get("delivery", "all"))
     facets = {name: list(db.scalars(select(column).where(*facet_filters, column.is_not(None))
                                   .distinct().order_by(column).limit(100)).all())
               for name, column in (("operations", TelemetryRecord.operation), ("models", TelemetryRecord.model), ("releases", TelemetryRecord.release))}
-    return {"source": filters.get("source", "server"), "count": len(rows), "facets": facets,
-        "pricing": pricing_summary(rows, source=filters.get('source', 'server')),
+    result = {"source": source, "count": len(rows), "facets": facets,
+        "pricing": pricing_summary(rows, source=source),
         "success_rate": sum(r.outcome == "ok" for r in completed) / len(completed) if completed else None,
         "errors": sum(r.outcome == "error" for r in rows), "timeouts": sum(r.outcome == "timeout" for r in rows),
         "cancelled": sum(r.outcome == "cancelled" for r in rows),
@@ -386,3 +408,6 @@ def overview(db, **filters):
         "trend": [{"time": time, "operation": op, "count": len(group),
                    "p95": percentiles(r.duration_ms for r in group if r.outcome != "cancelled")["p95"]}
                   for (time, op), group in sorted(buckets.items())]}
+    if source == "browser":
+        result["asr_replays"] = _asr_replay_summary(db, **filters)
+    return result

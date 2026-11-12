@@ -757,6 +757,42 @@ it("marks recovered reports and filters the browser table and overview together"
   expect(detail.getByText("发生至收到").parentElement).toHaveTextContent("1 小时 5 分");
 });
 
+it("shows the ASR replay summary for the selected time, release and traffic", async () => {
+  const selected = { count: 2, failed_count: 4, unclassified_count: 1, delay_samples: 1, median_delay_ms: 60000 };
+  fetcher.mockImplementation(async (url: string) => {
+    const request = new URL(url, "http://localhost");
+    if (!request.pathname.endsWith("/overview")) return Response.json({ items: [], total: 0 });
+    const filters = request.searchParams;
+    if (filters.get("source") !== "browser") return Response.json(overview);
+    const asrReplays = filters.get("traffic") === "test"
+      ? { count: 0, failed_count: 0, unclassified_count: 0, delay_samples: 0, median_delay_ms: null }
+      : !filters.has("release")
+        ? { ...selected, count: 4, failed_count: 6 }
+        : filters.get("hours") === "168" ? { ...selected, count: 3, failed_count: 5 } : selected;
+    return Response.json({ ...overview, source: "browser", traffic_filter: true, asr_replays: asrReplays });
+  });
+
+  show();
+  expect(screen.queryByRole("region", { name: "补报统计" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: "浏览器体验" }));
+  const card = () => screen.getByRole("region", { name: "补报统计" });
+  const initial = within(await screen.findByRole("region", { name: "补报统计" }));
+  expect(initial.getByText("补报条数").parentElement).toHaveTextContent("2");
+  expect(initial.getByText("50%")).toBeVisible();
+  expect(initial.getByText("2 / 4 条")).toBeVisible();
+  expect(initial.getByText(/1 条上报方式未知/)).toBeVisible();
+  expect(initial.getByText("1 分")).toBeVisible();
+  expect(initial.getByText("1 条有时间记录")).toBeVisible();
+
+  fireEvent.change(screen.getByLabelText("时间范围"), { target: { value: "168" } });
+  await waitFor(() => expect(card()).toHaveTextContent("3 / 5 条"));
+  fireEvent.change(screen.getByLabelText("发布版本"), { target: { value: "__all" } });
+  await waitFor(() => expect(card()).toHaveTextContent("4 / 6 条"));
+  fireEvent.change(screen.getByLabelText("流量范围"), { target: { value: "test" } });
+  await waitFor(() => expect(card()).toHaveTextContent("暂无识别失败和超时记录"));
+  expect(within(card()).getByText("暂无有效时间样本")).toBeVisible();
+});
+
 it("rejects malformed Trace IDs before requesting a private detail", async () => {
   show(); await screen.findByText(/暂无调用记录/); fetcher.mockClear();
   fireEvent.change(screen.getByLabelText("Trace ID"), { target: { value: "not-a-trace-id" } });

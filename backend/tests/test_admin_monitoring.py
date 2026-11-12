@@ -368,6 +368,64 @@ def test_asr_replay_filter_keeps_the_first_delivery_and_excludes_legacy_records(
     assert detail["received_at"] > detail["occurred_at"]
 
 
+def test_asr_replay_summary_counts_scoped_failures_and_times_only_known_delays(client, monkeypatch):
+    from app.api import telemetry as telemetry_api
+    from app.services import telemetry as telemetry_service
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now.astimezone(tz) if tz else now.replace(tzinfo=None)
+
+    monkeypatch.setattr(telemetry_api, "datetime", Clock)
+    monkeypatch.setattr(telemetry_service, "datetime", Clock)
+    owner = account(client, admin=True)
+    release = "qa-replay-" + uuid.uuid4().hex
+    sample = {"operation": "asr.transcribe", "duration_ms": 610, "outcome": "error",
+              "release": release, "test_run_id": uuid.uuid4().hex}
+
+    def record(age_seconds=None, **fields):
+        payload = sample | {"event_id": uuid.uuid4().hex} | fields
+        if age_seconds is not None:
+            payload["occurred_at_ms"] = int((now - timedelta(seconds=age_seconds)).timestamp() * 1000)
+        response = client.post("/api/telemetry/client", json=payload)
+        assert response.status_code == 202, response.text
+
+    record(30, is_replay=True)
+    record(90, is_replay=True, operation="asr.finalize", outcome="timeout")
+    record(is_replay=True)
+    record(0, is_replay=False)
+    record()
+    record(outcome="cancelled")
+    record(operation="speech.complete")
+    record(3900, is_replay=True)
+    record(20, is_replay=True, release=release + "-older")
+    record(5, is_replay=True, test_run_id=None)
+
+    scope = {"source": "browser", "release": release, "traffic": "test", "hours": 1}
+
+    def summary(**filters):
+        response = client.get("/api/admin/overview", params=scope | filters, headers=owner)
+        assert response.status_code == 200, response.text
+        return response.json()["asr_replays"]
+
+    expected = {"count": 3, "failed_count": 5, "unclassified_count": 1,
+                "delay_samples": 2, "median_delay_ms": 60_000}
+    assert summary() == expected
+    assert summary(delivery="replay") == expected
+    assert summary(hours=2) == expected | {"count": 4, "failed_count": 6, "delay_samples": 3, "median_delay_ms": 90_000}
+    assert summary(release=release + "-older") == {"count": 1, "failed_count": 1, "unclassified_count": 0,
+                                                   "delay_samples": 1, "median_delay_ms": 20_000}
+    assert summary(traffic="unmarked") == {"count": 1, "failed_count": 1, "unclassified_count": 0,
+                                            "delay_samples": 1, "median_delay_ms": 5000}
+    assert summary(operation="asr.finalize") == {"count": 1, "failed_count": 1, "unclassified_count": 0,
+                                                  "delay_samples": 1, "median_delay_ms": 90_000}
+    assert summary(test_run_id="no-such-batch") == {"count": 0, "failed_count": 0, "unclassified_count": 0,
+                                                    "delay_samples": 0, "median_delay_ms": None}
+
+
 @pytest.mark.parametrize("offset", [timedelta(minutes=1), timedelta(hours=-25)])
 def test_asr_outside_the_recovery_window_keeps_only_the_receipt(client, offset):
     owner = account(client, admin=True)

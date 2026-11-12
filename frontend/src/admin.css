@@ -95,6 +95,13 @@
 .admin-panel-heading{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .admin-panel-heading h2{font-size:15px;font-weight:800;margin:0;display:flex;align-items:center;gap:8px;line-height:1.4}
 .admin-panel-heading h2 span,.admin-panel-heading>span{font-size:12px;color:var(--admin-muted);font-weight:400}
+.admin-replay-summary{margin-bottom:14px}
+.admin-replay-summary dl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:0;padding:0 18px 14px}
+.admin-replay-summary dl>div{border-top:1px solid var(--admin-line);padding-top:8px}
+.admin-replay-summary dt,.admin-replay-summary small{font-size:12px;color:var(--admin-muted);line-height:1.5}
+.admin-replay-summary dd{font-size:21px;line-height:1.35;font-weight:800;margin:4px 0 0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.admin-replay-summary small{display:block;font-weight:400;margin-top:3px}
+@media(max-width:480px){.admin-replay-summary dl{grid-template-columns:minmax(0,1fr);gap:10px;padding:0 15px 13px}}
 .admin-trend .chart-data-details{margin:0 18px 12px}
 .admin-trend .chart-data-table{white-space:normal}
 .admin-trend .chart-data-table :is(th,td){padding:8px 10px}

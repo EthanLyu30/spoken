@@ -37,7 +37,15 @@ export interface AdminExperience {
     recovered: number; recovery_failed: number; recovery_cancelled: number;
   };
 }
+export interface AdminAsrReplays {
+  count: number;
+  failed_count: number;
+  unclassified_count: number;
+  delay_samples: number;
+  median_delay_ms: number | null;
+}
 export interface AdminOverview {
+  asr_replays?: AdminAsrReplays;
   visitors?: AdminVisitors;
   experience?: AdminExperience;
   pricing?: AdminPricing;
