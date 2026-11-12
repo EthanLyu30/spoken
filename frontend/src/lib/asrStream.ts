@@ -42,7 +42,12 @@ function relayProviderError(message: string, code?: unknown): Error {
 }
 
 /** Direct→relay is allowed only while opening; later failures use complete PCM. */
-export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us", signal?: AbortSignal): Promise<AsrStream> {
+export async function openAsrStream(
+  cb: AsrStreamCallbacks,
+  language = "en_us",
+  signal?: AbortSignal,
+  options?: { directFinalTimeoutMs: number },
+): Promise<AsrStream> {
   const generation = getAuthGeneration();
   assertAuthGeneration(generation, signal);
   if (isAsrQuotaCooling()) throw new AsrQuotaError();
@@ -74,7 +79,7 @@ export async function openAsrStream(cb: AsrStreamCallbacks, language = "en_us", 
           activeAt = undefined;
           cb.onClose?.(error);
         },
-      }, language, signal);
+      }, language, signal, transport === "direct" ? options?.directFinalTimeoutMs : undefined);
       try { assertAuthGeneration(generation, signal); }
       catch (error) { raw.close(); throw error; }
       reportTiming("asr.attempt", performance.now() - started, {

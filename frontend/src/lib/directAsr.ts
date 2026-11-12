@@ -12,7 +12,12 @@ let unavailableUntil = 0;
 const cancelledError = () => new DOMException("ASR cancelled", "AbortError");
 
 /** One provider session per utterance; signed handshakes are memory-only. */
-export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en_us", signal?: AbortSignal): Promise<AsrStream> {
+export async function openDirectAsrStream(
+  cb: AsrStreamCallbacks,
+  language = "en_us",
+  signal?: AbortSignal,
+  finalTimeoutMs = 5_000,
+): Promise<AsrStream> {
   const generation = getAuthGeneration();
   assertAuthGeneration(generation, signal);
   if (isAsrQuotaCooling()) throw new AsrQuotaError();
@@ -111,7 +116,7 @@ export async function openDirectAsrStream(cb: AsrStreamCallbacks, language = "en
             if (pending.length) { sendFrame(pending); pending = new Uint8Array(0); }
             if (first) { close(new Error("ASR returned no audio")); return; }
             ws.send(JSON.stringify({ data: { status: 2, audio: "" } }));
-            finalTimer = setTimeout(() => fail("ASR final timed out"), 5_000);
+            finalTimer = setTimeout(() => fail("ASR final timed out"), finalTimeoutMs);
           } catch { fail("ASR finalization failed"); }
         }),
         close,

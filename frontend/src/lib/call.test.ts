@@ -9,6 +9,7 @@ vi.mock("./asrStream", () => ({
 }));
 
 import { startVoiceCall } from "./call";
+import { transcribeSpeech } from "./transcribe";
 import { getInteraction } from "./telemetry";
 import { ASR_QUOTA_MESSAGE, AsrQuotaError } from "./asrQuota";
 
@@ -187,6 +188,103 @@ describe("voice call ASR engine boundaries", () => {
       expect(fetcher.mock.calls.map(([, options]) => JSON.parse(options.body))).toContainEqual(
         expect.objectContaining({ operation: "voice.complete", outcome: "timeout" }),
       );
+    } finally { call.end(); vi.useRealTimers(); }
+  });
+
+
+  it.each([
+    { scenario: "healthy final", finalAfter: 150, recoveryAt: null, firstAudio: 1_703 },
+    { scenario: "missing final", finalAfter: 6_000, recoveryAt: 2_500, firstAudio: 7_514 },
+  ])("plays one reply for $scenario without submitting a partial", async ({ finalAfter, recoveryAt, firstAudio }) => {
+    const { openAsrStream } = await vi.importActual<typeof import("./asrStream")>("./asrStream");
+    mocks.openAsrStream.mockImplementation(openAsrStream);
+    const fullText = "A latte, please. Can I pay by card?";
+    let finalizeAt: number | undefined;
+    let uploadAt: number | undefined;
+    const terminalFrames = vi.fn();
+    const sockets = vi.fn();
+
+    class DirectSocket {
+      static OPEN = 1;
+      readyState = DirectSocket.OPEN;
+      onopen?: () => void;
+      onclose?: () => void;
+      onmessage?: (event: { data: string }) => void;
+
+      constructor() {
+        sockets();
+        queueMicrotask(() => this.onopen?.());
+      }
+      send(raw: string) {
+        if (JSON.parse(raw).data.status !== 2) return;
+        terminalFrames();
+        finalizeAt = performance.now();
+        this.onmessage?.({ data: JSON.stringify({
+          code: 0, data: { status: 1, result: { sn: 0, ws: [{ cw: [{ w: "A latte, please. " }] }] } },
+        }) });
+        setTimeout(() => this.onmessage?.({ data: JSON.stringify({
+          code: 0, data: { status: 2, result: { sn: 1, ws: [{ cw: [{ w: "Can I pay by card?" }] }] } },
+        }) }), finalAfter);
+      }
+      close() {
+        this.readyState = 3;
+        this.onclose?.();
+      }
+    }
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
+    vi.stubGlobal("WebSocket", DirectSocket);
+    const recovery = vi.fn(async (request: RequestInit | undefined) => {
+      uploadAt = performance.now();
+      await new Promise(resolve => setTimeout(resolve, 3_461));
+      expect(request?.body).toBeInstanceOf(ArrayBuffer);
+      return Response.json({ text: fullText });
+    });
+    const events: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", (url: string, request?: RequestInit) => {
+      if (url.endsWith("/api/asr/session")) {
+        return Promise.resolve(Response.json({ url: "wss://iat-api.xfyun.cn/v2/iat?authorization=test", app_id: "public-app" }));
+      }
+      if (url.endsWith("/api/asr")) return recovery(request);
+      if (url.endsWith("/api/telemetry/client")) {
+        events.push(JSON.parse(String(request?.body)));
+        return Promise.resolve(new Response(null, { status: 202 }));
+      }
+      throw new Error("Unexpected request in the voice timing test");
+    });
+    const reply = vi.fn(async (_text: string, _pcm: ArrayBuffer, onSpeaking: () => void) => {
+      await new Promise(resolve => setTimeout(resolve, 1_553));
+      onSpeaking();
+    });
+    const onError = vi.fn();
+    const call = await startVoiceCall({
+      onPhase: vi.fn(), onError, reply,
+      transcribe: (pcm, _engine, signal) => transcribeSpeech(pcm, signal, "cloud"),
+    });
+    try {
+      pushMs(500, 0.1);
+      await vi.advanceTimersByTimeAsync(0);
+      pushMs(920, 0);
+      await vi.advanceTimersByTimeAsync(12_000);
+
+      const final = events.find(event => event.operation === "asr.finalize");
+      const audio = events.find(event => event.operation === "voice.first_audio");
+      expect({
+        finalizeToRecovery: uploadAt === undefined ? null : uploadAt - finalizeAt!,
+        firstAudio: audio?.duration_ms,
+      }).toEqual({ finalizeToRecovery: recoveryAt, firstAudio });
+      expect(final).toMatchObject({
+        outcome: recoveryAt === null ? "ok" : "timeout",
+        transport: "direct",
+        interaction_id: audio?.interaction_id,
+        ...(recoveryAt === null ? {} : { asr_reason: "timeout" }),
+      });
+      expect(terminalFrames).toHaveBeenCalledOnce();
+      expect(sockets).toHaveBeenCalledOnce();
+      expect(recovery).toHaveBeenCalledTimes(recoveryAt === null ? 0 : 1);
+      expect(reply).toHaveBeenCalledExactlyOnceWith(fullText, expect.any(ArrayBuffer), expect.any(Function), expect.any(AbortSignal));
+      if (recoveryAt !== null) expect(recovery.mock.calls[0][0]?.body).toBe(reply.mock.calls[0][1]);
+      expect(onError).not.toHaveBeenCalled();
     } finally { call.end(); vi.useRealTimers(); }
   });
 

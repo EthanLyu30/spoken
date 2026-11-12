@@ -61,6 +61,8 @@ const SILENCE_THRESHOLD = 0.012; // RMS below this counts as silence
 // card?". At 650ms that pause ended the turn; 900ms keeps it in one utterance
 // while adding only 250ms to a normal end-of-turn wait.
 const END_SILENCE_MS = 900;
+// The whole turn is already retained for recovery if the direct final stalls.
+const DIRECT_CALL_FINAL_TIMEOUT_MS = 2_500;
 const MIN_SPEECH_MS = 180; // include brief answers such as "yes" and "no"
 const MAX_UTTER_MS = 15000; // safety cap
 const LEADING_SILENCE_DROP_MS = 4000; // drop long leading silence
@@ -126,7 +128,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
           onClose: () => {
             if (asr === opened) asr = null;
           },
-        }, "en_us", lifetime.signal);
+        }, "en_us", lifetime.signal, { directFinalTimeoutMs: DIRECT_CALL_FINAL_TIMEOUT_MS });
         if (ended || generation !== asrGeneration || busy || !started) {
           opened.close();
           return;
