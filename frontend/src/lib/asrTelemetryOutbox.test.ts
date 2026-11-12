@@ -77,6 +77,32 @@ it("reopens a queued failure with the same id and original test batch after an i
   expect(pending()).toHaveLength(0);
 });
 
+it("preserves the failure timestamp across Beijing midnight and a schema rollout", async () => {
+  const occurred = new Date("2026-11-12T23:50:00+08:00");
+  vi.setSystemTime(occurred);
+  const online = offline();
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, { status: 422 }))
+    .mockImplementation(() => Promise.resolve(stored()));
+  vi.stubGlobal("fetch", fetcher);
+  start();
+  reportFailure();
+  expect(fetcher).not.toHaveBeenCalled();
+  stop?.();
+
+  vi.setSystemTime(new Date("2026-11-13T00:55:00+08:00"));
+  online.mockReturnValue(true);
+  start();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(pending()).toHaveLength(1);
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({
+    occurred_at_ms: occurred.getTime(), interaction_id: id, provider_code: 10005,
+  });
+  await vi.advanceTimersByTimeAsync(750);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls[1][1].body).toBe(fetcher.mock.calls[0][1].body);
+  expect(pending()).toHaveLength(0);
+});
+
 it("retains the same event through a network error and a queue-only 202", async () => {
   const fetcher = vi.fn().mockRejectedValueOnce(new TypeError("network error"))
     .mockResolvedValueOnce(new Response(null, { status: 202 }))

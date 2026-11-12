@@ -699,6 +699,30 @@ it("describes an empty direct ASR result without blaming user cancellation", asy
   expect(detail.getByText("识别结果分类")).toBeVisible();
 });
 
+it.each([true, false])("shows the browser occurrence and receipt truthfully when occurrence is available: %s", async hasOccurrence => {
+  const occurred = "2026-11-12T15:50:00.000Z";
+  const received = "2026-11-12T16:55:00.000Z";
+  const failure = { ...trace, source: "browser", operation: "asr.transcribe", outcome: "error",
+    started_at: hasOccurrence ? occurred : received, occurred_at: hasOccurrence ? occurred : null, received_at: received };
+  fetcher.mockImplementation(async (url: string) => Response.json(url.includes("/overview") ? overview
+    : url.includes(`/traces/${trace.trace_id}`) ? failure : { items: [], total: 0 }));
+  show();
+  await screen.findByText(/暂无调用记录/);
+  fireEvent.change(screen.getByLabelText("Trace ID"), { target: { value: trace.trace_id } });
+  fireEvent.click(screen.getByRole("button", { name: "查找调用" }));
+  const detail = within(await screen.findByRole("complementary", { name: "调用详情" }));
+  const when = detail.getByText("发生时间").parentElement!;
+  if (hasOccurrence) {
+    expect(when.querySelector("time")).toHaveAttribute("datetime", occurred);
+    expect(when).toHaveTextContent(/11\/12.*23:50:00/);
+  } else {
+    expect(when).toHaveTextContent("未采集");
+  }
+  const arrival = detail.getByText("收到时间").parentElement!;
+  expect(arrival.querySelector("time")).toHaveAttribute("datetime", received);
+  expect(arrival).toHaveTextContent(/11\/13.*00:55:00/);
+});
+
 it("rejects malformed Trace IDs before requesting a private detail", async () => {
   show(); await screen.findByText(/暂无调用记录/); fetcher.mockClear();
   fireEvent.change(screen.getByLabelText("Trace ID"), { target: { value: "not-a-trace-id" } });

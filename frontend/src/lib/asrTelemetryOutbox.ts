@@ -30,6 +30,9 @@ function failurePayload(value: unknown): Payload | undefined {
   const eventId = text(raw.event_id, ID_PATTERN);
   const duration = number(raw.duration_ms, 0, 300_000);
   if (!operation || !outcome || !eventId || duration === undefined) return;
+  const reason = choice(raw.asr_reason, ASR_REASONS);
+  const cancelled = reason === "cancelled" || reason === "user_cancelled";
+  const matchingReason = !cancelled && (reason === "timeout") === (outcome === "timeout");
 
   const payload: Payload = {
     operation, outcome, event_id: eventId, duration_ms: duration,
@@ -38,7 +41,7 @@ function failurePayload(value: unknown): Payload | undefined {
     transport: choice(raw.transport, ["direct", "relay", "buffered", "local", "unknown"]) ?? "unknown",
     interaction_id: text(raw.interaction_id, ID_PATTERN),
     test_run_id: text(raw.test_run_id, /^[A-Za-z0-9._-]{1,64}$/),
-    asr_reason: choice(raw.asr_reason, ASR_REASONS),
+    asr_reason: matchingReason ? reason : undefined,
     provider_code: integer(raw.provider_code, 1, 99_999),
   };
 
@@ -67,7 +70,7 @@ function pendingFailures(storage: Storage): Pending[] {
     try { entry = raw && raw.length <= 2048 ? object(JSON.parse(raw)) : undefined; }
     catch { /* Discard malformed entries from this queue. */ }
     const payload = failurePayload(entry?.payload);
-    const createdAt = number(entry?.createdAt, 0, now + RETENTION_MS);
+    const createdAt = integer(entry?.createdAt, 0, now + RETENTION_MS);
     if (payload && key === KEY_PREFIX + payload.event_id && createdAt !== undefined && createdAt > expiresBefore) {
       pending.push({ key, createdAt, payload });
     } else {
@@ -92,10 +95,11 @@ export function createAsrTimingOutbox(send: Send) {
   let rateLimitUntil = 0;
 
   async function deliver(storage: Storage, entry: Pending) {
-    const response = await send(entry.payload).catch(() => undefined);
+    const response = await send({ ...entry.payload, occurred_at_ms: entry.createdAt }).catch(() => undefined);
     try {
+      // An older server may reject the timestamp with 422 during a rollout.
       if ((response?.ok && response.headers.get("X-Telemetry-Stored") === "1") ||
-          [400, 413, 422].includes(response?.status ?? 0)) {
+          [400, 413].includes(response?.status ?? 0)) {
         storage.removeItem(entry.key);
         retryDelay = INITIAL_RETRY_MS;
         return;

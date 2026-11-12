@@ -64,6 +64,7 @@ export type AdminUserSort = "activity" | "registered";
 export interface AdminTrace {
   interaction_id?: string | null; related?: AdminTrace[];
   trace_id: string; started_at: string; operation: string; source: string; outcome: string;
+  occurred_at?: string | null; received_at?: string | null;
   audience?: "guest";
   duration_ms: number; http_status: number | null; ttft_ms: number | null; model: string | null;
   error_type?: string | null; error_cause_type?: string | null; test_run_id?: string | null;

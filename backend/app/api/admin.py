@@ -99,7 +99,9 @@ async def list_traces(request: Request, options: dict = Depends(filters), db: Se
 
 def _list(options, db, limit, offset, slow_first):
     query = select(TelemetryRecord).where(*conditions(**options))
-    order = TelemetryRecord.duration_ms.desc() if slow_first else TelemetryRecord.id.desc()
+    order = TelemetryRecord.started_at.desc() if options.get("source") == "browser" else TelemetryRecord.id.desc()
+    if slow_first:
+        order = TelemetryRecord.duration_ms.desc()
     records = db.scalars(query.order_by(order, TelemetryRecord.id.desc()).limit(limit).offset(offset)).all()
     total = db.scalar(select(func.count()).select_from(TelemetryRecord).where(*conditions(**options)))
     return {"items": [serialize(r) for r in records], "total": total}

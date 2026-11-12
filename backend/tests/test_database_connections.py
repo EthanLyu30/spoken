@@ -35,10 +35,10 @@ def test_legacy_telemetry_migration_preserves_rows_and_is_repeatable(tmp_path, m
         database._migrate_telemetry_errors()
         database._migrate_telemetry_errors()
         columns = {column['name'] for column in inspect(legacy).get_columns('telemetry_records')}
-        assert {'error_type', 'error_cause_type'} <= columns
+        assert {'error_type', 'error_cause_type', 'received_at'} <= columns
         with legacy.connect() as connection:
             assert connection.exec_driver_sql(
-                "SELECT trace_id, error_type, error_cause_type FROM telemetry_records"
-            ).one() == ('legacy-trace', None, None)
+                "SELECT trace_id, error_type, error_cause_type, received_at FROM telemetry_records"
+            ).one() == ('legacy-trace', None, None, None)
     finally:
         legacy.dispose()

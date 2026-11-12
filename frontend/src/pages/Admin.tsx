@@ -540,13 +540,19 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
   const failedSpans = (detail.spans ?? []).filter(span => span.outcome === "error" || span.outcome === "timeout");
   const diagnosticText = (span: NonNullable<AdminTrace["spans"]>[number]) =>
     Object.entries(span.attributes ?? {}).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value)).map(([key, value]) => `${key}=${String(value)}`).join(" · ");
+  const receivedAt = detail.received_at ?? detail.started_at;
   return <aside className="admin-detail" aria-label="调用详情"><header><div><span className="admin-eyebrow">调用详情</span><h2>{names[detail.operation] ?? detail.operation}</h2></div><button ref={closeButton} type="button" aria-label="关闭调用详情" onClick={onClose}><X size={20} /></button></header>
-    <div className="admin-detail-status"><span className={`admin-badge ${detail.outcome}`}>{labels[detail.outcome] ?? detail.outcome}</span><time dateTime={detail.started_at}>{date(detail.started_at)}</time></div>
+    <div className="admin-detail-status"><span className={`admin-badge ${detail.outcome}`}>{labels[detail.outcome] ?? detail.outcome}</span>{detail.source === "server" && <time dateTime={detail.started_at}>{date(detail.started_at)}</time>}</div>
     <code className="admin-trace-id">{detail.trace_id}</code>
     {detail.interaction_id && <p className="admin-interaction-id">交互编号 <code>{detail.interaction_id}</code></p>}
     <div className="admin-trace-root"><div><span>总耗时</span><strong>{ms(detail.duration_ms)}</strong></div>{detail.source === "server" && <div><span>模型 / 类型</span><b>{modelLabel(detail)}</b></div>}</div>
     {detail.source === "server" && <p className="admin-detail-cost">费用参考：{referenceCost(detail.cost_min_cny, detail.cost_max_cny)}<small>依据当前公开价与已知用量区间，未计价不代表零费用。</small></p>}
-    <dl className="admin-detail-meta"><div><dt>采集来源</dt><dd>{detail.source === "browser" ? "浏览器上报" : "后端请求"}</dd></div><div><dt>响应</dt><dd>{detail.source === "browser" ? "不适用 HTTP 状态" : detail.http_status == null ? "HTTP 状态未采集" : `HTTP ${detail.http_status}`}</dd></div><div><dt>发布版本</dt><dd>{releaseLabel(detail.release)}{isTestRelease(detail.release) && "（测试样本）"}</dd></div>{detail.test_run_id && <div><dt>测试批次</dt><dd>{detail.test_run_id}</dd></div>}{detail.source === "server" && <div><dt>模型首文本</dt><dd>{ms(detail.ttft_ms)}</dd></div>}</dl>
+    <dl className="admin-detail-meta"><div><dt>采集来源</dt><dd>{detail.source === "browser" ? "浏览器上报" : "后端请求"}</dd></div>
+      {detail.source === "browser" && <>
+        <div><dt>发生时间</dt><dd>{detail.occurred_at ? <time dateTime={detail.occurred_at}>{date(detail.occurred_at)}</time> : "未采集"}</dd></div>
+        <div><dt>收到时间</dt><dd><time dateTime={receivedAt}>{date(receivedAt)}</time></dd></div>
+      </>}
+      <div><dt>响应</dt><dd>{detail.source === "browser" ? "不适用 HTTP 状态" : detail.http_status == null ? "HTTP 状态未采集" : `HTTP ${detail.http_status}`}</dd></div><div><dt>发布版本</dt><dd>{releaseLabel(detail.release)}{isTestRelease(detail.release) && "（测试样本）"}</dd></div>{detail.test_run_id && <div><dt>测试批次</dt><dd>{detail.test_run_id}</dd></div>}{detail.source === "server" && <div><dt>模型首文本</dt><dd>{ms(detail.ttft_ms)}</dd></div>}</dl>
     {detail.audience === "guest" && <p className="admin-detail-cost">游客练习请求<small>近 7 天的保留样本按发生时间计入用户运营。</small></p>}
     {(failed || cancelled) && <section className="admin-failure-context"><h3><TriangleAlert size={16} />{cancelled ? "取消线索" : "失败线索"}</h3>
       {detail.source === "browser" ? <p>{browserDiagnosis}</p>

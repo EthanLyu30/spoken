@@ -24,7 +24,9 @@ class TelemetryRecord(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     trace_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     interaction_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    # Indexed statistics time. Browser samples with a valid occurrence keep receipt separately.
     started_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     operation: Mapped[str] = mapped_column(String(120), index=True)
     source: Mapped[str] = mapped_column(String(12), default="server", index=True)
     outcome: Mapped[str] = mapped_column(String(16))

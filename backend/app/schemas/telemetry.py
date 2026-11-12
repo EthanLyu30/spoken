@@ -26,6 +26,7 @@ class BrowserTiming(BaseModel):
     release: str = Field(default="unknown", max_length=80, pattern=r"^[A-Za-z0-9._-]+$")
     test_run_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
     event_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    occurred_at_ms: int | None = Field(default=None, ge=0, le=9_007_199_254_740_991, strict=True)
 
     reason: Literal["started", "startup_timeout", "end_before_start", "speech_error", "speak_exception", "cancelled",
                     "end", "native_error", "completion_timeout"] | None = None
@@ -52,8 +53,14 @@ class BrowserTiming(BaseModel):
                         "http_error", "unavailable", "cancelled", "user_cancelled", "quota_cooldown", "unknown"] | None = None
     entry: Literal["turn_correction", "follow_read"] | None = None
 
+    @property
+    def durable_asr(self) -> bool:
+        return bool(self.event_id) and self.operation.startswith("asr.") and self.outcome in {"error", "timeout"}
+
     @model_validator(mode="after")
     def operation_fields_only(self):
+        if self.occurred_at_ms is not None and not self.durable_asr:
+            raise ValueError("occurrence time belongs to durable ASR failures")
         supplied = self.model_fields_set - GLOBAL_DIAGNOSTIC_FIELDS
         if "asr_reason" in supplied:
             expected = {"cancelled": "cancelled", "user_cancelled": "cancelled",

@@ -279,6 +279,76 @@ def test_asr_receipt_follows_commit_and_retries_insert_once(client, monkeypatch)
     assert after[0].id == before[0].id
 
 
+def test_replayed_asr_uses_occurrence_bucket_and_keeps_first_receipt(client, monkeypatch):
+    import hashlib
+
+    from app.api import telemetry as telemetry_api
+    from app.services import telemetry as telemetry_service
+
+    occurred = datetime(2026, 11, 12, 15, 50, tzinfo=timezone.utc)
+    received = datetime(2026, 11, 12, 16, 55, tzinfo=timezone.utc)
+    now = received
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now.astimezone(tz) if tz else now.replace(tzinfo=None)
+
+    monkeypatch.setattr(telemetry_api, "datetime", Clock)
+    monkeypatch.setattr(telemetry_service, "datetime", Clock)
+    owner = account(client, admin=True)
+    batch = uuid.uuid4().hex
+    older_id, newer_id = uuid.uuid4().hex, uuid.uuid4().hex
+    sample = {"operation": "asr.finalize", "duration_ms": 610, "engine": "xfyun",
+              "transport": "direct", "test_run_id": batch, "outcome": "error",
+              "asr_reason": "provider_error", "provider_code": 10005}
+    old = sample | {"event_id": older_id, "occurred_at_ms": int(occurred.timestamp() * 1000)}
+    recent = (sample | {"event_id": newer_id, "outcome": "timeout", "asr_reason": "timeout"})
+    recent.pop("provider_code")
+    assert client.post("/api/telemetry/client", json=recent).status_code == 202
+    assert client.post("/api/telemetry/client", json=old).headers["X-Telemetry-Stored"] == "1"
+
+    now += timedelta(minutes=1)
+    assert client.post("/api/telemetry/client", json=old).headers["X-Telemetry-Stored"] == "1"
+    scope = {"source": "browser", "test_run_id": batch}
+    rows = client.get("/api/admin/traces", params=scope | {"hours": 2}, headers=owner).json()
+    assert rows["total"] == 2
+    assert [row["started_at"] for row in rows["items"]] == [
+        "2026-11-12T16:55:00.000Z", "2026-11-12T15:50:00.000Z",
+    ]
+
+    detail = client.get(f"/api/admin/traces/{rows['items'][1]['trace_id']}", headers=owner).json()
+    assert detail["trace_id"] == hashlib.sha256(f"spoken-browser-v1/{older_id}".encode()).hexdigest()[:32]
+    assert detail["occurred_at"] == "2026-11-12T15:50:00.000Z"
+    assert detail["received_at"] == "2026-11-12T16:55:00.000Z"
+    legacy = client.get(f"/api/admin/traces/{rows['items'][0]['trace_id']}", headers=owner).json()
+    assert legacy["occurred_at"] is None
+    assert legacy["received_at"] == "2026-11-12T16:55:00.000Z"
+
+    overview = client.get("/api/admin/overview", params=scope | {"hours": 2}, headers=owner).json()
+    assert (overview["errors"], overview["timeouts"]) == (1, 1)
+    assert [(bucket["time"], bucket["count"]) for bucket in overview["trend"]] == [
+        ("2026-11-12T15:00:00Z", 1), ("2026-11-12T16:00:00Z", 1),
+    ]
+    last_hour = client.get("/api/admin/overview", params=scope | {"hours": 1}, headers=owner).json()
+    assert (last_hour["errors"], last_hour["timeouts"]) == (0, 1)
+
+
+@pytest.mark.parametrize("offset", [timedelta(minutes=1), timedelta(hours=-25)])
+def test_asr_outside_the_recovery_window_keeps_only_the_receipt(client, offset):
+    owner = account(client, admin=True)
+    batch = uuid.uuid4().hex
+    guessed = datetime.now(timezone.utc) + offset
+    sample = {"operation": "asr.finalize", "duration_ms": 610, "outcome": "error",
+              "test_run_id": batch, "event_id": uuid.uuid4().hex,
+              "occurred_at_ms": int(guessed.timestamp() * 1000)}
+    assert client.post("/api/telemetry/client", json=sample).headers["X-Telemetry-Stored"] == "1"
+    rows = client.get("/api/admin/traces", params={"source": "browser", "test_run_id": batch}, headers=owner).json()
+    detail = client.get(f"/api/admin/traces/{rows['items'][0]['trace_id']}", headers=owner).json()
+    assert detail["occurred_at"] is None
+    assert detail["received_at"] == detail["started_at"]
+
+
 def test_telemetry_rate_limit_tells_browser_when_to_retry(client, monkeypatch):
     from app.api import telemetry
 

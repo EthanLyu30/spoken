@@ -344,6 +344,10 @@ def serialize(record, *, detail=False):
     out['cost_max_cny'] = cost[1] if cost is not None else None
     if detail:
         out["spans"] = spans
+        if record.source == "browser":
+            out["occurred_at"] = out["started_at"] if record.received_at is not None else None
+            received = record.received_at or record.started_at
+            out["received_at"] = received.isoformat(timespec="milliseconds") + "Z"
     return out
 
 

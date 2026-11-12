@@ -21,6 +21,8 @@ from app.services.monitoring import record_visit
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 _rates = OrderedDict()
+# The browser queues for 24 hours. Allow a small margin for clock skew and transit.
+_MAX_ASR_AGE_MS = (24 * 60 + 5) * 60_000
 
 
 @router.post('/visit', status_code=204)
@@ -71,7 +73,7 @@ async def client_timing(request: Request):
         event = BrowserTiming.model_validate_json(payload)
     except ValidationError:
         raise HTTPException(status_code=422, detail="Invalid telemetry payload") from None
-    durable = bool(event.event_id) and event.operation.startswith("asr.") and event.outcome in {"error", "timeout"}
+    durable = event.durable_asr
     sink = getattr(request.app.state, "telemetry_sink", None)
     if not sink and durable and get_settings().telemetry_enabled:
         raise HTTPException(status_code=503, detail="Telemetry collector unavailable")
@@ -85,8 +87,15 @@ async def client_timing(request: Request):
         # the caller pick a trace ID in the server's namespace.
         trace_id = (hashlib.sha256(f"spoken-browser-v1/{event.event_id}".encode()).hexdigest()[:32]
                     if event.event_id else secrets.token_hex(16))
-        record = {"trace_id": trace_id, "interaction_id": event.interaction_id,
-            "test_run_id": test_run_id, "started_at": datetime.now(timezone.utc).replace(tzinfo=None),
+        received_at = datetime.now(timezone.utc)
+        occurred_at = None
+        if event.occurred_at_ms is not None:
+            age_ms = received_at.timestamp() * 1000 - event.occurred_at_ms
+            if 0 <= age_ms <= _MAX_ASR_AGE_MS:
+                occurred_at = datetime.fromtimestamp(event.occurred_at_ms / 1000, timezone.utc)
+        record = {"trace_id": trace_id, "interaction_id": event.interaction_id, "test_run_id": test_run_id,
+            "started_at": (occurred_at or received_at).replace(tzinfo=None),
+            "received_at": received_at.replace(tzinfo=None) if occurred_at is not None else None,
             "operation": event.operation, "source": "browser", "outcome": event.outcome,
             "duration_ms": event.duration_ms, "release": event.release, "model": f"{event.engine}/{event.transport}", "spans_json": json.dumps([
                 {"id": secrets.token_hex(8), "parent_id": None, "name": event.operation, "offset_ms": 0,

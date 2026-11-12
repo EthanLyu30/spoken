@@ -115,18 +115,21 @@ def init_db() -> None:
 
 def _migrate_telemetry_errors() -> None:
     """Add content-free diagnostics without changing historical records."""
-    columns = {"error_type": 100, "error_cause_type": 100, "test_run_id": 64, "guest_subject_hash": 64}
+    columns = {
+        "error_type": "VARCHAR(100)", "error_cause_type": "VARCHAR(100)",
+        "test_run_id": "VARCHAR(64)", "guest_subject_hash": "VARCHAR(64)", "received_at": "TIMESTAMP",
+    }
     with engine.begin() as conn:
         if _url.startswith("sqlite"):
             existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(telemetry_records)")}
             if not existing:
                 return
-            for column, size in columns.items():
+            for column, ddl in columns.items():
                 if column not in existing:
-                    conn.exec_driver_sql(f"ALTER TABLE telemetry_records ADD COLUMN {column} VARCHAR({size})")
+                    conn.exec_driver_sql(f"ALTER TABLE telemetry_records ADD COLUMN {column} {ddl}")
         else:
-            for column, size in columns.items():
-                conn.exec_driver_sql(f"ALTER TABLE telemetry_records ADD COLUMN IF NOT EXISTS {column} VARCHAR({size})")
+            for column, ddl in columns.items():
+                conn.exec_driver_sql(f"ALTER TABLE telemetry_records ADD COLUMN IF NOT EXISTS {column} {ddl}")
 
 
 def _migrate_session_identity() -> None:
