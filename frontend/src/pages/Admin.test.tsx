@@ -723,6 +723,40 @@ it.each([true, false])("shows the browser occurrence and receipt truthfully when
   expect(arrival).toHaveTextContent(/11\/13.*00:55:00/);
 });
 
+it("marks recovered reports and filters the browser table and overview together", async () => {
+  const occurred = "2026-11-12T15:50:00.000Z";
+  const received = "2026-11-12T16:55:00.000Z";
+  const failure = { ...trace, source: "browser", operation: "asr.transcribe", outcome: "error",
+    started_at: occurred, occurred_at: occurred, received_at: received, is_replay: true };
+  const firstDelivery = { ...failure, trace_id: "c".repeat(32), is_replay: false };
+  fetcher.mockImplementation(async (url: string) => {
+    const request = new URL(url, "http://localhost");
+    const browser = request.searchParams.get("source") === "browser";
+    const filtered = request.searchParams.get("delivery") === "replay";
+    const rows = browser ? (filtered ? [failure] : [firstDelivery, failure]) : [];
+    if (url.includes("/overview")) return Response.json({ ...overview, delivery_filter: true,
+      source: browser ? "browser" : "server", count: rows.length, errors: rows.length });
+    return Response.json(url.includes(`/traces/${failure.trace_id}`) ? failure : { items: rows, total: rows.length });
+  });
+  show();
+  expect(screen.queryByLabelText("上报方式")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: "浏览器体验" }));
+  const replay = await screen.findByRole("button", { name: "查看调用 aaaaaaaa" });
+  expect(within(replay.closest("tr")!).getByText("补报")).toBeVisible();
+  const immediate = screen.getByRole("button", { name: "查看调用 cccccccc" });
+  expect(within(immediate.closest("tr")!).queryByText("补报")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("上报方式"), { target: { value: "replay" } });
+  expect(await screen.findByText(/第 1–1 条 \/ 1/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "查看调用 cccccccc" })).not.toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([url]) => url.includes("/overview?") &&
+    new URL(url, "http://localhost").searchParams.get("delivery") === "replay")).toBe(true);
+
+  fireEvent.click(screen.getByRole("button", { name: "查看调用 aaaaaaaa" }));
+  const detail = within(await screen.findByRole("complementary", { name: "调用详情" }));
+  expect(detail.getByText("补报")).toBeVisible();
+  expect(detail.getByText("发生至收到").parentElement).toHaveTextContent("1 小时 5 分");
+});
+
 it("rejects malformed Trace IDs before requesting a private detail", async () => {
   show(); await screen.findByText(/暂无调用记录/); fetcher.mockClear();
   fireEvent.change(screen.getByLabelText("Trace ID"), { target: { value: "not-a-trace-id" } });

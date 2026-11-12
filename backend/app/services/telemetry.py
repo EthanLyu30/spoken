@@ -246,13 +246,15 @@ def percentiles(values):
 
 
 def conditions(hours=24, source="server", operation=None, model=None, release=None, outcome=None,
-               traffic="all", test_run_id=None):
+               traffic="all", test_run_id=None, delivery="all"):
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
     filters = [TelemetryRecord.started_at >= cutoff, TelemetryRecord.source == source]
     for column, value in [(TelemetryRecord.operation, operation), (TelemetryRecord.model, model),
                           (TelemetryRecord.release, release), (TelemetryRecord.outcome, outcome)]:
         if value:
             filters.append(column == value)
+    if source == "browser" and delivery == "replay":
+        filters.append(TelemetryRecord.is_replay.is_(True))
     if test_run_id:
         filters.append(TelemetryRecord.test_run_id == test_run_id)
     elif traffic == "unmarked":
@@ -328,6 +330,8 @@ def serialize(record, *, detail=False):
     if record.guest_subject_hash and not record.test_run_id:
         out["audience"] = "guest"
     out["started_at"] = record.started_at.isoformat(timespec="milliseconds") + "Z"
+    if record.source == "browser":
+        out["is_replay"] = record.is_replay
     spans = None
     if detail or not out["model"]:
         spans = _read_spans(record.spans_json)
@@ -364,7 +368,8 @@ def overview(db, **filters):
         bucket = buckets.setdefault((key, row.operation), [])
         bucket.append(row)
     facet_filters = conditions(hours=filters.get("hours", 24), source=filters.get("source", "server"),
-                               traffic=filters.get("traffic", "all"), test_run_id=filters.get("test_run_id"))
+                               traffic=filters.get("traffic", "all"), test_run_id=filters.get("test_run_id"),
+                               delivery=filters.get("delivery", "all"))
     facets = {name: list(db.scalars(select(column).where(*facet_filters, column.is_not(None))
                                   .distinct().order_by(column).limit(100)).all())
               for name, column in (("operations", TelemetryRecord.operation), ("models", TelemetryRecord.model), ("releases", TelemetryRecord.release))}

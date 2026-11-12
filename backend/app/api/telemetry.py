@@ -96,6 +96,7 @@ async def client_timing(request: Request):
         record = {"trace_id": trace_id, "interaction_id": event.interaction_id, "test_run_id": test_run_id,
             "started_at": (occurred_at or received_at).replace(tzinfo=None),
             "received_at": received_at.replace(tzinfo=None) if occurred_at is not None else None,
+            "is_replay": event.is_replay,
             "operation": event.operation, "source": "browser", "outcome": event.outcome,
             "duration_ms": event.duration_ms, "release": event.release, "model": f"{event.engine}/{event.transport}", "spans_json": json.dumps([
                 {"id": secrets.token_hex(8), "parent_id": None, "name": event.operation, "offset_ms": 0,

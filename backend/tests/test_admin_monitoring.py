@@ -334,6 +334,40 @@ def test_replayed_asr_uses_occurrence_bucket_and_keeps_first_receipt(client, mon
     assert (last_hour["errors"], last_hour["timeouts"]) == (0, 1)
 
 
+def test_asr_replay_filter_keeps_the_first_delivery_and_excludes_legacy_records(client):
+    owner = account(client, admin=True)
+    occurrence = datetime.now(timezone.utc) - timedelta(minutes=65)
+    replay = {"operation": "asr.transcribe", "duration_ms": 610, "outcome": "error",
+              "release": "replay-release", "test_run_id": uuid.uuid4().hex, "event_id": uuid.uuid4().hex,
+              "occurred_at_ms": int(occurrence.timestamp() * 1000), "is_replay": True}
+    normal = replay | {"event_id": uuid.uuid4().hex, "is_replay": False,
+                       "release": "normal-release", "occurred_at_ms": int(datetime.now(timezone.utc).timestamp() * 1000)}
+    legacy = {k: v for k, v in normal.items() if k not in {"is_replay", "occurred_at_ms"}}
+    legacy["event_id"] = uuid.uuid4().hex
+    for payload in (replay, normal, legacy, normal | {"is_replay": True}):
+        response = client.post("/api/telemetry/client", json=payload)
+        assert response.status_code == 202, response.text
+        assert response.headers["X-Telemetry-Stored"] == "1"
+
+    scope = {"source": "browser", "test_run_id": replay["test_run_id"]}
+    rows = client.get("/api/admin/traces", params=scope, headers=owner).json()
+    assert rows["total"] == 3
+    assert [row["is_replay"] for row in rows["items"]] == [None, False, True]
+    filtered = scope | {"delivery": "replay"}
+    result = client.get("/api/admin/traces", params=filtered, headers=owner).json()
+    assert result == {"total": 1, "items": rows["items"][-1:]}
+    stats = client.get("/api/admin/overview", params=filtered, headers=owner).json()
+    assert stats["delivery_filter"] is True
+    assert stats["count"] == stats["errors"] == 1
+    assert stats["facets"]["releases"] == ["replay-release"]
+    assert [entry["count"] for entry in stats["trend"]] == [1]
+    trace_id = result["items"][0]["trace_id"]
+    detail = client.get(f"/api/admin/traces/{trace_id}", headers=owner).json()
+    assert detail["is_replay"] is True
+    assert detail["occurred_at"] == occurrence.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    assert detail["received_at"] > detail["occurred_at"]
+
+
 @pytest.mark.parametrize("offset", [timedelta(minutes=1), timedelta(hours=-25)])
 def test_asr_outside_the_recovery_window_keeps_only_the_receipt(client, offset):
     owner = account(client, admin=True)

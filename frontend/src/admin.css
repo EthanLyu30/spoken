@@ -136,6 +136,8 @@
 .admin-badge::before{content:"";height:5px;width:5px;border-radius:50%;background:currentColor}
 .admin-badge.error,.admin-badge.timeout{background:#ffede2;color:#a34f30}
 .admin-badge.cancelled{background:#f1ede7;color:#7d6e5d}
+.admin-badge.replay{background:#eaf1fa;color:#355a81}
+.admin-row-status{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px}
 .admin-page td.admin-empty{text-align:center;padding:30px 18px;color:var(--admin-muted);white-space:normal;line-height:1.8}
 .admin-pagination{padding:11px 18px;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--admin-muted);gap:10px}
 .admin-pagination>div{display:flex;gap:6px}

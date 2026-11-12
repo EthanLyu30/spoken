@@ -1,7 +1,7 @@
 """Private, content-free operational records; separate from learning data."""
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -27,6 +27,7 @@ class TelemetryRecord(Base):
     # Indexed statistics time. Browser samples with a valid occurrence keep receipt separately.
     started_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     received_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_replay: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     operation: Mapped[str] = mapped_column(String(120), index=True)
     source: Mapped[str] = mapped_column(String(12), default="server", index=True)
     outcome: Mapped[str] = mapped_column(String(16))

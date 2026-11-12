@@ -5,10 +5,10 @@ import { useAuth } from "../store/auth";
 import { EChart } from "../components/EChart";
 import { AdminUsers } from "../components/AdminUsers";
 import { modelLabel, referenceCost } from '../lib/adminFormatting';
-import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, getDeployedBrowserRelease, type AdminExperience, type AdminFilters, type AdminOverview, type AdminTrace, type AdminTraffic } from "../lib/adminApi";
+import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, getDeployedBrowserRelease, type AdminDelivery, type AdminExperience, type AdminFilters, type AdminOverview, type AdminTrace, type AdminTraffic } from "../lib/adminApi";
 import "../admin.css";
 
-const defaults: AdminFilters = { hours: 24, source: "server", operation: "", model: "", release: "", outcome: "", traffic: "unmarked", testRunId: "" };
+const defaults: AdminFilters = { hours: 24, source: "server", operation: "", model: "", release: "", outcome: "", traffic: "unmarked", testRunId: "", delivery: "all" };
 const knownRelease = (release: string | null) => release && release !== "unknown" ? release : undefined;
 type ReleaseMode = "current" | "all" | "history";
 const isTestRelease = (release: string) => /^(development|test|qa)([-_]|$)/i.test(release);
@@ -62,6 +62,19 @@ const names: Record<string, string> = {
   "voice.first_audio": "整轮语音 · 说话结束至播放开始回调", "voice.complete": "整轮语音 · 完成（含播放）",
 };
 const ms = (n: number | null | undefined) => n == null ? "—" : n >= 1000 ? `${(n / 1000).toFixed(2)} s` : `${Math.round(n)} ms`;
+function replayDelay(occurredAt?: string | null, receivedAt?: string | null) {
+  if (!occurredAt || !receivedAt) return "未采集";
+  const delay = Date.parse(receivedAt) - Date.parse(occurredAt);
+  if (!Number.isFinite(delay) || delay < 0) return "未采集";
+  if (delay < 60_000) return ms(delay);
+  const seconds = Math.floor(delay / 1000);
+  const parts: [number, string][] = [
+    [Math.floor(seconds / 3600), "小时"],
+    [Math.floor(seconds / 60) % 60, "分"],
+    [seconds % 60, "秒"],
+  ];
+  return parts.filter(([value]) => value > 0).map(([value, unit]) => `${value} ${unit}`).join(" ");
+}
 const number = (n: number | null) => n == null ? "—" : n.toLocaleString("zh-CN");
 const date = (s: string) => new Date(s).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const forbidden = (err: unknown) => err instanceof AdminApiError && (err.status === 401 || err.status === 403);
@@ -195,7 +208,7 @@ export default function Admin() {
     let live = true;
     const inspectFirst = openFirstFailure.current;
     openFirstFailure.current = false;
-    const scope = JSON.stringify([userId, view, releaseMode, filters.hours, filters.source, filters.operation, filters.model, filters.release, filters.traffic, filters.testRunId, currentBrowserRelease]);
+    const scope = JSON.stringify([userId, view, releaseMode, filters.hours, filters.source, filters.operation, filters.model, filters.release, filters.traffic, filters.testRunId, filters.delivery, currentBrowserRelease]);
     const listScope = JSON.stringify([scope, filters.outcome, offset, slow]);
     const keepOverview = previousScope.current === scope && hasOverview.current;
     const keepList = previousList.current === listScope && hasList.current;
@@ -279,7 +292,7 @@ export default function Admin() {
     const release = releaseMode === "current"
       ? source === "browser" ? "" : knownRelease(serverRelease) ?? ""
       : releaseMode === "all" ? "" : filters.release;
-    update({ source, operation: "", model: "", release, outcome: "" });
+    update({ source, operation: "", model: "", release, outcome: "", delivery: "all" });
   };
   const changeRelease = (value: string) => {
     if (value === "__current") {
@@ -370,6 +383,10 @@ export default function Admin() {
             changeSource(next);
           }}>{source === "server" ? "后端调用" : "浏览器体验"}</button>)}</div>
       {timeRange}{versionSelect}{trafficSelect}
+      {filters.source === "browser" && <label>上报方式<select value={filters.delivery}
+        onChange={event => update({ delivery: event.target.value as AdminDelivery })}>
+        <option value="all">全部上报</option><option value="replay">仅补报</option>
+      </select></label>}
       <label className="admin-operation">业务操作<select value={filters.operation} onChange={e => update({ operation: e.target.value })}><option value="">所有操作（混合样本）</option>{operationOptions.map(op => <option key={op} value={op}>{names[op] ?? op}</option>)}</select></label>
       {filters.source === "server" && <label>模型<select aria-label="模型" value={filters.model} onChange={e => update({ model: e.target.value })}><option value="">全部</option>{(data?.facets?.models ?? []).map(m => <option key={m}>{m}</option>)}</select></label>}
       <span className={`admin-release-state ${releaseMode}`} title={releaseMode === "current" ? selectedRelease ?? undefined : filters.release}>{versionLabel}</span>
@@ -391,6 +408,7 @@ export default function Admin() {
     {overviewLoading && !data && <p className="admin-loading" role="status">正在读取运行概览…</p>}
     {data && <>
       {filters.traffic !== "all" && !data.traffic_filter && <p className="admin-notice" role="status">此后端尚不支持流量筛选，当前展示全部流量。</p>}
+      {filters.delivery === "replay" && !data.delivery_filter && <p className="admin-notice" role="status">后端更新后可筛选补报。当前显示全部上报。</p>}
       {filters.traffic === "unmarked" && data.traffic_filter && <p className="admin-scope-caption">未标记流量也可能包含历史测试。已标记的测试批次可在「仅测试流量」下查看。</p>}
       {filters.source === "browser" && <p className="admin-notice">浏览器上报可能缺失或被修改，独立于后端成功率与 Token 计量。朗读任务首声含等待文字与音频准备，不含之前的识别；整轮首声从检测到说话结束起计。</p>}
       {(!data.collection.active || data.collection.dropped_since_restart > 0 || data.collection.write_errors_since_restart > 0) && <p className="admin-notice" role="status">采集存在缺口：本进程启动后丢弃 {data.collection.dropped_since_restart} 条，写入失败 {data.collection.write_errors_since_restart} 次。{!data.collection.active && "采集未启用。"}</p>}
@@ -468,7 +486,7 @@ export default function Admin() {
       </div></div>
       {listError && !checkingBrowserRelease && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{listError}</span><button onClick={refresh}>重试</button></p>}
       <div className="admin-table-wrap" role="region" aria-label="调用记录表格" tabIndex={0} aria-busy={listLoading}><table><thead><tr><th scope="col">时间 · 北京</th><th scope="col">业务操作</th><th scope="col">状态</th><th scope="col">耗时</th>{filters.source === "server" && <><th scope="col">模型 / 类型</th><th scope="col">费用参考</th></>}<th scope="col">Trace</th></tr></thead><tbody>
-        {rows.map(row => <tr key={row.trace_id} data-outcome={row.outcome}><td><time dateTime={row.started_at}>{date(row.started_at)}</time></td><td className="admin-operation-cell"><strong>{names[row.operation] ?? row.operation}</strong><small>版本 {releaseLabel(row.release)}{row.audience === "guest" && " · 游客"}</small></td><td><span className={`admin-badge ${row.outcome}`}>{labels[row.outcome] ?? row.outcome}</span></td><td className="admin-duration">{ms(row.duration_ms)}</td>{filters.source === "server" && <><td>{modelLabel(row)}</td><td className="admin-row-cost" title="按已采集用量与公开单价参考；未计价不代表零费用">{referenceCost(row.cost_min_cny, row.cost_max_cny)}</td></>}<td><button type="button" aria-label={`查看调用 ${row.trace_id.slice(0, 8)}`} onClick={event => void inspect(row.trace_id, event.currentTarget)}>{row.trace_id.slice(0, 8)} <ArrowRight size={14} /></button></td></tr>)}
+        {rows.map(row => <tr key={row.trace_id} data-outcome={row.outcome}><td><time dateTime={row.started_at}>{date(row.started_at)}</time></td><td className="admin-operation-cell"><strong>{names[row.operation] ?? row.operation}</strong><small>版本 {releaseLabel(row.release)}{row.audience === "guest" && " · 游客"}</small></td><td><span className="admin-row-status"><span className={`admin-badge ${row.outcome}`}>{labels[row.outcome] ?? row.outcome}</span>{row.is_replay && <span className="admin-badge replay">补报</span>}</span></td><td className="admin-duration">{ms(row.duration_ms)}</td>{filters.source === "server" && <><td>{modelLabel(row)}</td><td className="admin-row-cost" title="按已采集用量与公开单价参考；未计价不代表零费用">{referenceCost(row.cost_min_cny, row.cost_max_cny)}</td></>}<td><button type="button" aria-label={`查看调用 ${row.trace_id.slice(0, 8)}`} onClick={event => void inspect(row.trace_id, event.currentTarget)}>{row.trace_id.slice(0, 8)} <ArrowRight size={14} /></button></td></tr>)}
         {!rows.length && <tr><td colSpan={filters.source === "server" ? 7 : 5} className="admin-empty">{listLoading ? "正在读取调用记录…" : listError ? "列表读取失败，可点击上方重试。" : "暂无调用记录。可切换业务操作、状态或时间范围；这里不会生成演示数据。"}</td></tr>}
       </tbody></table></div>
       <div className="admin-pagination"><span>{listLoading ? "列表更新中 · " : ""}第 {total ? offset + 1 : 0}–{Math.min(offset + rows.length, total)} 条 / {total} · 状态筛选仅影响列表</span><div><button aria-label="上一页" disabled={listLoading || offset === 0} onClick={() => setOffset(v => Math.max(0, v - 50))}><ArrowLeft size={15} /></button><button aria-label="下一页" disabled={listLoading || offset + 50 >= total} onClick={() => setOffset(v => v + 50)}><ArrowRight size={15} /></button></div></div>
@@ -542,7 +560,7 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
     Object.entries(span.attributes ?? {}).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value)).map(([key, value]) => `${key}=${String(value)}`).join(" · ");
   const receivedAt = detail.received_at ?? detail.started_at;
   return <aside className="admin-detail" aria-label="调用详情"><header><div><span className="admin-eyebrow">调用详情</span><h2>{names[detail.operation] ?? detail.operation}</h2></div><button ref={closeButton} type="button" aria-label="关闭调用详情" onClick={onClose}><X size={20} /></button></header>
-    <div className="admin-detail-status"><span className={`admin-badge ${detail.outcome}`}>{labels[detail.outcome] ?? detail.outcome}</span>{detail.source === "server" && <time dateTime={detail.started_at}>{date(detail.started_at)}</time>}</div>
+    <div className="admin-detail-status"><span className={`admin-badge ${detail.outcome}`}>{labels[detail.outcome] ?? detail.outcome}</span>{detail.is_replay && <span className="admin-badge replay">补报</span>}{detail.source === "server" && <time dateTime={detail.started_at}>{date(detail.started_at)}</time>}</div>
     <code className="admin-trace-id">{detail.trace_id}</code>
     {detail.interaction_id && <p className="admin-interaction-id">交互编号 <code>{detail.interaction_id}</code></p>}
     <div className="admin-trace-root"><div><span>总耗时</span><strong>{ms(detail.duration_ms)}</strong></div>{detail.source === "server" && <div><span>模型 / 类型</span><b>{modelLabel(detail)}</b></div>}</div>
@@ -551,6 +569,7 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
       {detail.source === "browser" && <>
         <div><dt>发生时间</dt><dd>{detail.occurred_at ? <time dateTime={detail.occurred_at}>{date(detail.occurred_at)}</time> : "未采集"}</dd></div>
         <div><dt>收到时间</dt><dd><time dateTime={receivedAt}>{date(receivedAt)}</time></dd></div>
+        {detail.is_replay && <div><dt>发生至收到</dt><dd>{replayDelay(detail.occurred_at, detail.received_at)}</dd></div>}
       </>}
       <div><dt>响应</dt><dd>{detail.source === "browser" ? "不适用 HTTP 状态" : detail.http_status == null ? "HTTP 状态未采集" : `HTTP ${detail.http_status}`}</dd></div><div><dt>发布版本</dt><dd>{releaseLabel(detail.release)}{isTestRelease(detail.release) && "（测试样本）"}</dd></div>{detail.test_run_id && <div><dt>测试批次</dt><dd>{detail.test_run_id}</dd></div>}{detail.source === "server" && <div><dt>模型首文本</dt><dd>{ms(detail.ttft_ms)}</dd></div>}</dl>
     {detail.audience === "guest" && <p className="admin-detail-cost">游客练习请求<small>近 7 天的保留样本按发生时间计入用户运营。</small></p>}

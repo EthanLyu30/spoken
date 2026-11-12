@@ -118,6 +118,7 @@ def _migrate_telemetry_errors() -> None:
     columns = {
         "error_type": "VARCHAR(100)", "error_cause_type": "VARCHAR(100)",
         "test_run_id": "VARCHAR(64)", "guest_subject_hash": "VARCHAR(64)", "received_at": "TIMESTAMP",
+        "is_replay": "BOOLEAN",
     }
     with engine.begin() as conn:
         if _url.startswith("sqlite"):

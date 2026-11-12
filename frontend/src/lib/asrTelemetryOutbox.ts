@@ -93,11 +93,14 @@ export function createAsrTimingOutbox(send: Send) {
   let retryDelay = INITIAL_RETRY_MS;
   let networkRetryAt = 0;
   let rateLimitUntil = 0;
+  // Only events created in this online session qualify for a first delivery.
+  const firstAttempts = new Set<string>();
 
   async function deliver(storage: Storage, entry: Pending) {
-    const response = await send({ ...entry.payload, occurred_at_ms: entry.createdAt }).catch(() => undefined);
+    const isReplay = !firstAttempts.delete(entry.key);
+    const response = await send({ ...entry.payload, occurred_at_ms: entry.createdAt, is_replay: isReplay }).catch(() => undefined);
     try {
-      // An older server may reject the timestamp with 422 during a rollout.
+      // A rollout can leave a server that does not yet accept the current payload.
       if ((response?.ok && response.headers.get("X-Telemetry-Stored") === "1") ||
           [400, 413].includes(response?.status ?? 0)) {
         storage.removeItem(entry.key);
@@ -105,6 +108,7 @@ export function createAsrTimingOutbox(send: Send) {
         return;
       }
     } catch { /* A blocked storage operation is retried with backoff. */ }
+    firstAttempts.clear();
     if (response?.status === 429) {
       rateLimitUntil = Date.now() + retryAfterMs(response);
     } else {
@@ -122,7 +126,10 @@ export function createAsrTimingOutbox(send: Send) {
       storage = window.localStorage;
       [entry] = pendingFailures(storage);
     } catch { return; }
-    if (!entry || navigator.onLine === false) return;
+    if (!entry || navigator.onLine === false) {
+      firstAttempts.clear();
+      return;
+    }
 
     const wait = Math.max(networkRetryAt, rateLimitUntil) - Date.now();
     if (wait > 0) {
@@ -138,12 +145,18 @@ export function createAsrTimingOutbox(send: Send) {
   }
 
   function online() {
+    firstAttempts.clear();
     networkRetryAt = 0;
     flush();
   }
 
+  function pageShow(event: PageTransitionEvent) {
+    if (event.persisted) firstAttempts.clear();
+    flush();
+  }
+
   window.addEventListener("online", online);
-  window.addEventListener("pageshow", flush);
+  window.addEventListener("pageshow", pageShow);
   flush();
   return {
     enqueue(value: Payload): boolean {
@@ -155,7 +168,15 @@ export function createAsrTimingOutbox(send: Send) {
         for (const entry of older.slice(0, Math.max(0, older.length - MAX_PENDING + 1))) {
           storage.removeItem(entry.key);
         }
-        storage.setItem(KEY_PREFIX + payload.event_id, JSON.stringify({ createdAt: Date.now(), payload }));
+        for (const key of firstAttempts) {
+          if (storage.getItem(key) === null) firstAttempts.delete(key);
+        }
+        const key = KEY_PREFIX + payload.event_id;
+        const createdAt = Date.now();
+        storage.setItem(key, JSON.stringify({ createdAt, payload }));
+        if (navigator.onLine !== false && createdAt >= Math.max(networkRetryAt, rateLimitUntil)) {
+          firstAttempts.add(key);
+        }
       } catch { return false; }
       flush();
       return true;
@@ -164,7 +185,7 @@ export function createAsrTimingOutbox(send: Send) {
       stopped = true;
       clearTimeout(timer);
       window.removeEventListener("online", online);
-      window.removeEventListener("pageshow", flush);
+      window.removeEventListener("pageshow", pageShow);
     },
   };
 }

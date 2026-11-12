@@ -27,6 +27,7 @@ class BrowserTiming(BaseModel):
     test_run_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
     event_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     occurred_at_ms: int | None = Field(default=None, ge=0, le=9_007_199_254_740_991, strict=True)
+    is_replay: bool | None = Field(default=None, strict=True)
 
     reason: Literal["started", "startup_timeout", "end_before_start", "speech_error", "speak_exception", "cancelled",
                     "end", "native_error", "completion_timeout"] | None = None
@@ -59,8 +60,8 @@ class BrowserTiming(BaseModel):
 
     @model_validator(mode="after")
     def operation_fields_only(self):
-        if self.occurred_at_ms is not None and not self.durable_asr:
-            raise ValueError("occurrence time belongs to durable ASR failures")
+        if (self.occurred_at_ms is not None or self.is_replay is not None) and not self.durable_asr:
+            raise ValueError("delivery metadata belongs to durable ASR failures")
         supplied = self.model_fields_set - GLOBAL_DIAGNOSTIC_FIELDS
         if "asr_reason" in supplied:
             expected = {"cancelled": "cancelled", "user_cancelled": "cancelled",

@@ -48,7 +48,7 @@ it("saves the failure before sending and automatically retries when the browser 
   const init = fetcher.mock.calls[0][1];
   expect(JSON.parse(init.body)).toMatchObject({
     operation: "asr.transcribe", outcome: "error", asr_reason: "provider_error",
-    provider_code: 10005, interaction_id: id, event_id: expect.stringMatching(/^[a-f0-9]{32}$/),
+    provider_code: 10005, interaction_id: id, event_id: expect.stringMatching(/^[a-f0-9]{32}$/), is_replay: true,
   });
   expect(init.credentials).toBe("omit");
   expect(pending()).toHaveLength(0);
@@ -72,7 +72,8 @@ it("reopens a queued failure with the same id and original test batch after an i
   await vi.advanceTimersByTimeAsync(0);
   expect(nextFetch).toHaveBeenCalledOnce();
   const replay = JSON.parse(nextFetch.mock.calls[0][1].body);
-  expect(replay).toEqual(first);
+  expect(first.is_replay).toBe(false);
+  expect(replay).toEqual({ ...first, is_replay: true });
   expect(replay.test_run_id).toBe("before-close");
   expect(pending()).toHaveLength(0);
 });
@@ -119,7 +120,10 @@ it("retains the same event through a network error and a queue-only 202", async 
   window.dispatchEvent(new Event("online"));
   await vi.advanceTimersByTimeAsync(0);
   expect(fetcher).toHaveBeenCalledTimes(3);
-  expect(new Set(fetcher.mock.calls.map(([, init]) => init.body)).size).toBe(1);
+  const [first, retry, confirmed] = fetcher.mock.calls.map(([, init]) => JSON.parse(init.body));
+  expect(first.is_replay).toBe(false);
+  expect(retry).toEqual({ ...first, is_replay: true });
+  expect(confirmed).toEqual(retry);
   expect(pending()).toHaveLength(0);
 });
 
@@ -136,7 +140,9 @@ it("honors Retry-After for a stored failure even when an online event fires", as
   expect(pending()).toHaveLength(1);
   await vi.advanceTimersByTimeAsync(1);
   expect(fetcher).toHaveBeenCalledTimes(2);
-  expect(fetcher.mock.calls[1][1].body).toBe(fetcher.mock.calls[0][1].body);
+  const [first, retry] = fetcher.mock.calls.map(([, init]) => JSON.parse(init.body));
+  expect(first.is_replay).toBe(false);
+  expect(retry).toEqual({ ...first, is_replay: true });
   expect(pending()).toHaveLength(0);
 });
 
@@ -168,5 +174,20 @@ it("can still report a failure if local storage is blocked", async () => {
   reportFailure();
   await vi.advanceTimersByTimeAsync(0);
   expect(fetcher).toHaveBeenCalledOnce();
+  expect(pending()).toHaveLength(0);
+});
+
+it("does not mark healthy first attempts queued behind another online delivery as replays", async () => {
+  let confirm!: (response: Response) => void;
+  const first = new Promise<Response>(resolve => { confirm = resolve; });
+  const fetcher = vi.fn().mockReturnValueOnce(first).mockImplementation(() => Promise.resolve(stored()));
+  vi.stubGlobal("fetch", fetcher);
+  start();
+  reportFailure();
+  reportFailure();
+  expect(fetcher).toHaveBeenCalledOnce();
+  confirm(stored());
+  await vi.advanceTimersByTimeAsync(0);
+  expect(fetcher.mock.calls.map(([, init]) => JSON.parse(init.body).is_replay)).toEqual([false, false]);
   expect(pending()).toHaveLength(0);
 });

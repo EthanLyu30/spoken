@@ -2,9 +2,10 @@ import { getToken } from "./authToken";
 import { withTimeout } from "./requestTimeout";
 
 export type AdminTraffic = "unmarked" | "test" | "all";
+export type AdminDelivery = "all" | "replay";
 export interface AdminFilters {
   hours: number; source: "server" | "browser"; operation: string; model: string; release: string; outcome: string;
-  traffic: AdminTraffic; testRunId: string;
+  traffic: AdminTraffic; testRunId: string; delivery: AdminDelivery;
 }
 type Percentiles = { p50: number | null; p95: number | null; p99: number | null };
 export interface AdminPricing {
@@ -40,7 +41,8 @@ export interface AdminOverview {
   visitors?: AdminVisitors;
   experience?: AdminExperience;
   pricing?: AdminPricing;
-  source: "server" | "browser"; server_release?: string; traffic_filter?: boolean; count: number; success_rate: number | null;
+  source: "server" | "browser"; server_release?: string; traffic_filter?: boolean; delivery_filter?: boolean;
+  count: number; success_rate: number | null;
   errors: number; timeouts: number; cancelled: number;
   latency: Percentiles; ttft: Percentiles; ttft_known?: number; input_tokens: number | null; output_tokens: number | null; usage_known: number;
   operations: string[]; facets?: { operations: string[]; models: string[]; releases: string[] };
@@ -64,7 +66,7 @@ export type AdminUserSort = "activity" | "registered";
 export interface AdminTrace {
   interaction_id?: string | null; related?: AdminTrace[];
   trace_id: string; started_at: string; operation: string; source: string; outcome: string;
-  occurred_at?: string | null; received_at?: string | null;
+  occurred_at?: string | null; received_at?: string | null; is_replay?: boolean | null;
   audience?: "guest";
   duration_ms: number; http_status: number | null; ttft_ms: number | null; model: string | null;
   error_type?: string | null; error_cause_type?: string | null; test_run_id?: string | null;
@@ -101,6 +103,7 @@ export function query(filters: AdminFilters): URLSearchParams {
   for (const key of ["operation", "model", "release", "outcome"] as const) if (filters[key]) params.set(key, filters[key]);
   if (filters.traffic !== "all") params.set("traffic", filters.traffic);
   if (filters.testRunId) params.set("test_run_id", filters.testRunId);
+  if (filters.source === "browser" && filters.delivery === "replay") params.set("delivery", filters.delivery);
   return params;
 }
 export function getAdminOverview(filters: AdminFilters, signal?: AbortSignal, includeExperience = false,
