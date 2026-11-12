@@ -159,21 +159,31 @@ class RetentionWorker:
 
 class TelemetrySink:
     def __init__(self, capacity=1000):
-        self.queue = asyncio.Queue(maxsize=capacity)
+        self.queue: asyncio.Queue[tuple[dict, asyncio.Future[bool] | None] | None] = asyncio.Queue(maxsize=capacity)
         self.dropped = 0
         self.write_errors = 0
         self.closed = False
         self.worker = asyncio.create_task(self._run())
 
-    def submit(self, record: dict) -> bool:
+    def submit(self, record: dict, *, receipt: asyncio.Future[bool] | None = None) -> bool:
         if self.closed:
             self.dropped += 1
             return False
         try:
-            self.queue.put_nowait(record)
+            self.queue.put_nowait((record, receipt))
             return True
         except asyncio.QueueFull:
             self.dropped += 1
+            return False
+
+    async def submit_persisted(self, record: dict) -> bool:
+        """Acknowledge only after the batch commits, including idempotent replays."""
+        receipt = asyncio.get_running_loop().create_future()
+        if not self.submit(record, receipt=receipt):
+            return False
+        try:
+            return await asyncio.wait_for(receipt, timeout=6)
+        except TimeoutError:
             return False
 
     async def _run(self):
@@ -191,14 +201,18 @@ class TelemetrySink:
                     stopping = True
                     break
                 batch.append(next_item)
+            stored = False
             try:
-                await asyncio.to_thread(persist_batch, batch)
+                await asyncio.to_thread(persist_batch, [record for record, _ in batch])
+                stored = True
             except Exception as exc:
                 self.dropped += len(batch)
                 self.write_errors += 1
                 logging.getLogger(__name__).warning("Telemetry write failed: %s", type(exc).__name__)
             finally:
-                for _ in batch:
+                for _, receipt in batch:
+                    if receipt is not None and not receipt.done():
+                        receipt.set_result(stored)
                     self.queue.task_done()
             if stopping:
                 break

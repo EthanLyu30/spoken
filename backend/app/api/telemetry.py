@@ -71,7 +71,10 @@ async def client_timing(request: Request):
         event = BrowserTiming.model_validate_json(payload)
     except ValidationError:
         raise HTTPException(status_code=422, detail="Invalid telemetry payload") from None
+    durable = bool(event.event_id) and event.operation.startswith("asr.") and event.outcome in {"error", "timeout"}
     sink = getattr(request.app.state, "telemetry_sink", None)
+    if not sink and durable and get_settings().telemetry_enabled:
+        raise HTTPException(status_code=503, detail="Telemetry collector unavailable")
     if sink:
         diagnostics = event.model_dump(include=SINK_DIAGNOSTIC_FIELDS, exclude_none=True)
         if event.asr_reason:
@@ -82,13 +85,17 @@ async def client_timing(request: Request):
         # the caller pick a trace ID in the server's namespace.
         trace_id = (hashlib.sha256(f"spoken-browser-v1/{event.event_id}".encode()).hexdigest()[:32]
                     if event.event_id else secrets.token_hex(16))
-        accepted = sink.submit({"trace_id": trace_id, "interaction_id": event.interaction_id,
+        record = {"trace_id": trace_id, "interaction_id": event.interaction_id,
             "test_run_id": test_run_id, "started_at": datetime.now(timezone.utc).replace(tzinfo=None),
             "operation": event.operation, "source": "browser", "outcome": event.outcome,
             "duration_ms": event.duration_ms, "release": event.release, "model": f"{event.engine}/{event.transport}", "spans_json": json.dumps([
                 {"id": secrets.token_hex(8), "parent_id": None, "name": event.operation, "offset_ms": 0,
                  "duration_ms": event.duration_ms, "outcome": event.outcome, "attributes": {"engine": event.engine, "transport": event.transport, **diagnostics}}
-            ])})
-        if accepted is False:
+            ])}
+        if durable:
+            if not await sink.submit_persisted(record):
+                raise HTTPException(status_code=503, detail="Telemetry write not confirmed")
+            return Response(status_code=202, headers={"X-Telemetry-Stored": "1"})
+        if sink.submit(record) is False:
             raise HTTPException(status_code=503, detail="Telemetry collector busy")
     return Response(status_code=202)

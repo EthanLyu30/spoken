@@ -230,6 +230,55 @@ def test_browser_asr_diagnostics_keep_cancellation_and_provider_codes_separate(c
     assert seen == diagnostics.keys()
 
 
+def test_asr_receipt_follows_commit_and_retries_insert_once(client, monkeypatch):
+    import hashlib
+
+    from app.models.telemetry import TelemetryRecord
+    from app.services import telemetry
+
+    persist = telemetry.persist_batch
+    event_id, interaction_id = uuid.uuid4().hex, uuid.uuid4().hex
+    trace_id = hashlib.sha256(f"spoken-browser-v1/{event_id}".encode()).hexdigest()[:32]
+    writes = 0
+
+    def fail_once(rows):
+        nonlocal writes
+        if any(row["trace_id"] == trace_id for row in rows):
+            writes += 1
+            if writes == 1:
+                raise RuntimeError("simulated database failure")
+        return persist(rows)
+
+    monkeypatch.setattr(telemetry, "persist_batch", fail_once)
+    body = {"operation": "asr.finalize", "duration_ms": 610, "engine": "xfyun", "transport": "direct",
+            "outcome": "error", "asr_reason": "provider_error", "provider_code": 10005,
+            "event_id": event_id, "interaction_id": interaction_id, "test_run_id": "asr-receipt-test"}
+
+    def rows():
+        with SessionLocal() as db:
+            return db.scalars(select(TelemetryRecord).where(TelemetryRecord.trace_id == trace_id)).all()
+
+    failed = client.post("/api/telemetry/client", json=body)
+    assert failed.status_code == 503
+    assert "X-Telemetry-Stored" not in failed.headers
+    assert rows() == []
+
+    committed = client.post("/api/telemetry/client", json=body, headers={"Origin": "http://localhost:5173"})
+    assert committed.status_code == 202
+    assert committed.headers["X-Telemetry-Stored"] == "1"
+    assert "x-telemetry-stored" in committed.headers["Access-Control-Expose-Headers"].lower()
+    before = rows()
+    assert len(before) == 1
+    assert (before[0].interaction_id, before[0].test_run_id) == (interaction_id, "asr-receipt-test")
+
+    replayed = client.post("/api/telemetry/client", json=body)
+    assert replayed.status_code == 202
+    assert replayed.headers["X-Telemetry-Stored"] == "1"
+    after = rows()
+    assert len(after) == 1
+    assert after[0].id == before[0].id
+
+
 def test_telemetry_rate_limit_tells_browser_when_to_retry(client, monkeypatch):
     from app.api import telemetry
 
