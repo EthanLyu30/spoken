@@ -215,6 +215,8 @@ class XfAsrStream:
 
     async def send(self, pcm: bytes) -> None:
         """Forward a chunk of 16 kHz/16-bit mono PCM, split into 40 ms frames."""
+        if self._error:
+            raise self._error
         if self._ws is None:
             raise XfAsrError("stream not open")
         self._pending_pcm.extend(pcm)
@@ -240,7 +242,12 @@ class XfAsrStream:
                 if self._language == "zh_cn":
                     frame["business"]["dwa"] = "wpgs"
                 self._first = False
-            await self._ws.send(json.dumps(frame))
+            try:
+                await self._ws.send(json.dumps(frame))
+            except Exception as exc:
+                if self._error:
+                    raise self._error from exc
+                raise XfAsrError("iFlytek ASR connection closed") from exc
 
     @traced("asr.finalize", provider="xfyun")
     async def finish(self) -> str:
@@ -254,16 +261,16 @@ class XfAsrStream:
             await self._ws.send(json.dumps({"data": {"status": 2, "audio": ""}}))
         except Exception:
             pass  # connection may already be closing; still drain what we have
-        timed_out = False
+        deadline = None
         try:
             await asyncio.wait_for(self._done.wait(), timeout=_FINAL_TIMEOUT)
-        except asyncio.TimeoutError:
-            timed_out = True
+        except TimeoutError as exc:
+            deadline = exc
         await self._close()
         if self._error:
             raise self._error
-        if timed_out:
-            raise XfAsrError("语音识别等待超时，请重试。")
+        if deadline is not None:
+            raise XfAsrError("语音识别等待超时，请重试。") from deadline
         return self._current_text()
 
     async def abort(self) -> None:

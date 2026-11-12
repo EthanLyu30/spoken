@@ -199,6 +199,47 @@ def test_browser_retries_keep_one_sample_and_a_safe_asr_reason(client, monkeypat
     assert rows["items"][0]["trace_id"] != body["event_id"]
 
 
+def test_browser_asr_diagnostics_keep_cancellation_and_provider_codes_separate(client):
+    owner = account(client, admin=True)
+    release = uuid.uuid4().hex
+    interaction = uuid.uuid4().hex
+    diagnostics = {
+        "user_cancelled": ("cancelled", {}),
+        "timeout": ("timeout", {}),
+        "provider_error": ("error", {"provider_code": 10005}),
+        "quota_cooldown": ("error", {}),
+    }
+    for reason, (outcome, attributes) in diagnostics.items():
+        body = {"operation": "asr.attempt", "stage": "stream", "attempt": 1, "duration_ms": 400,
+                "outcome": outcome, "asr_reason": reason, "engine": "xfyun", "transport": "direct",
+                "release": release, "interaction_id": interaction, "event_id": uuid.uuid4().hex,
+                **attributes}
+        assert client.post("/api/telemetry/client", json=body).status_code == 202
+    rows = client.get("/api/admin/traces", headers=owner, params={"release": release, "source": "browser"}).json()
+    assert rows["total"] == 4
+    seen = set()
+    for row in rows["items"]:
+        detail = client.get(f"/api/admin/traces/{row['trace_id']}", headers=owner).json()
+        span = detail["spans"][0]["attributes"]
+        reason = span["asr_reason"]
+        outcome, attributes = diagnostics[reason]
+        assert (detail["outcome"], detail["interaction_id"]) == (outcome, interaction)
+        assert len(detail["related"]) == 3
+        assert span.get("provider_code") == attributes.get("provider_code")
+        seen.add(reason)
+    assert seen == diagnostics.keys()
+
+
+def test_telemetry_rate_limit_tells_browser_when_to_retry(client, monkeypatch):
+    from app.api import telemetry
+
+    monkeypatch.setattr(telemetry, "monotonic", lambda: 119.25)
+    telemetry._rates[("testclient", 1)] = 180
+    response = client.post("/api/telemetry/client", json={"operation": "asr.finalize", "duration_ms": 400})
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "1"
+
+
 def test_user_page_counts_all_accounts_and_sorts_by_durable_activity(client):
     from sqlalchemy import create_engine, event
     from sqlalchemy.orm import Session

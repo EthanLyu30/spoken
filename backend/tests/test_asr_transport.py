@@ -278,6 +278,27 @@ def test_buffered_final_wait_has_its_own_short_deadline(monkeypatch):
     asyncio.run(run())
 
 
+def test_relay_final_deadline_is_a_timeout_in_the_trace(monkeypatch):
+    socket = Socket(respond=False)
+    monkeypatch.setattr(xf_asr.websockets, "connect", lambda *_args, **_kwargs: Dial(socket))
+    monkeypatch.setattr(xf_asr, "_FINAL_TIMEOUT", 0.02)
+
+    async def run():
+        stream = xf_asr.XfAsrStream(SETTINGS, lambda _text: None)
+        trace = TraceContext("WS /api/asr/stream")
+        with pytest.raises(xf_asr.XfAsrError), trace:
+            await stream.open()
+            await stream.send(bytes(1280))
+            await stream.finish()
+        record = trace.record()
+        final = next(span for span in json.loads(record["spans_json"]) if span["name"] == "asr.finalize")
+        assert record["outcome"] == final["outcome"] == "timeout"
+        assert record["error_cause_type"] == "TimeoutError"
+        assert socket.closed
+
+    asyncio.run(run())
+
+
 def test_provider_error_during_upload_cancels_sender_and_closes_socket(monkeypatch):
     class BlockingSocket(Socket):
         def __init__(self):

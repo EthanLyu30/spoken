@@ -2,6 +2,7 @@
 from collections import OrderedDict
 import asyncio
 from datetime import datetime, timezone
+from math import ceil
 import hashlib
 import json
 import secrets
@@ -49,11 +50,14 @@ async def client_timing(request: Request):
         if origin != same_origin and origin not in allowed and "*" not in allowed:
             raise HTTPException(status_code=403, detail="Origin not allowed")
     host = request.client.host if request.client else "unknown"
-    minute = int(monotonic() // 60)
+    now = monotonic()
+    minute = int(now // 60)
     key = (host, minute)
     count = _rates.get(key, 0)
     if count >= 180:
-        raise HTTPException(status_code=429, detail="Too many telemetry samples")
+        retry_after = ceil((minute + 1) * 60 - now)
+        raise HTTPException(status_code=429, detail="Too many telemetry samples",
+                            headers={"Retry-After": str(retry_after)})
     _rates[key] = count + 1
     _rates.move_to_end(key)
     while len(_rates) > 4096:

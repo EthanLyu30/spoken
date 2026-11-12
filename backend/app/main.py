@@ -141,7 +141,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Trace-Id", "Server-Timing"],
+    expose_headers=["X-Trace-Id", "Server-Timing", "Retry-After"],
     max_age=86_400,
 )
 

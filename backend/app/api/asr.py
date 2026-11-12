@@ -19,7 +19,7 @@ from app.core.config import Settings, get_settings
 from app.core.deps import get_optional_client_id
 from app.services.xf_auth import build_auth_url
 from app.services.xf_asr import XfAsrClient, XfAsrError, XfAsrStream
-from app.core.observability import trace_classify
+from app.core.observability import TraceContext, span, trace_attribute, trace_classify, trace_error
 from app.services.xf_ise import MAX_AUDIO_BYTES
 
 router = APIRouter(tags=["asr"])
@@ -77,7 +77,7 @@ def get_asr_stream_factory():
     return make
 
 
-async def _relay_utterance(websocket: WebSocket, settings, make_stream, language: str) -> bool:
+async def _relay_utterance(websocket: WebSocket, settings, make_stream, language: str, first_message=None) -> bool:
     """Relay one utterance to iFlytek. Returns True if the call has ended.
 
     Binary frames are forwarded as PCM; a ``{"type":"end"}`` text frame flushes
@@ -92,8 +92,10 @@ async def _relay_utterance(websocket: WebSocket, settings, make_stream, language
 
     try:
         while True:
-            msg = await websocket.receive()
+            msg = first_message if first_message is not None else await websocket.receive()
+            first_message = None
             if msg.get("type") == "websocket.disconnect":
+                trace_error("cancelled")
                 return True
             data = msg.get("bytes")
             text = msg.get("text")
@@ -122,27 +124,64 @@ async def _relay_utterance(websocket: WebSocket, settings, make_stream, language
                     await websocket.send_json({"type": "final", "text": final})
                     return False
                 if kind == "close":
+                    trace_error("cancelled")
                     return True
                 raise _ProtocolError("Expected end or close control frame")
             else:
                 raise _ProtocolError("Expected PCM audio or a control frame")
     except WebSocketDisconnect:
+        trace_error("cancelled")
         return True
     except XfAsrError as exc:
-        provider_code = getattr(stream, "_provider_code", None) if stream is not None else None
-        if provider_code is None:
-            code_match = re.search(r"iFlytek ASR error (\d+)", str(exc))
+        provider_code = getattr(stream, "_provider_code", None)
+        if not provider_code:
+            code_match = re.search(r"iFlytek ASR error (\d{1,5})\b", str(exc))
             provider_code = code_match.group(1) if code_match else None
         payload = {"type": "error", "message": str(exc)}
-        if provider_code is not None:
-            payload["code"] = int(provider_code) if provider_code.isdigit() else provider_code
-        await websocket.send_json(payload)
-        # Remaining queued frames still belong to this failed utterance. Close
-        # the relay so they cannot become a new session with a tail-only final.
-        return True
+        if provider_code and re.fullmatch(r"[1-9]\d{0,4}", provider_code):
+            code = int(provider_code)
+            trace_attribute("provider_code", code)
+            payload["code"] = code
+        failure_stage = getattr(stream, "_failure_stage", None)
+        if failure_stage in {"provider_stream", "provider_finalize"}:
+            trace_attribute("failure_stage", failure_stage)
+        try:
+            await websocket.send_json(payload)
+        except (RuntimeError, WebSocketDisconnect):
+            pass
+        # Remaining frames belong to this failed utterance; close the relay.
+        raise
     finally:
         if stream is not None:
             await stream.abort()
+
+
+def _turn_context(message: dict) -> dict | None:
+    text = message.get("text")
+    if not text or len(text) > 256:
+        return None
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        return None
+    return payload if isinstance(payload, dict) and payload.get("type") == "turn" else None
+
+
+async def _tracked_utterance(websocket, settings, make_stream, language, context):
+    sink = getattr(websocket.app.state, "telemetry_sink", None)
+    interaction = context.get("interaction_id")
+    if not sink or not isinstance(interaction, str) or not re.fullmatch(r"[a-f0-9]{32}", interaction):
+        return await _relay_utterance(websocket, settings, make_stream, language)
+    run = context.get("test_run_id")
+    trace = TraceContext(
+        operation="WS /api/asr/stream", interaction_id=interaction,
+        test_run_id=run if isinstance(run, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,64}", run) else None,
+    )
+    try:
+        with trace, span("asr.relay", provider="xfyun", transport="relay"):
+            return await _relay_utterance(websocket, settings, make_stream, language)
+    finally:
+        sink.submit(trace.record())
 
 
 @router.websocket("/asr/stream")
@@ -156,6 +195,8 @@ async def asr_stream(
     Protocol (JSON text frames + raw binary audio frames):
       client → ``{"type":"start","language":"en_us"}``  (handshake)
       server → ``{"type":"ready"}`` | ``{"type":"error","message":...}``
+      both sides may opt into trace_context; an optional ``turn`` frame then
+      supplies the interaction and test-run IDs before the audio of each utterance.
       then, per utterance:
         client → binary PCM frames (16 kHz/16-bit/mono), then ``{"type":"end"}``
         server → ``{"type":"partial","text":...}`` … then ``{"type":"final","text":...}``
@@ -181,9 +222,18 @@ async def asr_stream(
                 )
                 return
             language = payload.get("language") or "en_us"
-            await websocket.send_json({"type": "ready"})
+            trace_context = payload.get("trace_context") is True
+            await websocket.send_json({"type": "ready", **({"trace_context": True} if trace_context else {})})
             while True:
-                ended = await _relay_utterance(websocket, settings, make_stream, language)
+                if trace_context:
+                    first_message = await websocket.receive()
+                    context = _turn_context(first_message)
+                    if context is not None:
+                        ended = await _tracked_utterance(websocket, settings, make_stream, language, context)
+                    else:
+                        ended = await _relay_utterance(websocket, settings, make_stream, language, first_message)
+                else:
+                    ended = await _relay_utterance(websocket, settings, make_stream, language)
                 if ended:
                     break
     except TimeoutError:
@@ -196,7 +246,7 @@ async def asr_stream(
             await websocket.send_json({"type": "error", "message": str(exc)})
         except (RuntimeError, WebSocketDisconnect):
             pass
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, XfAsrError):
         pass
     finally:
         try:

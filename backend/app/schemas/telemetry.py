@@ -42,21 +42,22 @@ class BrowserTiming(BaseModel):
     paused_duration_ms: float | None = Field(default=None, ge=0, le=300_000, strict=True)
     visibility_state: Literal["visible", "hidden", "unknown"] | None = None
 
-    stage: Literal["authorize", "open", "stream_final", "whole_clip", "http_buffered"] | None = None
+    stage: Literal["authorize", "open", "stream", "stream_final", "whole_clip", "http_buffered"] | None = None
     attempt: int | None = Field(default=None, ge=1, le=10, strict=True)
     fallback_reason: Literal["none", "timeout", "disconnect", "provider_error", "empty", "http_error", "unavailable", "unknown"] | None = None
     audio_bytes: int | None = Field(default=None, ge=0, le=5_760_000, strict=True)
     result_class: Literal["empty", "nonempty"] | None = None
     provider_code: int | None = Field(default=None, ge=1, le=99999, strict=True)
     asr_reason: Literal["empty", "incomplete", "timeout", "disconnect", "provider_error",
-                        "http_error", "unavailable", "cancelled", "unknown"] | None = None
+                        "http_error", "unavailable", "cancelled", "user_cancelled", "quota_cooldown", "unknown"] | None = None
     entry: Literal["turn_correction", "follow_read"] | None = None
 
     @model_validator(mode="after")
     def operation_fields_only(self):
         supplied = self.model_fields_set - GLOBAL_DIAGNOSTIC_FIELDS
         if "asr_reason" in supplied:
-            expected = {"cancelled": "cancelled", "timeout": "timeout"}.get(self.asr_reason, "error")
+            expected = {"cancelled": "cancelled", "user_cancelled": "cancelled",
+                        "timeout": "timeout"}.get(self.asr_reason, "error")
             if not self.operation.startswith("asr.") or self.outcome != expected or self.asr_reason is None:
                 raise ValueError("invalid recognition failure classification")
         if self.operation != "speech.native_end" and self.duration_ms > 300_000:

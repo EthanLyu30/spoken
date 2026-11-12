@@ -111,6 +111,56 @@ def test_end_without_audio_returns_empty_final():
         assert ws.receive_json() == {"type": "final", "text": ""}
 
 
+def test_relay_correlates_each_utterance_with_its_browser_trace(monkeypatch):
+    import uuid
+
+    from tests.test_observability import account
+
+    class FailingStream(_FakeStream):
+        async def send(self, pcm: bytes) -> None:
+            self._provider_code = "10005"
+            self._failure_stage = "provider_stream"
+            raise XfAsrError("iFlytek ASR error 10005: private provider text")
+
+    streams = iter((_FakeStream, FailingStream))
+    app.dependency_overrides[get_settings] = lambda: _Cfg()
+    app.dependency_overrides[get_asr_stream_factory] = lambda: (
+        lambda settings, on_partial, *, language: next(streams)(settings, on_partial, language=language)
+    )
+    monkeypatch.setattr(get_settings(), "jwt_secret", "test-relay-trace-secret-0123456789abcdef")
+    first, second = uuid.uuid4().hex, uuid.uuid4().hex
+    with TestClient(app) as tracked:
+        owner = account(tracked, admin=True)
+        with tracked.websocket_connect("/api/asr/stream") as ws:
+            ws.send_json({"type": "start", "trace_context": True})
+            assert ws.receive_json() == {"type": "ready", "trace_context": True}
+            ws.send_json({"type": "turn", "interaction_id": first, "test_run_id": "relay-proof"})
+            ws.send_bytes(b"\x00\x01" * 640)
+            assert ws.receive_json()["type"] == "partial"
+            ws.send_json({"type": "end"})
+            assert ws.receive_json()["type"] == "final"
+            ws.send_json({"type": "turn", "interaction_id": second, "test_run_id": "relay-proof"})
+            ws.send_bytes(b"\x00\x01" * 640)
+            assert ws.receive_json()["code"] == 10005
+
+        sample = {"operation": "asr.attempt", "stage": "stream", "attempt": 2, "duration_ms": 30,
+                  "engine": "xfyun", "transport": "relay", "outcome": "error", "asr_reason": "provider_error",
+                  "provider_code": 10005, "interaction_id": second, "test_run_id": "relay-proof"}
+        assert tracked.post("/api/telemetry/client", json=sample).status_code == 202
+        browser = tracked.get("/api/admin/traces", headers=owner, params={"source": "browser", "test_run_id": "relay-proof"}).json()
+        detail = tracked.get(f"/api/admin/traces/{browser['items'][0]['trace_id']}", headers=owner).json()
+        assert len(detail["related"]) == 1
+        relay = detail["related"][0]
+        assert (relay["operation"], relay["outcome"], relay["interaction_id"]) == ("WS /api/asr/stream", "error", second)
+        server_detail = tracked.get(f"/api/admin/traces/{relay['trace_id']}", headers=owner).json()
+        assert any(span["attributes"].get("provider_code") == 10005
+                   and span["attributes"].get("failure_stage") == "provider_stream"
+                   for span in server_detail["spans"])
+        assert "private provider text" not in json.dumps(server_detail)
+        rows = tracked.get("/api/admin/traces", headers=owner, params={"source": "server", "test_run_id": "relay-proof"}).json()
+        assert {row["interaction_id"]: row["outcome"] for row in rows["items"]} == {first: "ok", second: "error"}
+
+
 class _DirectSocket:
     def __init__(self, *messages):
         self.messages = asyncio.Queue()
