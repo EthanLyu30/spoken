@@ -28,6 +28,7 @@ from app.schemas.auth import _EMAIL_RE, _normalize_email
 from app.services.account_export import build_account_export
 from app.services.account_mail import email_actions_enabled, send_account_mail
 from app.services.monitoring import visit_digest
+from app.services.product_feedback import erase_account_feedback
 from app.services.progress import lock_owner
 from app.services.users import get_by_email
 
@@ -152,6 +153,7 @@ def delete_account(payload: PasswordConfirmation, request: Request, db: Session 
     if secret:
         db.execute(delete(SiteVisit).where(SiteVisit.kind == "registered",
                                           SiteVisit.subject_hash == visit_digest(secret, "registered", owner)))
+    erase_account_feedback(db, user.id)
     db.delete(user)
     db.commit()
 

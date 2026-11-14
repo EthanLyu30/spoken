@@ -6,5 +6,6 @@ from app.models.telemetry import AdminAccount, AdminBootstrap, TelemetryRecord
 from app.models.monitoring import MonitoringState, SiteVisit
 from app.models.progress import EarnedBadge, GuestClaim, LearningEvent, ProgressMigration, ProgressOwner
 from app.models.request_receipt import RequestReceipt
+from app.models.product_feedback import FeedbackPilot, ProductFeedback
 
 __all__ = ["PracticeSession", "Turn", "SkillScore", "WordEntry", "PracticeRecord", "User", "AdminAccount", "AdminBootstrap", "TelemetryRecord", "MonitoringState", "SiteVisit"]

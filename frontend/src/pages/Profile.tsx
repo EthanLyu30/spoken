@@ -195,6 +195,7 @@ export default function Profile() {
               {userId && <Link to="/me?tab=account" className={accountSettings ? "active" : ""}>账号与数据</Link>}
               <Link to="/me#badges">成就徽章</Link>
               <Link to="/me#practice-history">练习记录</Link>
+              <Link to="/feedback?from=profile">意见反馈</Link>
             </nav>
           </aside>
           <div className="profile-main">

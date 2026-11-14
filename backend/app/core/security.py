@@ -76,6 +76,10 @@ def decode_account_token(token: str) -> tuple[int, str] | None:
         return None
 
 
+def feedback_key(purpose: str, value: str) -> str:
+    return hmac.new(_secret().encode(), f"spoken-feedback/{purpose}/{value}".encode(), hashlib.sha256).hexdigest()
+
+
 def create_guest_claim_ticket(guest_id: str, transition_id: str) -> str:
     """Authorize one guest registration while the claim protocol is enabled."""
     now = datetime.now(timezone.utc)

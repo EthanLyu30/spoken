@@ -33,6 +33,7 @@ from app.models.progress import EarnedBadge, LearningEvent
 from app.models.session import PracticeSession
 from app.models.user import User
 from app.models.word import WordEntry
+from app.services.product_feedback import export_account_feedback
 
 EXPORT_VERSION = 1
 
@@ -54,6 +55,7 @@ def build_account_export(db: Session, user: User) -> dict:
         "words": _words(db, owner),
         "learning_events": _learning_events(db, owner),
         "badges": _badges(db, owner),
+        "product_feedback": export_account_feedback(db, user.id),
     }
 
 

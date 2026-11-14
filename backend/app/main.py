@@ -16,8 +16,9 @@ from app.core.middleware import SelectiveGZipMiddleware
 from app.core.ratelimit import limiter, limit_for
 from app.core.observability import TelemetryMiddleware
 from app.services.telemetry import TelemetrySink, RetentionWorker, configured_bootstrap_admin
+from app.services.feedback_notifications import recover_notifications
 from app.services.deepseek import DeepSeekClient, create_http_client
-from app.api import account, admin, telemetry
+from app.api import account, admin, product_feedback, telemetry
 from app.api import (
     asr,
     auth,
@@ -101,6 +102,10 @@ async def lifespan(application):
             application.state.telemetry_retention = retention
             resources.push_async_callback(retention.close)
             await retention.start()
+            if get_settings().resend_api_key or get_settings().feedback_ai_enabled:
+                feedback_client = DeepSeekClient(http_client=application.state.deepseek_http)
+                feedback_recovery = asyncio.create_task(recover_notifications(feedback_client))
+                resources.push_async_callback(_stop_warmer, feedback_recovery)
             if not get_settings().database_url.startswith("sqlite"):
                 if len(get_settings().jwt_secret) < 32:
                     logging.getLogger(__name__).warning(
@@ -201,6 +206,8 @@ app.include_router(interview.router, prefix="/api")
 app.include_router(practice.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(telemetry.router, prefix="/api")
+app.include_router(product_feedback.router, prefix="/api")
+app.include_router(product_feedback.admin, prefix="/api")
 
 # Create database tables (idempotent).
 init_db()

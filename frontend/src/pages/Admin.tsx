@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Activity, ArrowLeft, ArrowRight, Clock3, Database, RefreshCw, Search, ShieldCheck, TriangleAlert, Users, X } from "lucide-react";
+import { Activity, ArrowLeft, ArrowRight, Clock3, Database, Mail, RefreshCw, Search, ShieldCheck, TriangleAlert, Users, X } from "lucide-react";
 import { useAuth } from "../store/auth";
 import { EChart } from "../components/EChart";
 import { AdminUsers } from "../components/AdminUsers";
+import { AdminFeedbackInbox } from "../components/AdminFeedbackInbox";
 import { modelLabel, referenceCost } from '../lib/adminFormatting';
 import { AdminApiError, getAdminOverview, getAdminTrace, getAdminTraces, getDeployedBrowserRelease, type AdminAsrReplays, type AdminDelivery, type AdminExperience, type AdminFilters, type AdminOverview, type AdminSampleCoverage, type AdminTrace, type AdminTracePage, type AdminTraffic } from "../lib/adminApi";
 import "../admin.css";
@@ -18,6 +19,7 @@ const views = [
   { id: "overview", label: "运行概览", icon: Activity },
   { id: "diagnostics", label: "调用诊断", icon: Search },
   { id: "users", label: "用户运营", icon: Users },
+  { id: "feedback", label: "意见审核", icon: Mail },
 ] as const;
 const labels: Record<string, string> = { ok: "成功", error: "失败", timeout: "超时", cancelled: "已取消" };
 const spanLabels: Record<string, string> = { ...labels, incomplete: "未完成" };
@@ -106,6 +108,7 @@ export default function Admin() {
   const [serverRelease, setServerRelease] = useState<string | null>(null);
   const [publishedBrowserRelease, setPublishedBrowserRelease] = useState<{ scope: string; release: string } | null>(null);
   const diagnostics = view === "diagnostics";
+  const showsCalls = view === "overview" || diagnostics;
   // Overview always keeps its own scope (server source, no business filters).
   // Diagnostics owns its source/operation/model/outcome and its own version.
   const selectedFilters = diagnostics ? diagnosticFilters : overviewFilters;
@@ -219,7 +222,7 @@ export default function Admin() {
     if (!keepList || !canRead) { setTracePage(emptyTracePage); setListError(""); hasList.current = false; }
     setDetail(null); setDetailLoading(false); setError("");
     detailController.current?.abort();
-    if (canRead && !denied && view !== "users") {
+    if (canRead && !denied && showsCalls) {
       setOverviewLoading(readOverview); setListLoading(diagnostics);
       if (readOverview) void getAdminOverview({ ...filters, outcome: "" }, controller.signal, !diagnostics, currentServerRelease, currentBrowserRelease)
         .then(overview => {
@@ -256,7 +259,7 @@ export default function Admin() {
         }).finally(() => { if (live) setListLoading(false); });
     } else { setOverviewLoading(false); setListLoading(false); }
     return () => { live = false; controller.abort(); detailController.current?.abort(); };
-  }, [canRead, denied, diagnostics, userId, view, releaseMode, filters, offset, slow, revision, rejectAccess, inspect, currentServerRelease, currentBrowserRelease, serverRelease, setFilters, checkingBrowserRelease]);
+  }, [canRead, denied, diagnostics, userId, view, showsCalls, releaseMode, filters, offset, slow, revision, rejectAccess, inspect, currentServerRelease, currentBrowserRelease, serverRelease, setFilters, checkingBrowserRelease]);
 
   const operationOptions = [...new Set([filters.operation, ...(data?.facets?.operations ?? data?.operations ?? [])])].filter(Boolean);
   const update = (patch: Partial<AdminFilters>) => { setOffset(0); setFilters(old => ({ ...old, ...patch })); };
@@ -360,7 +363,7 @@ export default function Admin() {
   return <main className="admin-page">
     <header className="admin-heading"><div><span className="admin-eyebrow"><ShieldCheck size={14} /> SPOKEN · 仅管理员可见</span>
       <h1>运行看板<span>服务表现与使用情况</span></h1></div>
-      {view !== "users" && <div className="admin-heading-actions">{data && <span className={`admin-collection-state ${!data.collection.active ? "" : data.collection.dropped_since_restart || data.collection.write_errors_since_restart ? "degraded" : "enabled"}`}><i />{!data.collection.active ? "采集未启用" : data.collection.dropped_since_restart || data.collection.write_errors_since_restart ? "采集有缺口" : "采集已启用"}</span>}
+      {showsCalls && <div className="admin-heading-actions">{data && <span className={`admin-collection-state ${!data.collection.active ? "" : data.collection.dropped_since_restart || data.collection.write_errors_since_restart ? "degraded" : "enabled"}`}><i />{!data.collection.active ? "采集未启用" : data.collection.dropped_since_restart || data.collection.write_errors_since_restart ? "采集有缺口" : "采集已启用"}</span>}
         <button className="admin-refresh" disabled={loading} onClick={refresh}><RefreshCw size={15} className={loading ? "admin-spinning" : undefined} />{loading ? "加载中…" : "刷新数据"}</button>
       </div>}
     </header>
@@ -371,7 +374,13 @@ export default function Admin() {
       </nav>
       {view === "overview" && <>{timeRange}{versionSelect}{trafficSelect}</>}
     </div>
-    {view === "users" ? <AdminUsers key={userId} onForbidden={rejectAccess} /> : <>
+    {view === "users" ? <AdminUsers key={userId} onForbidden={rejectAccess} /> : view === "feedback" ?
+      <AdminFeedbackInbox key={userId} selected={params.get("ticket")} onForbidden={rejectAccess}
+        selectTicket={id => {
+          const next = new URLSearchParams(params);
+          if (id) next.set("ticket", id); else next.delete("ticket");
+          setParams(next);
+        }} /> : <>
     {diagnostics && <div className="admin-toolbar">
       <div role="tablist" aria-label="采集来源" className="admin-tabs">{(["server", "browser"] as const).map(source =>
         <button key={source} type="button" id={`admin-source-${source}`} role="tab" aria-controls="admin-source-panel"

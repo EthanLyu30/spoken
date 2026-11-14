@@ -108,9 +108,37 @@ def init_db() -> None:
     _migrate_users()
     _migrate_session_identity()
     _migrate_telemetry_errors()
+    _migrate_feedback_payouts()
     from app.services.progress import backfill_progress
 
     backfill_progress(engine)
+
+
+def _migrate_feedback_payouts() -> None:
+    """Keep earlier feedback records and make removed claims reviewable."""
+    columns = {
+        "ai_attempt_at": "TIMESTAMP",
+        "verification_mail_attempt_at": "TIMESTAMP",
+        "payout_recorded_at": "TIMESTAMP",
+        "payout_recorded_by": "INTEGER",
+        "payout_reference": "VARCHAR(120)",
+        "owner_mail_started_at": "TIMESTAMP",
+        "result_mail_started_at": "TIMESTAMP",
+        "result_mail_ai_text": "TEXT",
+    }
+    with engine.begin() as conn:
+        if _url.startswith("sqlite"):
+            existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(product_feedback)")}
+            for column, definition in columns.items():
+                if column not in existing:
+                    conn.exec_driver_sql(f"ALTER TABLE product_feedback ADD COLUMN {column} {definition}")
+        else:
+            for column, definition in columns.items():
+                conn.exec_driver_sql(f"ALTER TABLE product_feedback ADD COLUMN IF NOT EXISTS {column} {definition}")
+        conn.exec_driver_sql(
+            "UPDATE product_feedback SET status = 'needs_reconciliation' "
+            "WHERE status = 'ready_to_pay' AND removed_at IS NOT NULL AND wechat IS NULL"
+        )
 
 
 def _migrate_telemetry_errors() -> None:

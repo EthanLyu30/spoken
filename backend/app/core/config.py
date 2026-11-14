@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     account_mail_from: str = ""
     account_public_origin: str = ""
 
+    # Feedback accepts opinions independently of the opt-in 30-day cash pilot.
+    feedback_notify_email: str = ""
+    feedback_pilot_starts_at: str = ""
+    feedback_ai_enabled: bool = False
+
     # Persistence
     database_url: str = "sqlite:///./spoken.db"
 

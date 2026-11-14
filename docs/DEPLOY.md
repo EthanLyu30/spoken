@@ -64,6 +64,12 @@ Render Web Service 部署或重启时，会先在旁边启动新实例；只有�
 
 邮箱验证和密码重置只有三项邮件配置齐全时才显示入口。配置后用测试邮箱各验证一次真实收信、链接打开、超时与单次使用。旧用户可以继续登录和练习，密码重置完成后旧登录会话失效。数据导出和删除账号独立于发信配置。 [Resend 发送邮件接口](https://resend.com/docs/api-reference/emails/send-email)
 
+反馈信箱沿用这三项发信配置。`FEEDBACK_NOTIFY_EMAIL` 设置为管理员的收件邮箱，后台会在意见入库后发出包含原文的通知。用户选填邮箱并确认后会收到审核结论。留空时审核结论只在私密回执更新。也可通过私密回执补填、修改尚未确认的邮箱或重发确认邮件。后台持续处理还未尝试的邮件。自动和管理员发起的重试都遵守 20 小时安全窗口，管理员通知和结果邮件从首次尝试算起，确认邮件从链接生成算起。超过窗口后，「运行看板 → 意见审核」会显示「待核对投递」，请先在 Resend 查询投递记录。用户仍可从回执申请新的确认链接。
+
+确认上线后，再设置带时区的 `FEEDBACK_PILOT_STARTS_AT`。未设置时仍可收意见。活动从该时间开始持续 30 天，奖池上限 ¥200。账号删除后的已领取奖励会保留预留并标记待核对。管理员确认转账记录并填写不含联系方式的核对依据后，可记为已发放或释放额度。开始时间只决定提交是否进入奖励试行期，调整日期仍使用同一期的 ¥200 账本。`FEEDBACK_AI_ENABLED=true` 时，只对明确勾选同意的反馈运行 DeepSeek 初筛。请保持生产 `JWT_SECRET` 稳定，以便旧的私密回执链接继续有效。
+
+反馈限流在 Render 的公开入口使用边缘覆盖的 `CF-Connecting-IP`。在其他部署中使用连接地址或由 Uvicorn 可信代理配置解析出的地址。发布验收时，用两个独立网络核对反馈限流互不影响。 [Render 客户端 IP 说明](https://render.com/articles/host-pocketbase-on-render#making-pocketbase-see-the-real-client-ip)
+
 1. 在 Resend 添加项目控制的发件域。可以使用 `auth.spokenai.org` 这样的独立子域。在 DNS 控制台添加 Resend 给出的记录，等待域名显示已验证。 [Resend 发件域](https://resend.com/docs/dashboard/domains/introduction)
 2. 为已验证的发件域创建仅可发送的 API 密钥。在 Render 的 `spoken-backend-sg` 服务中，打开 **Environment**，设置 `RESEND_API_KEY`、`ACCOUNT_MAIL_FROM`（例如 `Spoken <no-reply@auth.spokenai.org>`）和 `ACCOUNT_PUBLIC_ORIGIN=https://www.spokenai.org`，然后保存并部署。密钥只在 Render 中保存。 [Resend 密钥权限](https://resend.com/docs/dashboard/api-keys/introduction) · [Render 环境变量](https://render.com/docs/configure-environment-variables)
 3. 部署后访问 `https://spoken-backend-sg.onrender.com/api/auth/account-capabilities`，确认 `email_actions` 为 `true`。用自己控制的测试邮箱分别验证两封邮件到达、链接落在正式站点，以及链接使用后无法再次使用。能力接口只确认配置已加载，实际收信以邮箱为准。

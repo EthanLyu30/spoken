@@ -25,6 +25,9 @@ const Interview = lazy(() => import("./pages/Interview"));
 const SessionView = lazy(() => import("./pages/SessionView"));
 const Admin = lazy(() => import("./pages/Admin"));
 const AccountAction = lazy(() => import("./pages/AccountAction"));
+const Feedback = lazy(() => import("./pages/Feedback"));
+const FeedbackReceipt = lazy(() => import("./pages/FeedbackReceipt"));
+const FeedbackEmailConfirm = lazy(() => import("./pages/FeedbackEmailConfirm"));
 
 export default function App() {
   const location = useLocation();
@@ -34,7 +37,7 @@ export default function App() {
   const resolutionError = useAuth((s) => s.resolutionError);
   const focused = location.pathname.startsWith("/practice/");
   const section = location.pathname.split("/")[1] || "home";
-  const hasSkipTarget = focused || ["/", "/scenes", "/custom", "/interview"].includes(location.pathname);
+  const hasSkipTarget = focused || section === "feedback" || ["/", "/scenes", "/custom", "/interview"].includes(location.pathname);
   // Account resolution must never hide the routes: Home, Scenes and practice
   // remain usable while `/auth/me` validates in the background. Only an
   // unresolved credential shows a non-blocking notice.
@@ -100,11 +103,14 @@ export default function App() {
             <Route path="/daily" element={<Daily />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/account-action" element={<AccountAction />} />
+            <Route path="/feedback" element={<Feedback key={generation} />} />
+            <Route path="/feedback/confirm/:ticketId" element={<FeedbackEmailConfirm key={location.pathname} />} />
+            <Route path="/feedback/receipt/:ticketId" element={<FeedbackReceipt key={location.pathname + location.hash + generation} />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
         </RouteErrorBoundary>
-        <Onboarding />
+        {section !== "feedback" && <Onboarding />}
       </div>
     </DictionaryProvider>
   );

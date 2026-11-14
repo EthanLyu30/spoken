@@ -18,6 +18,7 @@ import {
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import { InterviewResults } from "../components/InterviewResults";
+import { PracticeFeedbackInvite } from "../components/FeedbackEntry";
 import { InterviewLibrary } from "../components/InterviewLibrary";
 import {
   getInterviewSets,
@@ -527,6 +528,7 @@ export default function Interview() {
                 </button>
               </p>
             )}
+            <PracticeFeedbackInvite completed={session.saved} source="interview_result" />
             <InterviewResults
               result={session.result}
               onRestart={session.exit}

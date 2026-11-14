@@ -41,6 +41,7 @@ interface State {
   canRetryRecognition: boolean;
   saveError: boolean;
   saving: boolean;
+  saved: boolean;
 }
 const initial = (owner: string): State => ({
   owner,
@@ -57,6 +58,7 @@ const initial = (owner: string): State => ({
   canRetryRecognition: false,
   saveError: false,
   saving: false,
+  saved: false,
 });
 
 /** All asynchronous work belongs to a run and an identity, including mic grants. */
@@ -351,7 +353,7 @@ export function useInterviewSession(owner: string) {
         undefined,
         saveId.current,
       );
-      if (active(run)) update({ saveError: false });
+      if (active(run)) update({ saveError: false, saved: true });
     } catch {
       if (active(run)) update({ saveError: true });
     } finally {
@@ -381,7 +383,7 @@ export function useInterviewSession(owner: string) {
       );
       if (!active(run)) return;
       locked.current = false;
-      update({ result, phase: "results" });
+      update({ result, phase: "results", saved: false });
       await persist(result, deck, mode, run);
     } catch {
       if (active(run)) {

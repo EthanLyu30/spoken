@@ -5,6 +5,7 @@ import { DailyScenePick } from "../components/DailyScenePick";
 import { DailyGoal } from "../components/DailyGoal";
 import { BottomNav } from "../components/BottomNav";
 import { BackendStatus } from "../components/BackendStatus";
+import { PipFeedbackBubble } from "../components/FeedbackEntry";
 import { quotes } from "../data/quotes";
 import { speakText } from "../lib/speech";
 
@@ -29,6 +30,7 @@ export default function Home() {
     <div className="min-h-screen pb-24 home-page">
       <main id="spoken-main" tabIndex={-1} className="home-main">
         <section className="home-hero" aria-labelledby="home-title">
+          <PipFeedbackBubble />
           <div className="hero-inner">
             <p className="hero-kicker">PIP 和你一起，每天练习真实的英语对话</p>
             <h1 id="home-title">今天，开口就好。</h1>

@@ -8,6 +8,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Buddy } from "../components/Buddy";
+import { PracticeFeedbackInvite } from "../components/FeedbackEntry";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { Button } from "../components/ui/Button";
 import { InteractiveEnglishText } from "../components/dictionary/InteractiveEnglishText";
@@ -43,6 +44,7 @@ export default function Report() {
   const [error, setError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [attempt, setAttempt] = useState(0);
   // phrase index -> saved word id, so the chip can toggle collect / un-collect.
   const words = useWords((s) => s.words);
@@ -71,9 +73,9 @@ export default function Report() {
         if (myId !== reqId.current || ctrl.signal.aborted || generation !== getAuthGeneration()) return;
         setFeedback(f);
         if (practiceId)
-          void persistSessionOnce(scenarioId, messages, f, practiceId, generation).catch(
-            () => { if (generation === getAuthGeneration() && !ctrl.signal.aborted) setSaveError(true); },
-          );
+          void persistSessionOnce(scenarioId, messages, f, practiceId, generation)
+            .then(() => { if (generation === getAuthGeneration() && !ctrl.signal.aborted) setSaved(true); })
+            .catch(() => { if (generation === getAuthGeneration() && !ctrl.signal.aborted) setSaveError(true); });
       })
       .catch(() => {
         if (!ctrl.signal.aborted && myId === reqId.current && generation === getAuthGeneration())
@@ -92,7 +94,7 @@ export default function Report() {
     setSaving(true);
     try {
       await persistSessionOnce(scenarioId, messages, feedback, practiceId, generation);
-      if (generation === getAuthGeneration()) setSaveError(false);
+      if (generation === getAuthGeneration()) { setSaveError(false); setSaved(true); }
     } catch {
       if (generation === getAuthGeneration()) setSaveError(true);
     } finally {
@@ -140,6 +142,7 @@ export default function Report() {
       </header>
 
       <main className="mx-auto w-full max-w-3xl px-5 py-6">
+        <PracticeFeedbackInvite completed={saved && !!feedback && !loading} source="scene_report" />
         {saveError && (
           <div
             role="alert"

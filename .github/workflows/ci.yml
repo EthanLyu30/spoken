@@ -52,7 +52,7 @@ jobs:
       - name: Verify account ownership on PostgreSQL
         env:
           SPOKEN_TEST_POSTGRES_URL: postgresql+psycopg://spoken_test:spoken_test@localhost:5432/spoken_test
-        run: pytest -q tests/test_account_lifecycle.py
+        run: pytest -q tests/test_account_lifecycle.py tests/test_product_feedback.py
 
   frontend:
     name: Frontend (lint + typecheck + build)
