@@ -24,7 +24,12 @@ Return one JSON object with exactly:
 - explanation: one brief encouraging Chinese summary
 
 Do not invent an error. If the sentence is natural, set natural=true and issues=[].
-Keep the learner's intended meaning. Do not answer the role-play partner."""
+Keep the learner's intended meaning. Do not answer the role-play partner.
+
+Example JSON:
+{"natural":false,"suggestion":"I went there yesterday.","issues":[{"kind":"grammar",
+"original":"go","replacement":"went","note":"描述昨天的事情，用过去式。"}],
+"explanation":"意思很清楚，注意过去式。"}"""
 
 
 def build_turn_correction_messages(
@@ -49,20 +54,29 @@ async def generate_turn_correction(
     request: TurnCorrectionRequest,
     client: DeepSeekClient,
 ) -> TurnCorrectionResponse:
-    raw = await client.chat(
-        build_turn_correction_messages(scenario, request),
-        temperature=0.2,
-        max_tokens=700,
-        response_format={"type": "json_object"},
-    )
-    try:
-        with span("turn_correction.parse", provider="local"):
-            data = json.loads(raw)
-            data["original"] = request.text
-            response = TurnCorrectionResponse(**data)
-    except (json.JSONDecodeError, TypeError, ValidationError) as exc:
-        trace_classify("TurnCorrectionParseError", type(exc).__name__)
-        raise DeepSeekError(f"could not parse turn correction: {exc}") from exc
-    if response.natural and response.issues:
-        response = response.model_copy(update={"issues": []})
-    return response
+    messages = build_turn_correction_messages(scenario, request)
+    for attempt in (1, 2):
+        raw = await client.chat(
+            messages,
+            temperature=0.2 if attempt == 1 else 0,
+            max_tokens=700,
+            response_format={"type": "json_object"},
+        )
+        try:
+            with span("turn_correction.parse", provider="local", attempt=attempt):
+                data = json.loads(raw)
+                data["original"] = request.text
+                response = TurnCorrectionResponse.model_validate(data)
+        except (json.JSONDecodeError, TypeError, ValidationError) as exc:
+            if attempt == 2:
+                trace_classify("TurnCorrectionParseError", type(exc).__name__)
+                raise DeepSeekError("纠错分析暂时不可用，请稍后重试。") from exc
+            messages[-1]["content"] += (
+                "\nRegenerate the correction. Match the example JSON field types exactly. "
+                "Use a boolean for natural, an array (never null) for issues, and "
+                "short non-empty strings for suggestion, explanation, and issue text."
+            )
+            continue
+        if response.natural and response.issues:
+            response = response.model_copy(update={"issues": []})
+        return response

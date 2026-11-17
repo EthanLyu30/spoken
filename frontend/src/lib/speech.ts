@@ -66,12 +66,14 @@ function voiceSource() {
     timeoutMs: 500,
   };
 }
+const isEnhancedVoice = (voice: SpeechSynthesisVoice) => /natural|neural|google|enhanced|premium/i.test(voice.name);
+
 function pickBrowserVoice(uri: string | null): SpeechSynthesisVoice | null {
   const voices = listBrowserVoices();
   const selected = uri ? voices.find(v => v.voiceURI === uri) : undefined;
   if (selected) return selected;
   const score = (voice: SpeechSynthesisVoice) =>
-    (/(natural|neural|google|enhanced|premium)/i.test(voice.name) ? 100 : 0) +
+    (isEnhancedVoice(voice) ? 100 : 0) +
     (voice.lang.toLowerCase() === "en-us" ? 10 : 0);
   return [...voices].sort((a, b) => score(b) - score(a))[0] ?? null;
 }
@@ -104,7 +106,7 @@ function speakBrowser(text: string, settings: VoiceSettings, voice: SpeechSynthe
     startReported = true;
     onOutcome(performance.now() - (nativeRequestedAt ?? attemptStartedAt), {
       reason, state_before: stateBefore, state_after: stateAfter,
-      voice_type: !voice ? "unknown" : /(natural|neural|google|enhanced|premium)/i.test(voice.name) ? "enhanced" : voice.localService === false ? "remote" : voice.localService === true ? "local" : "unknown",
+      voice_type: isEnhancedVoice(voice) ? "enhanced" : voice.localService === false ? "remote" : voice.localService === true ? "local" : "unknown",
       ...(settings.browserVoiceURI ? {voice_matched: voice?.voiceURI === settings.browserVoiceURI} : {}),
       ...(error !== undefined ? {error_code: NATIVE_ERRORS.find(code => code === error) ?? "unknown"} : {}),
     }, reason === "started" ? "ok" : reason === "cancelled" ? "cancelled" : "error");
@@ -334,7 +336,7 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
   let browserRecovery: NativeDiagnostic | undefined;
   const playBrowser = async (text: string, voice: SpeechSynthesisVoice): Promise<{voice: SpeechSynthesisVoice; failed: boolean}> => {
     const onStarted = () => { playback.update({phase: "speaking"}); didStart(); };
-    // Do not count a failed online voice as a dashboard error until we know
+    // Do not count a failed initial voice as a dashboard error until we know
     // whether the intentional local-English recovery succeeds.
     const startup: {error?: [number, NativeDiagnostic, "error"]} = {};
     const captureStart = (duration: number, diagnostic: NativeDiagnostic, outcome: "ok" | "error" | "cancelled") => {
@@ -345,14 +347,16 @@ export function createSpeechQueue(_scenarioId?: string, interactionId?: string, 
     active = first;
     await first.done;
     const flushStartError = () => { if (startup.error) reportNativeStart(...startup.error); };
-    // A listed online voice can end without producing sound. Recover only
-    // before this utterance starts, once per reply, using real local English.
+    // Enhanced voices can stall even when the browser reports them as local.
+    // Recover before the start callback, at most once per reply.
     if (stopped) return {voice, failed: Boolean(first.failed)};
-    if (!first.canRecoverStartup || voice.localService !== false || browserRecovery) {
+    const canTryLocalVoice = voice.localService === false || isEnhancedVoice(voice);
+    if (!first.canRecoverStartup || !canTryLocalVoice || browserRecovery) {
       flushStartError();
       return {voice, failed: Boolean(first.failed)};
     }
-    const fallback = listBrowserVoices().find(candidate => candidate.localService === true && candidate.voiceURI !== voice.voiceURI);
+    const localAlternatives = listBrowserVoices().filter(candidate => candidate.localService === true && candidate.voiceURI !== voice.voiceURI);
+    const fallback = localAlternatives.find(candidate => !isEnhancedVoice(candidate)) ?? localAlternatives[0];
     if (!fallback) {
       flushStartError();
       return {voice, failed: Boolean(first.failed)};

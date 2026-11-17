@@ -103,9 +103,37 @@ def test_turn_correction_validates_text_and_scenario():
 
 
 def test_turn_correction_bad_model_json_maps_to_503():
-    app.dependency_overrides[get_client] = lambda: _Stub("not json")
+    stub = _Stub("not json")
+    app.dependency_overrides[get_client] = lambda: stub
     try:
-        assert client.post("/api/turn-correction", json=_body()).status_code == 503
+        response = client.post("/api/turn-correction", json=_body())
+        assert response.status_code == 503
+        assert response.json() == {"detail": "纠错分析暂时不可用，请稍后重试。"}
+        assert len(stub.calls) == 2
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_turn_correction_recovers_from_model_response_failing_schema_validation():
+    valid = {
+        "natural": False,
+        "suggestion": "I really like this coffee.",
+        "issues": [],
+        "explanation": "用 really 修饰 like 更自然。",
+    }
+
+    class _InvalidFirst(_Stub):
+        async def chat(self, messages, **kwargs):
+            content = await super().chat(messages, **kwargs)
+            return json.dumps({**valid, "issues": None}) if len(self.calls) == 1 else content
+
+    stub = _InvalidFirst(json.dumps(valid))
+    app.dependency_overrides[get_client] = lambda: stub
+    try:
+        response = client.post("/api/turn-correction", json=_body())
+        assert response.status_code == 200
+        assert response.json() == {"original": "I very like this coffee", **valid}
+        assert len(stub.calls) == 2
     finally:
         app.dependency_overrides.clear()
 

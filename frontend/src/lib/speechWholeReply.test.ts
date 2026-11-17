@@ -358,6 +358,32 @@ it.each(["end_before_start", "network", "startup_timeout"])("recovers an online 
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
 });
 
+it("recovers a stalled enhanced voice reported as local using a standard system voice", async () => {
+  vi.useFakeTimers();
+  const synth = window.speechSynthesis;
+  Object.assign(synth, { paused: false, speaking: false, pending: false });
+  vi.spyOn(synth, "getVoices").mockReturnValue([
+    { name: "Enhanced English", voiceURI: "enhanced", lang: "en-US", localService: true },
+    { name: "Other Enhanced English", voiceURI: "other-enhanced", lang: "en-US", localService: true },
+    { name: "System English", voiceURI: "system", lang: "en-US", localService: true },
+  ] as SpeechSynthesisVoice[]);
+  const queue = createSpeechQueue();
+  const done = queue.end("Would you like a cup of coffee?");
+  await vi.advanceTimersByTimeAsync(0);
+  Object.assign(synth, { speaking: true }); // Native state changes without an onstart callback.
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(utterances.map(utterance => utterance.voice?.voiceURI)).toEqual(["enhanced", "system"]);
+
+  utterances[1].onstart?.();
+  utterances[1].onend?.();
+  await done;
+  expect(queue.status).toMatchObject({ phase: "completed", voice: "System English" });
+  expect(samples.filter(sample => sample.operation === "speech.complete")).toEqual([
+    expect.objectContaining({ outcome: "ok", reason: "startup_timeout", voice_type: "enhanced", playback_started: true }),
+  ]);
+  expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
+});
+
 it.each(["not-allowed", "interrupted", "canceled"])("does not switch voices after native %s", async error => {
   vi.useFakeTimers();
   vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([
