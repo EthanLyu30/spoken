@@ -2,13 +2,19 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ postChat: vi.fn(), postAsr: vi.fn(), streamChat: vi.fn(), speakText: vi.fn(), prepareSpeech: vi.fn(), createSpeechQueue: vi.fn(), postFeedback: vi.fn(), postSession: vi.fn(), startVoiceCall: vi.fn(), startRecording: vi.fn(), openAsrStream: vi.fn() }));
+import type { TurnCorrectionCardProps } from "../components/TurnCorrectionCard";
+const mocks = vi.hoisted(() => ({ postChat: vi.fn(), postAsr: vi.fn(), streamChat: vi.fn(), speakText: vi.fn(), prepareSpeech: vi.fn(), createSpeechQueue: vi.fn(), postFeedback: vi.fn(), postSession: vi.fn(), startVoiceCall: vi.fn(), startRecording: vi.fn(), openAsrStream: vi.fn(), postTurnCorrection: vi.fn(), showCorrectionCards: false }));
 vi.mock("../lib/api", () => ({ ...mocks }));
 vi.mock("../lib/call", () => ({ startVoiceCall: mocks.startVoiceCall }));
 vi.mock("../lib/recorder", () => ({ startRecording: mocks.startRecording }));
 vi.mock("../lib/asrStream", () => ({ openAsrStream: mocks.openAsrStream }));
 vi.mock("../lib/speech", () => ({ speakText: mocks.speakText, prepareSpeech: mocks.prepareSpeech, createSpeechQueue: mocks.createSpeechQueue }));
-vi.mock("../components/ChatBubble", () => ({ ChatBubble: ({ text, onSpeak }: { text: string; onSpeak?: () => void }) => <div>{text}{onSpeak && <button onClick={onSpeak}>Replay {text}</button>}</div> }));
+vi.mock("../components/ChatBubble", async () => {
+  const { TurnCorrectionCard } = await import("../components/TurnCorrectionCard");
+  return { ChatBubble: ({ text, onSpeak, correction }: {
+    text: string; onSpeak?: () => void; correction?: TurnCorrectionCardProps;
+  }) => <div>{text}{onSpeak && <button onClick={onSpeak}>Replay {text}</button>}{mocks.showCorrectionCards && correction && <TurnCorrectionCard {...correction} />}</div> };
+});
 vi.mock("../components/Buddy", () => ({ Buddy: () => null }));
 vi.mock("../components/PlayfulBackground", () => ({ PlayfulBackground: () => null }));
 import Conversation from "./Conversation";
@@ -16,9 +22,12 @@ import { bindInteraction, getInteraction } from "../lib/telemetry";
 import type { CallCallbacks } from "../lib/call";
 import { MAX_AUDIO_BYTES } from "../lib/audioLimits";
 import { ASR_QUOTA_MESSAGE, AsrQuotaError } from "../lib/asrQuota";
+import { DictionaryProvider } from "../components/dictionary/DictionaryProvider";
+import { useSession } from "../store/session";
 afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.showCorrectionCards = false;
   Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
   mocks.prepareSpeech.mockImplementation(() => ({ dispose: vi.fn(), consume: vi.fn() }));
   mocks.postChat.mockResolvedValue({ reply: "Hello" });
@@ -80,6 +89,46 @@ it("recovers an interrupted stream through the plain endpoint and speaks only th
   expect(mocks.postChat).toHaveBeenCalledTimes(2);
   expect(mocks.speakText.mock.calls.map(([text]) => text)).toEqual(["Complete reply"]);
   expect(screen.queryByRole("button", { name: "重试回复" })).not.toBeInTheDocument();
+});
+
+it("takes a marked article correction from the learner's turn to the report", async () => {
+  const user = userEvent.setup();
+  mocks.showCorrectionCards = true;
+  mocks.streamChat.mockImplementationOnce(async (_id, _history, onText) => {
+    onText("Would you like milk?");
+    return "Would you like milk?";
+  });
+  mocks.postTurnCorrection.mockResolvedValueOnce({
+    original: "I'd like latte.", natural: false, suggestion: "I'd like a latte.",
+    issues: [{ kind: "grammar", category: "articles", original: "like latte", replacement: "like a latte", note: "单数可数名词前加 a。" }],
+    explanation: "这里是在点一杯拿铁。",
+  });
+  render(
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe?focus=articles"]}>
+      <DictionaryProvider>
+        <Routes>
+          <Route path="/practice/:scenarioId" element={<Conversation />} />
+          <Route path="/report/:scenarioId" element={<h1>练习小结</h1>} />
+        </Routes>
+      </DictionaryProvider>
+    </MemoryRouter>,
+  );
+  await screen.findByText("Hello");
+  expect(screen.getByRole("heading", { name: "本轮复练 · 冠词" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "文字练习" }));
+  await user.type(screen.getByRole("textbox", { name: "英文回复" }), "I'd like latte.");
+  await user.click(screen.getByRole("button", { name: /^发送$/ }));
+  await screen.findByText("Would you like milk?");
+  await user.click(screen.getByRole("button", { name: "即时纠错" }));
+  const mark = await screen.findByRole("button", { name: "标记复练" });
+  await user.click(mark);
+  expect(mark).toHaveAttribute("aria-pressed", "true");
+  await user.click(screen.getByRole("button", { name: "看小结" }));
+  expect(await screen.findByRole("heading", { name: "练习小结" })).toBeInTheDocument();
+  expect(useSession.getState().markedCorrections).toEqual([{
+    turn_index: 1, category: "articles", marked: true,
+    original: "like latte", suggestion: "like a latte", note: "单数可数名词前加 a。",
+  }]);
 });
 
 it("does not send a previous identity's unmount feedback result as a new account's session", async () => {

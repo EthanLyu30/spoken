@@ -42,6 +42,19 @@ def test_custom_scenario_builds_scene():
         app.dependency_overrides.clear()
 
 
+def test_custom_scene_keeps_usable_preview_cues_in_the_generated_scene():
+    cue = {"keyword": "a checking account", "meaning": "开一个支票账户",
+           "sentence": "I'd like to open a checking account."}
+    fixture = {**_SCENE, "practice_cues": [cue, {"keyword": "incomplete"}]}
+    app.dependency_overrides[get_client] = lambda: _Stub(json.dumps(fixture))
+    try:
+        response = client.post("/api/custom-scenario", json={"description": "去银行开户"})
+        assert response.status_code == 200
+        assert response.json()["practice_cues"] == [cue]
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_scenario_suggestion_returns_scene():
     app.dependency_overrides[get_client] = lambda: _Stub(json.dumps(_SCENE))
     try:

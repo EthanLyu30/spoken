@@ -10,8 +10,10 @@ import {
 import {
   postPronunciation,
   postTurnCorrection,
+  type Correction,
   type CustomScene,
   type PronunciationResult,
+  type TurnCorrectionIssue,
   type TurnCorrectionResponse,
 } from "../lib/api";
 import { copyText } from "../lib/clipboard";
@@ -21,6 +23,7 @@ import { InteractiveEnglishText } from "./dictionary/InteractiveEnglishText";
 import { PronunciationFeedback } from "./PronunciationFeedback";
 import { getAuthGeneration } from "../lib/authToken";
 import { bindInteraction, getInteraction, reportTiming } from "../lib/telemetry";
+import { correctionDrills, isCorrectionCategory } from "../lib/practiceCorrections";
 
 type LoadState<T> =
   | { status: "idle" | "loading" | "error"; data?: undefined }
@@ -33,6 +36,8 @@ export interface TurnCorrectionCardProps {
   custom?: CustomScene;
   meta: UserTurnMeta;
   onUseSuggestion: (suggestion: string) => void;
+  markedIssues?: Correction[];
+  onToggleMark?: (issue: TurnCorrectionIssue) => void;
 }
 
 export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
@@ -157,6 +162,7 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
         <Sparkles className="h-3.5 w-3.5" />
         {open ? "收起纠错" : "即时纠错"}
       </button>
+      {!open && Boolean(props.markedIssues?.length) && <span className="ml-2 text-xs font-semibold">已标记复练</span>}
 
       {open && (
         <section className="mt-2 rounded-2xl bg-surface-2 p-3 text-left text-ink shadow-soft">
@@ -204,28 +210,34 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
                 <p className="mt-2 text-xs text-muted">表达自然，无需修改。</p>
               ) : (
                 <ul className="mt-2 space-y-2">
-                  {textState.data.issues.map((issue, index) => (
-                    <li
-                      key={`${issue.kind}-${issue.original}-${index}`}
-                      className="rounded-xl bg-surface p-2"
-                    >
-                      <p className="text-[0.62rem] font-bold text-coral-deep">
-                        {issue.kind === "grammar" ? "语法" : "表达"}
-                      </p>
-                      <p className="text-xs">
-                        <InteractiveEnglishText
-                          text={issue.original}
-                          className="line-through text-muted"
-                        />
-                        {" → "}
-                        <InteractiveEnglishText
-                          text={issue.replacement}
-                          className="font-bold text-leaf-deep"
-                        />
-                      </p>
-                      <p className="text-xs text-muted">{issue.note}</p>
-                    </li>
-                  ))}
+                  {textState.data.issues.map((issue, index) => {
+                    const categoryId = issue.category ?? null;
+                    const category = isCorrectionCategory(categoryId) ? correctionDrills[categoryId] : null;
+                    const original = issue.original.trim().toLowerCase();
+                    const canMark = props.onToggleMark && category && original && props.text.toLowerCase().includes(original);
+                    const marked = props.markedIssues?.some((mark) =>
+                      mark.category === issue.category && mark.original.trim().toLowerCase() === original,
+                    ) ?? false;
+                    return (
+                      <li key={`${issue.kind}-${issue.original}-${index}`} className="rounded-xl bg-surface p-2">
+                        <p className="text-xs font-bold text-coral-deep">
+                          {category?.label ?? (issue.kind === "grammar" ? "语法" : "表达")}
+                        </p>
+                        <p className="text-xs">
+                          <InteractiveEnglishText text={issue.original} className="line-through text-muted" />
+                          {" → "}
+                          <InteractiveEnglishText text={issue.replacement} className="font-bold text-leaf-deep" />
+                        </p>
+                        <p className="text-xs text-muted">{issue.note}</p>
+                        {canMark && (
+                          <button type="button" className="mt-1 min-h-8 text-xs font-bold text-ink underline underline-offset-2"
+                            aria-pressed={marked} onClick={() => props.onToggleMark?.(issue)}>
+                            {marked ? "已标记复练" : "标记复练"}
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
 

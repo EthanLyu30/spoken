@@ -303,7 +303,8 @@ def test_word_identity_is_trimmed_case_sensitive_and_concurrent_collection_idemp
         assert stats["words_count"] == 2 and stats["xp"] == 10
 
 
-def test_bound_connection_backfill_rollback_and_null_legacy_times():
+def test_bound_connection_backfill_rollback_and_null_legacy_times(monkeypatch):
+    from app import db as database
     from app.services import progress
 
     engine = create_engine("sqlite:///:memory:")
@@ -322,6 +323,10 @@ def test_bound_connection_backfill_rollback_and_null_legacy_times():
         assert db.scalar(select(func.count()).select_from(progress.LearningEvent)) == 0
         assert db.get(progress.ProgressMigration, 1) is None
     progress.backfill_progress(engine)
+    with monkeypatch.context() as legacy_env:
+        legacy_env.setattr(database, "engine", engine)
+        legacy_env.setattr(database, "_url", "sqlite:///:memory:")
+        database._migrate_session_identity()
     with Session(engine) as db:
         stats = practice.compute_stats(db, "legacy-null")
         assert stats["total_sessions"] == 1 and stats["today_count"] == 0 and stats["streak_days"] == 0

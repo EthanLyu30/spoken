@@ -37,7 +37,7 @@ export default function Home() {
             <p className="hero-subtitle">每天一点真实对话，让英语自然一点。</p>
             <div className="hero-actions">
               <Link
-                to="/practice/cafe"
+                to="/prepare/cafe"
                 className="ui-button"
                 onPointerEnter={() => { void import("./Conversation"); }}
                 onFocus={() => { void import("./Conversation"); }}

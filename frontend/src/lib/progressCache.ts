@@ -15,6 +15,7 @@ export interface ProgressData {
   stats: Stats | null;
   insights: Insights | null;
   latest: ProgressSessions["latest"];
+  correctionFocus?: ProgressSessions["correction_focus"];
   errors: string[];
   practicePending: boolean;
   statsPending: boolean;

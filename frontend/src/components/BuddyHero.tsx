@@ -52,7 +52,7 @@ export function BuddyHero({ greeting }: BuddyHeroProps) {
             <span className="absolute -left-1.5 top-12 h-4 w-4 rotate-45 bg-surface-2" />
           </div>
         </div>
-        <Link to="/practice/cafe" className="mt-5 flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-coral px-5 py-3 font-display text-base font-bold text-ink shadow-pop transition-transform active:scale-[0.98]">
+        <Link to="/prepare/cafe" className="mt-5 flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-coral px-5 py-3 font-display text-base font-bold text-ink shadow-pop transition-transform active:scale-[0.98]">
           <Mic className="h-5 w-5" /> 开始语音练习
         </Link>
         <p className="mt-2 text-center text-xs text-muted">从咖啡馆点单热身，开口聊几句就好</p>

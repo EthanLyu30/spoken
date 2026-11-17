@@ -803,6 +803,7 @@ export interface CustomScene {
   goal: string;
   persona: string;
   opening_line: string;
+  practice_cues?: { keyword: string; meaning: string; sentence: string }[];
   /** Short Chinese theme tag (display-only), e.g. "日常生活·邻里". */
   source?: string;
 }
@@ -828,6 +829,7 @@ export type CorrectionIssueKind = "grammar" | "expression";
 
 export interface TurnCorrectionIssue {
   kind: CorrectionIssueKind;
+  category?: CorrectionCategory | null;
   original: string;
   replacement: string;
   note: string;
@@ -927,10 +929,15 @@ export interface SkillScore {
   score: number;
 }
 
+export type CorrectionCategory = "articles" | "tense" | "agreement" | "word_order" | "sentence_structure" | "prepositions" | "word_choice";
+
 export interface Correction {
   original: string;
   suggestion: string;
   note: string;
+  category?: CorrectionCategory | null;
+  turn_index?: number | null;
+  marked?: boolean;
 }
 
 export interface Phrase {
@@ -955,11 +962,17 @@ export function postFeedback(
   signal?: AbortSignal,
   custom?: CustomScene,
 ): Promise<FeedbackResponse> {
+  const offset = Math.max(0, messages.length - 60);
   return request<FeedbackResponse>("/api/feedback", {
     method: "POST",
-    body: JSON.stringify({ scenario_id: scenarioId, messages: messages.slice(-60), custom }),
+    body: JSON.stringify({ scenario_id: scenarioId, messages: messages.slice(offset), custom }),
     signal,
-  }, 30_000);
+  }, 30_000).then((feedback) => offset === 0 ? feedback : {
+    ...feedback,
+    corrections: feedback.corrections.map((entry) => entry.turn_index == null ? entry : {
+      ...entry, turn_index: entry.turn_index + offset,
+    }),
+  });
 }
 
 export interface SessionSummary {
@@ -974,6 +987,7 @@ export interface SessionDetail extends SessionSummary {
   tip: string;
   scores: SkillScore[];
   messages: ChatMessage[];
+  corrections?: Correction[];
 }
 
 export interface SaveSessionPayload {
@@ -984,6 +998,7 @@ export interface SaveSessionPayload {
   summary: string;
   tip: string;
   scores: SkillScore[];
+  corrections?: Correction[];
 }
 
 /** Persist a finished session (transcript + feedback) for history/trends. */
@@ -1335,6 +1350,7 @@ export interface ProgressSessions {
   sessions: SessionSummary[];
   insights: Insights;
   latest: { id: number; scores: SkillScore[] } | null;
+  correction_focus?: { category: CorrectionCategory; sessions: number; turns: number; scenario_id: string }[];
 }
 
 export function getProgressSessions(signal?: AbortSignal, force = false): Promise<ProgressSessions> {

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -25,6 +25,7 @@ class PracticeSession(Base):
     overall: Mapped[int] = mapped_column(Integer, default=0)
     summary: Mapped[str] = mapped_column(Text, default="")
     tip: Mapped[str] = mapped_column(Text, default="")
+    corrections: Mapped[list[dict]] = mapped_column(JSON, default=list, server_default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
 
     turns: Mapped[list[Turn]] = relationship(

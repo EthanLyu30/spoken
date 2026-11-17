@@ -6,9 +6,10 @@ import type { PracticeRecord, ProgressSessions, SessionSummary } from "../lib/ap
 const mock = vi.hoisted(() => ({
   records: [] as PracticeRecord[], sessions: [] as SessionSummary[],
   latest: null as ProgressSessions["latest"], errors: [] as string[], reload: vi.fn(),
+  correctionFocus: [] as NonNullable<ProgressSessions["correction_focus"]>,
 }));
 vi.mock("../hooks/useProgressData", () => ({ useProgressData: () => ({
-  sessions: mock.sessions, practice: mock.records, stats: null, insights: null, latest: mock.latest,
+  sessions: mock.sessions, practice: mock.records, stats: null, insights: null, latest: mock.latest, correctionFocus: mock.correctionFocus,
   status: mock.errors.includes("sessions") ? "error" : "ready", errors: mock.errors,
   sessionsPending: false, practicePending: false, statsPending: false, reload: mock.reload,
 }) }));
@@ -30,9 +31,18 @@ beforeEach(() => {
   mock.records = [];
   mock.sessions = [];
   mock.latest = null;
+  mock.correctionFocus = [];
   mock.errors = [];
   mock.reload.mockClear();
   useAuth.setState({ user: null });
+});
+
+it("links a recurring article problem to the airport practice that uses it", () => {
+  mock.correctionFocus = [{ category: "articles", sessions: 3, turns: 5, scenario_id: "airport" }];
+  show();
+  const focus = screen.getByRole("region", { name: "优先复练" });
+  expect(focus).toHaveTextContent("3 次练习、5 句话");
+  expect(within(focus).getByRole("link", { name: /练冠词/ })).toHaveAttribute("href", "/prepare/airport?focus=articles");
 });
 
 it("provides the plotted conversations and latest ability scores as named tables", async () => {

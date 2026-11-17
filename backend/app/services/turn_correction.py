@@ -19,15 +19,16 @@ Analyse only the learner's current sentence in the supplied role-play context.
 Return one JSON object with exactly:
 - natural: boolean
 - suggestion: one complete natural English sentence the learner can say
-- issues: 0-6 objects, each with kind ("grammar" or "expression"), original,
-  replacement, and a brief Chinese note
+- issues: 0-6 objects, each with kind ("grammar" or "expression"), category
+  (articles, tense, agreement, word_order, sentence_structure, prepositions, word_choice),
+  original (a verbatim fragment of the learner's sentence), replacement, and a brief Chinese note
 - explanation: one brief encouraging Chinese summary
 
 Do not invent an error. If the sentence is natural, set natural=true and issues=[].
 Keep the learner's intended meaning. Do not answer the role-play partner.
 
 Example JSON:
-{"natural":false,"suggestion":"I went there yesterday.","issues":[{"kind":"grammar",
+{"natural":false,"suggestion":"I went there yesterday.","issues":[{"kind":"grammar","category":"tense",
 "original":"go","replacement":"went","note":"描述昨天的事情，用过去式。"}],
 "explanation":"意思很清楚，注意过去式。"}"""
 

@@ -12,12 +12,12 @@ it("retains every catalogue scene across chapter changes and keeps custom scenes
   for (const chapter of chapters) {
     await user.click(screen.getByRole("button", { name: chapter.titleZh }));
     for (const id of chapter.ids) {
-      expect(screen.getByRole("link", { name: new RegExp(scenarios.find((s) => s.id === id)!.titleZh) })).toHaveAttribute("href", `/practice/${id}`);
+      expect(screen.getByRole("link", { name: new RegExp(scenarios.find((s) => s.id === id)!.titleZh) })).toHaveAttribute("href", `/prepare/${id}`);
     }
   }
   const grouped = new Set(chapters.flatMap((c) => c.ids));
   for (const scene of scenarios.filter((s) => !grouped.has(s.id))) {
-    expect(screen.getByRole("link", { name: new RegExp(scene.titleZh) })).toHaveAttribute("href", `/practice/${scene.id}`);
+    expect(screen.getByRole("link", { name: new RegExp(scene.titleZh) })).toHaveAttribute("href", `/prepare/${scene.id}`);
   }
 });
 

@@ -30,7 +30,7 @@ export function AppHeader() {
           </NavLink>
           <NavLink
             to="/scenes"
-            className={pathname === "/custom" ? "active" : undefined}
+            className={pathname === "/custom" || pathname.startsWith("/prepare/") ? "active" : undefined}
           >
             <Route />
             场景练习

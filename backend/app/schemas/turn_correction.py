@@ -2,16 +2,26 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from app.schemas.custom import CustomScene
+from app.schemas.feedback import CorrectionCategory
 
 
 class TurnCorrectionIssue(BaseModel):
     kind: Literal["grammar", "expression"]
+    category: CorrectionCategory | None = None
     original: str = Field(min_length=1, max_length=300)
     replacement: str = Field(min_length=1, max_length=300)
     note: str = Field(min_length=1, max_length=500)
+
+    @field_validator("category", mode="wrap")
+    @classmethod
+    def optional_category(cls, value, handler):
+        try:
+            return handler(value)
+        except ValidationError:
+            return None
 
 
 class TurnCorrectionRequest(BaseModel):

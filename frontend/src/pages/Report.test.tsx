@@ -21,6 +21,20 @@ beforeEach(() => {
   api.postFeedback.mockResolvedValue(feedback); api.postSession.mockResolvedValue({});
 });
 const mount = () => render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><Report /></MemoryRouter>);
+
+it("keeps a marked learner sentence in the report and saved session even when the AI lists no fixes", async () => {
+  const mark = { original: "latte", suggestion: "a latte", note: "可数名词前加 a", category: "articles" as const,
+    turn_index: 1, marked: true };
+  useSession.getState().setSession("cafe", [
+    { role: "assistant", content: "What can I get you?" },
+    { role: "user", content: "I'd like latte, please." },
+  ], `marked-${sequence}`, [mark]);
+  mount();
+  expect(await screen.findByText("你的第 1 句")).toBeVisible();
+  expect(screen.getByRole("link", { name: "复练冠词" })).toHaveAttribute("href", "/prepare/cafe?focus=articles");
+  expect(api.postSession).toHaveBeenCalledWith(expect.objectContaining({ corrections: [mark] }));
+});
+
 it("does not save feedback that completes after an identity transition", async () => {
   let resolve!: (value: typeof feedback) => void;
   api.postFeedback.mockReturnValue(new Promise(r => { resolve = r; }));

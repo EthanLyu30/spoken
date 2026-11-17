@@ -1,5 +1,7 @@
 """Schemas for the post-session feedback endpoint."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from app.schemas.chat import ChatMessage
@@ -13,10 +15,25 @@ class SkillScore(BaseModel):
     score: int = Field(ge=0, le=100)
 
 
+CorrectionCategory = Literal[
+    "articles", "tense", "agreement", "word_order", "sentence_structure", "prepositions", "word_choice"
+]
+
+
 class Correction(BaseModel):
     original: str
     suggestion: str
     note: str
+    category: CorrectionCategory | None = None
+    turn_index: int | None = Field(default=None, ge=0, strict=True)
+    marked: bool = False
+
+
+class CorrectionFocus(BaseModel):
+    category: CorrectionCategory
+    sessions: int
+    turns: int
+    scenario_id: str
 
 
 class Phrase(BaseModel):

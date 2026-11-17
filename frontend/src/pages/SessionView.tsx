@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
+import { CorrectionReview } from "../components/CorrectionReview";
 import { InteractiveEnglishText } from "../components/dictionary/InteractiveEnglishText";
 import { Button } from "../components/ui/Button";
 import { Ring } from "../components/ui/Ring";
@@ -11,6 +12,7 @@ import { ProgressBar } from "../components/ui/ProgressBar";
 import { getSession, type SessionDetail } from "../lib/api";
 import { getScenario } from "../data/scenarios";
 import { cn } from "../lib/utils";
+import { correctionDrills, isCorrectionCategory } from "../lib/practiceCorrections";
 
 const SCORE_COLORS = ["#ff6f5e", "#ff9f45", "#41c08c", "#57b7e8"];
 
@@ -55,6 +57,14 @@ export default function SessionView() {
     : detail?.scenario_id === "custom"
       ? "自定义场景"
       : (detail?.scenario_id ?? "");
+  const tags = new Map<number, Set<string>>();
+  for (const entry of detail?.corrections ?? []) {
+    const category = entry.category ?? null;
+    if (entry.turn_index == null || !isCorrectionCategory(category)) continue;
+    const labels = tags.get(entry.turn_index) ?? new Set<string>();
+    labels.add(correctionDrills[category].label);
+    tags.set(entry.turn_index, labels);
+  }
 
   return (
     <div className="min-h-screen pb-24">
@@ -133,6 +143,10 @@ export default function SessionView() {
               </section>
             )}
 
+            {detail.corrections && detail.corrections.length > 0 && (
+              <CorrectionReview corrections={detail.corrections} messages={detail.messages} scenarioId={detail.scenario_id} className="mt-6" />
+            )}
+
             <section className="card mt-6 p-6">
               <h2 className="mb-3 font-display text-lg font-semibold text-ink">对话回顾 · 你的回答历程</h2>
               {detail.messages.length === 0 ? (
@@ -156,6 +170,9 @@ export default function SessionView() {
                           <p className="mt-0.5 leading-snug">
                             <InteractiveEnglishText text={m.content} />
                           </p>
+                          {!isPip && tags.has(i) && (
+                            <p className="mt-1 text-xs font-bold">复练标记 · {[...tags.get(i)!].join("、")}</p>
+                          )}
                         </div>
                       </div>
                     );

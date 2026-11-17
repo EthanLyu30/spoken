@@ -39,6 +39,7 @@ export async function persistSessionOnce(
       summary: feedback.summary,
       tip: feedback.tip,
       scores: feedback.scores,
+      ...(feedback.corrections?.length ? { corrections: feedback.corrections } : {}),
     }).then(() => {
       saved.add(sig);
       if (saved.size > 200) saved.delete(saved.values().next().value as string);

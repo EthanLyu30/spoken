@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Lightbulb,
@@ -16,14 +16,16 @@ import {
   X,
 } from "lucide-react";
 import { getScenario } from "../data/scenarios";
+import { practiceCues } from "../data/practiceCues";
 import { scenarioIcons } from "../lib/icons";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
 import {
   postChat,
-  postHint,
   postFeedback,
   streamChat,
   type ChatMessage,
+  type Correction,
+  type TurnCorrectionIssue,
 } from "../lib/api";
 import {
   appendUserTurn,
@@ -32,6 +34,7 @@ import {
   type UserTurnMetaMap,
 } from "../lib/conversationTurns";
 import { createPracticeId, persistSessionOnce } from "../lib/sessionSave";
+import { correctionDrills, correctionKey, includeMarkedCorrections, isCorrectionCategory } from "../lib/practiceCorrections";
 import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
 import {
   speakText,
@@ -76,6 +79,9 @@ const localOpeners: Record<string, string> = {
 export default function Conversation() {
   const generation = useRef(getAuthGeneration()).current;
   const { scenarioId } = useParams();
+  const [search] = useSearchParams();
+  const focusId = search.get("focus");
+  const focus = isCorrectionCategory(focusId) ? correctionDrills[focusId] : null;
   const isCustom = scenarioId === "custom";
   const customScene = useCustomScene((s) => s.scene);
   const scenario =
@@ -109,7 +115,8 @@ export default function Conversation() {
   const [callPhase, setCallPhase] = useState<CallPhase | null>(null);
   const [liveCaption, setLiveCaption] = useState(""); // streaming ASR preview while speaking
   const [hints, setHints] = useState<string[] | null>(null);
-  const [hintLoading, setHintLoading] = useState(false);
+  const [markedCorrections, setMarkedCorrections] = useState<Correction[]>([]);
+  const marksRef = useRef<Correction[]>([]);
   const [canRetry, setCanRetry] = useState(false);
   const [callStarting, setCallStarting] = useState(false);
   const [inputMode, setInputMode] = useState<"voice" | "text">("voice");
@@ -177,7 +184,7 @@ export default function Conversation() {
     requestControllerRef.current?.abort();
     callQueueRef.current?.stop();
     speakingRef.current?.stop();
-    setSession(id, messages, practiceIdRef.current);
+    setSession(id, messages, practiceIdRef.current, marksRef.current);
     navigate(`/report/${id}`);
   }
 
@@ -289,8 +296,9 @@ export default function Conversation() {
         const msgs = messagesRef.current;
         if (msgs.some((m) => m.role === "user")) {
           const custom = isCustom ? (customScene ?? undefined) : undefined;
+          const marked = marksRef.current;
           postFeedback(id, msgs, undefined, custom)
-            .then((f) => persistSessionOnce(id, msgs, f, practiceId, generation))
+            .then((f) => persistSessionOnce(id, msgs, includeMarkedCorrections(f, marked), practiceId, generation))
             .catch(() => undefined);
         }
       }
@@ -710,20 +718,23 @@ export default function Conversation() {
     speakingRef.current?.stop();
   }
 
-  async function getHints() {
-    if (!isCurrent() || !id || hintLoading || booting) return;
-    setHintLoading(true);
-    setError(null);
-    try {
-      const custom = isCustom ? (customScene ?? undefined) : undefined;
-      const s = await postHint(id, messages, undefined, custom);
-      if (!isCurrent()) return;
-      setHints(s.length ? s : ["试着先打个招呼或回应上一句～"]);
-    } catch {
-      if (isCurrent()) setError("获取提示失败，请稍后再试。");
-    } finally {
-      if (isCurrent()) setHintLoading(false);
-    }
+  function toggleCues() {
+    setHints((open) => open ? null : practiceCues(id, customScene).map(([, , sentence]) => sentence));
+  }
+
+  function toggleMark(turnIndex: number, issue: TurnCorrectionIssue) {
+    if (!isCurrent() || !issue.category) return;
+    const entry: Correction = {
+      turn_index: turnIndex, category: issue.category, marked: true,
+      original: issue.original, suggestion: issue.replacement, note: issue.note,
+    };
+    const key = correctionKey(entry);
+    const current = marksRef.current;
+    const next = current.some((mark) => correctionKey(mark) === key)
+      ? current.filter((mark) => correctionKey(mark) !== key)
+      : [...current, entry];
+    marksRef.current = next;
+    setMarkedCorrections(next);
   }
 
   const stageMood: BuddyMood =
@@ -842,6 +853,7 @@ export default function Conversation() {
             >
               {stageStatus}
             </p>
+            {focus && <p className="mt-1 text-xs font-semibold text-ink">本轮复练 · {focus.label}</p>}
               <SpeechPlaybackStatus suppressInlineErrors />
             {showVoiceSettings && (
               <div className="mt-3 w-full rounded-2xl border border-border bg-surface p-3 text-left shadow-soft">
@@ -900,6 +912,8 @@ export default function Conversation() {
                           ? (customScene ?? undefined)
                           : undefined,
                         meta: turnMeta[i] ?? { source: "typed" },
+                        markedIssues: markedCorrections.filter((entry) => entry.turn_index === i),
+                        onToggleMark: (issue) => toggleMark(i, issue),
                         onUseSuggestion: (suggestion) => {
                           setInput(suggestion);
                           setInputMode("text");
@@ -1005,7 +1019,7 @@ export default function Conversation() {
                 {hints && (
                   <div className="mb-2 flex flex-wrap items-center gap-2">
                     <span className="text-[0.66rem] font-bold uppercase tracking-wide text-muted">
-                      提示
+                      场景句型
                     </span>
                     {hints.map((h, i) => (
                       <button
@@ -1018,7 +1032,7 @@ export default function Conversation() {
                         }}
                         className="rounded-full border border-border bg-surface-2 px-3 py-1.5 text-xs font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
                       >
-                        {h}
+                        <span lang="en">{h}</span>
                       </button>
                     ))}
                     <button
@@ -1110,16 +1124,12 @@ export default function Conversation() {
                   </p>
                   <button
                     type="button"
-                    onClick={getHints}
-                    disabled={booting || hintLoading}
+                    onClick={toggleCues}
+                    aria-expanded={Boolean(hints)}
                     className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-1.5 text-xs font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5 disabled:opacity-50"
                   >
-                    {hintLoading ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Lightbulb className="h-3.5 w-3.5" />
-                    )}
-                    提示
+                    <Lightbulb className="h-3.5 w-3.5" />
+                    场景句型
                   </button>
                 </div>
               </>
@@ -1146,16 +1156,17 @@ export default function Conversation() {
             </p>
           </section>
           <section>
-            <p className="eyebrow">A LITTLE HELP</p>
-            <p>遇到卡壳的时候，可以先看一句提示，再用自己的方式接着聊。</p>
+            <h3>{focus ? `本轮复练 · ${focus.label}` : "场景句型"}</h3>
+            {focus && <p>{focus.task}</p>}
             <button
               type="button"
               className="ui-secondary"
-              disabled={booting || hintLoading || inCall}
-              onClick={getHints}
+              disabled={inCall}
+              onClick={toggleCues}
+              aria-expanded={Boolean(hints)}
             >
               <Lightbulb />
-              给我一句提示
+              {hints ? "收起预习句型" : "查看预习句型"}
             </button>
           </section>
           <p>点击英文单词可以查释义、听发音并收藏。</p>

@@ -56,7 +56,7 @@ export default function Scenes() {
             <h2>更多场景</h2>
             <div>
               {otherScenes.map((s) => (
-                <Link to={`/practice/${s.id}`} key={s.id}>
+                <Link to={`/prepare/${s.id}`} key={s.id}>
                   <span>
                     <strong>{s.titleZh}</strong>
                     <small lang="en">{s.title}</small>

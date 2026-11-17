@@ -13,11 +13,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import ValidationError
 
 from app.api.chat import get_client
-from app.schemas.custom import CustomScene, CustomSceneRequest
+from app.schemas.custom import CustomScene, CustomSceneRequest, PracticeCue
 from app.services.deepseek import DeepSeekClient, DeepSeekError
 from app.services.speaking_scope import SPEAKING_SCOPE_POLICY, is_unrelated_task
 
 router = APIRouter(tags=["custom"])
+
+_CUES = """
+- "practice_cues": exactly three short scene-specific objects {"keyword","meaning","sentence"}. keyword is an English phrase, meaning explains in Chinese when to use it, and sentence is a complete English line the learner can say to accomplish the goal. Select distinct, reusable phrases."""
 
 _SYSTEM = SPEAKING_SCOPE_POLICY + """
 You design short English speaking-practice role-plays for Chinese learners.
@@ -34,7 +37,7 @@ Return ONLY a JSON object with exactly these keys:
 - "goal": one English sentence describing what the learner should accomplish.
 - "persona": 2-3 sentences of scene and character detail so the partner stays in character and keeps the conversation flowing with natural follow-up questions.
 - "opening_line": the partner's natural first spoken line in English — short, in character, and ending in a way that invites the learner to respond.
-- "source": a SHORT Chinese theme tag for the scene (4-8 characters, e.g. "日常生活·点单" or "职场沟通"). This is just a category label, NOT a citation of any real news, article, or person."""
+- "source": a SHORT Chinese theme tag for the scene (4-8 characters, e.g. "日常生活·点单" or "职场沟通"). This is just a category label, NOT a citation of any real news, article, or person.""" + _CUES
 
 
 _SUGGEST = """You suggest fresh English speaking-practice role-plays for Chinese learners.
@@ -48,7 +51,7 @@ Return ONLY a JSON object with exactly these keys:
 - "goal": one English sentence describing what the learner should accomplish.
 - "persona": 2-3 sentences of scene and character detail so the partner stays in character with natural follow-up questions.
 - "opening_line": the partner's natural first spoken line in English — short, in character, inviting the learner to respond.
-- "source": a SHORT Chinese theme tag for the scene (4-8 characters, e.g. "生活灵感·邻里" or "旅行见闻"). This is a category label only, NOT a citation of any real news, article, or person."""
+- "source": a SHORT Chinese theme tag for the scene (4-8 characters, e.g. "生活灵感·邻里" or "旅行见闻"). This is a category label only, NOT a citation of any real news, article, or person.""" + _CUES
 
 
 async def _generate(client: DeepSeekClient, messages: list[dict], temperature: float) -> CustomScene:
@@ -56,13 +59,25 @@ async def _generate(client: DeepSeekClient, messages: list[dict], temperature: f
         raw = await client.chat(
             messages,
             temperature=temperature,
-            max_tokens=600,
+            max_tokens=900,
             response_format={"type": "json_object"},
         )
     except DeepSeekError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
-        return CustomScene(**json.loads(raw))
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            cues = data.get("practice_cues")
+            valid = {}
+            if isinstance(cues, list):
+                for item in cues[:3]:
+                    try:
+                        cue = PracticeCue.model_validate(item)
+                    except ValidationError:
+                        continue
+                    valid.setdefault(cue.keyword.casefold(), cue)
+            data["practice_cues"] = list(valid.values())
+        return CustomScene.model_validate(data)
     except (json.JSONDecodeError, ValidationError, TypeError) as exc:
         raise HTTPException(status_code=502, detail="Could not build scene") from exc
 

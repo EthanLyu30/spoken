@@ -8,6 +8,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Buddy } from "../components/Buddy";
+import { CorrectionReview } from "../components/CorrectionReview";
 import { PracticeFeedbackInvite } from "../components/FeedbackEntry";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { Button } from "../components/ui/Button";
@@ -20,6 +21,7 @@ import { useWords } from "../store/words";
 import { persistSessionOnce } from "../lib/sessionSave";
 import { getAuthGeneration } from "../lib/authToken";
 import { getScenario } from "../data/scenarios";
+import { includeMarkedCorrections } from "../lib/practiceCorrections";
 
 const SCORE_COLORS = ["#ff6f5e", "#ff9f45", "#41c08c", "#57b7e8"];
 
@@ -31,6 +33,7 @@ export default function Report() {
   const scenarioId = useSession((s) => s.scenarioId);
   const practiceId = useSession((s) => s.practiceId);
   const messages = useSession((s) => s.messages);
+  const marked = useSession((s) => s.markedCorrections);
   const isCustom = scenarioId === "custom";
   const customScene = useCustomScene((s) => s.scene);
   const scenario =
@@ -71,9 +74,10 @@ export default function Report() {
     )
       .then((f) => {
         if (myId !== reqId.current || ctrl.signal.aborted || generation !== getAuthGeneration()) return;
-        setFeedback(f);
+        const result = includeMarkedCorrections(f, marked);
+        setFeedback(result);
         if (practiceId)
-          void persistSessionOnce(scenarioId, messages, f, practiceId, generation)
+          void persistSessionOnce(scenarioId, messages, result, practiceId, generation)
             .then(() => { if (generation === getAuthGeneration() && !ctrl.signal.aborted) setSaved(true); })
             .catch(() => { if (generation === getAuthGeneration() && !ctrl.signal.aborted) setSaveError(true); });
       })
@@ -179,7 +183,7 @@ export default function Report() {
               <Button onClick={() => setAttempt((value) => value + 1)}>
                 重试生成
               </Button>
-              <Link to={`/practice/${scenarioId}`}>
+              <Link to={`/prepare/${scenarioId}`}>
                 <Button variant="soft">回到对话</Button>
               </Link>
               <Link to="/">
@@ -248,33 +252,7 @@ export default function Report() {
                 </div>
               </section>
 
-              <section className="card p-6">
-                <h2 className="font-display text-lg font-semibold text-ink">
-                  纠错 · Corrections
-                </h2>
-                {feedback.corrections.length === 0 ? (
-                  <p className="mt-3 text-sm text-muted">
-                    这次没有明显的语法错误，很棒！
-                  </p>
-                ) : (
-                  <div className="mt-4 space-y-3">
-                    {feedback.corrections.map((c, i) => (
-                      <div key={i} className="rounded-2xl bg-surface-2 p-4">
-                        <p className="text-sm text-muted line-through">
-                          <InteractiveEnglishText text={c.original} />
-                        </p>
-                        <p
-                          className="mt-1 text-sm font-bold"
-                          style={{ color: "var(--leaf-deep)" }}
-                        >
-                          <InteractiveEnglishText text={c.suggestion} />
-                        </p>
-                        <p className="mt-1 text-xs text-muted">{c.note}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
+              <CorrectionReview corrections={feedback.corrections} messages={messages} scenarioId={scenarioId} />
             </div>
 
             <div className="mt-6 grid gap-6 md:grid-cols-2">
@@ -349,7 +327,7 @@ export default function Report() {
             </div>
 
             <div className="mt-7 flex flex-wrap justify-center gap-3 print:hidden">
-              <Link to={`/practice/${scenarioId}`}>
+              <Link to={`/prepare/${scenarioId}`}>
                 <Button size="lg">
                   <RotateCcw className="h-5 w-5" /> 再来一局
                 </Button>

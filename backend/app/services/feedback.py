@@ -13,7 +13,8 @@ from pydantic import ValidationError
 
 from app.data.scenarios import ScenarioDef
 from app.schemas.chat import ChatMessage
-from app.schemas.feedback import FeedbackResponse
+from app.schemas.feedback import Correction, FeedbackResponse
+from app.services.corrections import ground_corrections
 from app.services.deepseek import DeepSeekClient, DeepSeekError
 
 _SYSTEM = """You are a warm, encouraging English-speaking coach reviewing a short practice conversation between a Chinese learner (role: Learner) and an AI partner (role: Partner). Assess ONLY the learner's English.
@@ -22,7 +23,7 @@ Return a single JSON object, no prose, with exactly these keys:
 - "overall": integer 0-100, an encouraging holistic score.
 - "summary": one or two short, friendly sentences (English; a short Chinese clause is fine).
 - "scores": array of exactly 4 objects for fluency, grammar, vocabulary and task completion. Each is {"key","label_en","label_zh","score"} with key in [fluency, grammar, vocabulary, task] and score 0-100.
-- "corrections": array (0-4) of the learner's most useful fixes, each {"original","suggestion","note"}, where note is a brief Chinese explanation.
+- "corrections": array (0-4) of useful fixes, each {"original","suggestion","note","category","turn_index"}. Choose category from articles, tense, agreement, word_order, sentence_structure, prepositions, word_choice. Prioritize grammar and sentence structure over word choice. Copy original verbatim from the learner's message, using only the relevant sentence or phrase. Use that message's zero-based index as turn_index. Give a natural correction and briefly explain the rule in Chinese.
 - "phrases": array (0-5) of natural words/phrases the learner could use next time, each {"text","note"} with a short Chinese gloss.
 - "tip": one actionable Chinese tip for next time.
 
@@ -33,7 +34,8 @@ def build_feedback_messages(
     scenario: ScenarioDef, history: list[ChatMessage]
 ) -> list[dict[str, str]]:
     lines = [
-        f"{'Learner' if m.role == 'user' else 'Partner'}: {m.content}" for m in history
+        f"[{i}] {'Learner' if m.role == 'user' else 'Partner'}: {m.content}"
+        for i, m in enumerate(history)
     ]
     transcript = "\n".join(lines)
     user = (
@@ -54,12 +56,21 @@ async def generate_feedback(
     raw = await client.chat(
         messages,
         temperature=0.3,
-        max_tokens=900,
+        max_tokens=1100,
         response_format={"type": "json_object"},
     )
     try:
         data = json.loads(raw)
         data["scenario_id"] = scenario.id
+        if isinstance(data.get("corrections"), list):
+            corrections = []
+            for item in data["corrections"]:
+                if isinstance(item, dict):
+                    try:
+                        corrections.append(Correction.model_validate({**item, "marked": False}))
+                    except ValidationError:
+                        continue
+            data["corrections"] = ground_corrections(corrections, history)[:4]
         return FeedbackResponse(**data)
     except (json.JSONDecodeError, ValidationError, TypeError) as exc:
         raise DeepSeekError(f"could not parse feedback: {exc}") from exc

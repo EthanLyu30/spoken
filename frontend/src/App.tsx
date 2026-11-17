@@ -15,6 +15,7 @@ import Home from "./pages/Home";
 // few pages use — e.g. echarts on Profile/Progress — stay split.
 const Scenes = lazy(() => import("./pages/Scenes"));
 const Conversation = lazy(() => import("./pages/Conversation"));
+const PracticePrep = lazy(() => import("./pages/PracticePrep"));
 const Report = lazy(() => import("./pages/Report"));
 const Progress = lazy(() => import("./pages/Progress"));
 const WordBag = lazy(() => import("./pages/WordBag"));
@@ -37,7 +38,7 @@ export default function App() {
   const resolutionError = useAuth((s) => s.resolutionError);
   const focused = location.pathname.startsWith("/practice/");
   const section = location.pathname.split("/")[1] || "home";
-  const hasSkipTarget = focused || section === "feedback" || ["/", "/scenes", "/custom", "/interview"].includes(location.pathname);
+  const hasSkipTarget = focused || section === "prepare" || section === "feedback" || ["/", "/scenes", "/custom", "/interview"].includes(location.pathname);
   // Account resolution must never hide the routes: Home, Scenes and practice
   // remain usable while `/auth/me` validates in the background. Only an
   // unresolved credential shows a non-blocking notice.
@@ -91,6 +92,7 @@ export default function App() {
             <Route path="/scenes" element={<Scenes />} />
             <Route path="/custom" element={<CustomScenePage />} />
             <Route path="/interview" element={<Interview />} />
+            <Route path="/prepare/:scenarioId" element={<PracticePrep />} />
             <Route
               path="/practice/:scenarioId"
               element={<Conversation key={location.pathname} />}

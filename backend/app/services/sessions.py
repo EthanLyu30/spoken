@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from sqlalchemy import desc, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
-from app.models.session import PracticeSession, SkillScore, Turn
+from app.data.scenarios import SCENARIOS
 from app.models.progress import LearningEvent
+from app.models.session import PracticeSession, SkillScore, Turn
 from app.schemas.session import ExpiredSessionReceipt, SaveSessionRequest, SessionSummary
 from app.services import practice, progress
+from app.services.corrections import ground_corrections, repeated_focus
 
 # Keep storage bounded: only retain the most recent N sessions.
 SESSION_KEEP = 200
@@ -47,6 +49,7 @@ def create_session(db: Session, client_id: str, payload: SaveSessionRequest,
         overall=payload.overall,
         summary=payload.summary,
         tip=payload.tip,
+        corrections=[entry.model_dump() for entry in ground_corrections(payload.corrections, payload.messages)],
         turns=[
             Turn(idx=i, role=m.role, content=m.content)
             for i, m in enumerate(payload.messages)
@@ -84,6 +87,7 @@ def prune_sessions(db: Session, client_id: str, keep: int = SESSION_KEEP) -> Non
     stale = list(
         db.scalars(
             select(PracticeSession)
+            .options(load_only(PracticeSession.id))
             .where(PracticeSession.client_id == client_id)
             .order_by(desc(PracticeSession.created_at))
             .offset(keep)
@@ -114,12 +118,13 @@ def get_session(db: Session, client_id: str, session_id: int) -> PracticeSession
 
 
 def progress_sessions(db: Session, client_id: str) -> dict:
-    """Bound the overview to metadata for 50 sessions and scores for the newest 8."""
-    summaries = [SessionSummary.model_validate(row) for row in db.execute(
+    """Read recent session metadata and correction tags without loading messages."""
+    rows = db.execute(
         select(PracticeSession.id, PracticeSession.scenario_id, PracticeSession.overall,
-               PracticeSession.created_at)
+               PracticeSession.created_at, PracticeSession.corrections)
         .where(PracticeSession.client_id == client_id)
-        .order_by(desc(PracticeSession.created_at)).limit(50))]
+        .order_by(desc(PracticeSession.created_at), desc(PracticeSession.id)).limit(50)).all()
+    summaries = [SessionSummary.model_validate(row) for row in rows]
     recent = summaries[:practice.INSIGHTS_RECENT]
     by_session = {session.id: [] for session in recent}
     if recent:
@@ -131,6 +136,9 @@ def progress_sessions(db: Session, client_id: str) -> dict:
             by_session[score.session_id].append(score)
     return {"sessions": summaries,
             "insights": practice.insights_from_scores(list(by_session.values())),
+            "correction_focus": repeated_focus(
+                ((row.scenario_id, row.corrections) for row in rows), {scene.id for scene in SCENARIOS},
+            ),
             "latest": {"id": recent[0].id,
                        "scores": [dict(score._mapping) for score in by_session[recent[0].id]]}
                       if recent else None}

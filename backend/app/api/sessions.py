@@ -27,6 +27,7 @@ def _detail(session: PracticeSession) -> SessionDetail:
             for s in session.scores
         ],
         messages=[ChatMessage(role=t.role, content=t.content) for t in session.turns],
+        corrections=session.corrections,
     )
 
 

@@ -56,6 +56,22 @@ def test_feedback_success():
         app.dependency_overrides.clear()
 
 
+def test_feedback_anchors_categorized_corrections_to_learner_turns():
+    valid = {"original": "a latte please", "suggestion": "a latte, please", "note": "加逗号",
+             "category": "sentence_structure", "turn_index": 1}
+    assistant = {**valid, "original": "What can I get you?", "turn_index": 0}
+    fabricated = {**valid, "original": "a missing quote"}
+    app.dependency_overrides[get_client] = lambda: _StubClient(json.dumps({
+        **VALID, "corrections": [assistant, valid, fabricated, valid],
+    }))
+    try:
+        response = client.post("/api/feedback", json=_conversation())
+        assert response.status_code == 200
+        assert response.json()["corrections"] == [{**valid, "marked": False}]
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_feedback_unknown_scenario_404():
     resp = client.post(
         "/api/feedback",

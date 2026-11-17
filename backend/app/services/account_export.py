@@ -120,6 +120,7 @@ def _sessions(db: Session, owner: str) -> list[dict[str, Any]]:
             "overall": session.overall,
             "summary": session.summary or "",
             "tip": session.tip or "",
+            "corrections": session.corrections,
             "created_at": _iso(session.created_at),
             "turns": [
                 {"idx": turn.idx, "role": turn.role, "content": turn.content}

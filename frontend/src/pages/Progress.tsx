@@ -26,6 +26,7 @@ import { getScenario } from "../data/scenarios";
 import { tokens } from "../lib/tokens";
 import { interviewProgressSummary } from "../lib/interviewScoring";
 import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
+import { correctionDrills, isCorrectionCategory } from "../lib/practiceCorrections";
 
 const EChart = lazy(() =>
   import("../components/EChart").then((module) => ({ default: module.EChart })),
@@ -60,6 +61,7 @@ export default function Progress() {
     stats,
     practice,
     insights,
+    correctionFocus,
     latest,
     status,
     errors,
@@ -459,6 +461,31 @@ export default function Progress() {
             ) : null}
           </section>
         </div>
+        {Boolean(correctionFocus?.length) && !sessionsFailed && (
+          <section className="learning-panel mb-6" aria-labelledby="correction-focus-heading">
+            <div className="learning-section-title">
+              <h2 id="correction-focus-heading">优先复练</h2>
+              <Target size={20} />
+            </div>
+            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {correctionFocus?.map(({ category, sessions, turns, scenario_id }) => {
+                if (!isCorrectionCategory(category)) return null;
+                const drill = correctionDrills[category];
+                const scene = getScenario(scenario_id) ?? getScenario("cafe")!;
+                return (
+                  <li key={category} className="min-w-0 rounded-2xl bg-surface-2 p-4">
+                    <h3 className="font-display font-bold text-ink">{drill.label}</h3>
+                    <p className="mt-1 text-sm text-muted">近期有 {sessions} 次练习、{turns} 句话出现过</p>
+                    <p className="mt-2 text-sm leading-relaxed text-ink">{drill.task}</p>
+                    <Link to={`/prepare/${scene.id}?focus=${category}`} className="mt-2 inline-flex min-h-9 items-center gap-1 text-sm font-bold text-ink underline underline-offset-2">
+                      在{scene.titleZh}练{drill.label} <ArrowRight size={16} />
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
         <section className="learning-history">
           <div className="learning-section-title">
             <div>

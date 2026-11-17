@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.chat import ChatMessage
-from app.schemas.feedback import SkillScore
+from app.schemas.feedback import Correction, CorrectionFocus, SkillScore
 from app.schemas.practice import Insights
 
 
@@ -18,6 +18,7 @@ class SaveSessionRequest(BaseModel):
     summary: str = ""
     tip: str = ""
     scores: list[SkillScore] = Field(default_factory=list)
+    corrections: list[Correction] = Field(default_factory=list)
 
 
 class SessionSummary(BaseModel):
@@ -34,6 +35,7 @@ class SessionDetail(SessionSummary):
     tip: str
     scores: list[SkillScore]
     messages: list[ChatMessage]
+    corrections: list[Correction] = Field(default_factory=list)
 
 
 class LatestSessionScores(BaseModel):
@@ -45,6 +47,7 @@ class ProgressSessions(BaseModel):
     sessions: list[SessionSummary]
     insights: Insights
     latest: LatestSessionScores | None
+    correction_focus: list[CorrectionFocus] = Field(default_factory=list)
 
 
 class ExpiredSessionReceipt(SessionSummary):

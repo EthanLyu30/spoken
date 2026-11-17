@@ -91,8 +91,8 @@ export function useProgressData(owner: string) {
     };
     // Snapshot data is for immediate rendering only; the resource owns freshness.
     getProgressSessions(controller.signal, force)
-      .then(({ sessions, insights, latest }) => {
-        update({ sessions, insights, latest, status: "ready", sessionsPending: false, insightsPending: false });
+      .then(({ sessions, insights, latest, correction_focus }) => {
+        update({ sessions, insights, latest, correctionFocus: correction_focus, status: "ready", sessionsPending: false, insightsPending: false });
       })
       .catch(() => failed("sessions", { status: "error", sessionsPending: false, insightsPending: false }));
     getStats(controller.signal, force)

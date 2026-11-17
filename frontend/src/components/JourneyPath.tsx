@@ -14,7 +14,7 @@ export function JourneyPath({ scenarios }: { scenarios: Scenario[] }) {
           return (
             <li key={s.id}>
               <Link
-                to={`/practice/${s.id}`}
+                to={`/prepare/${s.id}`}
                 className={`journey-stop stop-${i + 1}`}
               >
                 <span className="stop-icon">

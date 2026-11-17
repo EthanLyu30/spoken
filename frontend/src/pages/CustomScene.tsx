@@ -32,7 +32,7 @@ export default function CustomScenePage() {
     try {
       const scene = await createCustomScene(description);
       setScene(scene);
-      navigate("/practice/custom");
+      navigate("/prepare/custom");
     } catch {
       setError(true);
       setLoading(false);

@@ -70,7 +70,7 @@ export function DailyScenePick() {
   function play() {
     if (!scene) return;
     setActive(scene);
-    navigate("/practice/custom");
+    navigate("/prepare/custom");
   }
 
   return (

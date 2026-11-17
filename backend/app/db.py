@@ -162,14 +162,17 @@ def _migrate_telemetry_errors() -> None:
 
 
 def _migrate_session_identity() -> None:
-    """Keep legacy rows unchanged; idempotency applies to new client IDs only."""
+    """Keep legacy sessions readable, with empty corrections on old rows."""
     with engine.begin() as conn:
         if _url.startswith("sqlite"):
             existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sessions)")}
             if "client_session_id" not in existing:
                 conn.exec_driver_sql("ALTER TABLE sessions ADD COLUMN client_session_id VARCHAR(64)")
+            if "corrections" not in existing:
+                conn.exec_driver_sql("ALTER TABLE sessions ADD COLUMN corrections JSON NOT NULL DEFAULT '[]'")
         else:
             conn.exec_driver_sql("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS client_session_id VARCHAR(64)")
+            conn.exec_driver_sql("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS corrections JSON NOT NULL DEFAULT '[]'")
         conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS uq_sessions_owner_practice ON sessions (client_id, client_session_id)")
 
 

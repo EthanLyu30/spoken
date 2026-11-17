@@ -47,6 +47,28 @@ def test_list_sessions_returns_saved():
     assert {"id", "scenario_id", "overall", "created_at"} <= set(rows[0].keys())
 
 
+def test_saved_sentence_marks_drive_owner_scoped_repeated_focus():
+    owner = TestClient(app, headers={"X-Client-Id": "correction-focus-owner"})
+    other = TestClient(app, headers={"X-Client-Id": "correction-focus-other"})
+    payload = _payload()
+    payload["messages"][1]["content"] = "I would like latte please."
+    mark = {"original": "latte", "suggestion": "a latte", "note": "可数名词前加 a",
+            "category": "articles", "turn_index": 1, "marked": True}
+    payload["corrections"] = [mark, {**mark, "suggestion": "a large latte"}, {**mark, "turn_index": 0}]
+    first = owner.post("/api/sessions", json={**payload, "client_session_id": "repeat-1"})
+    assert first.status_code == 201
+    sid = first.json()["id"]
+    assert owner.get(f"/api/sessions/{sid}").json()["corrections"] == [mark]
+    assert owner.get("/api/progress/sessions").json()["correction_focus"] == []
+    assert other.post("/api/sessions", json=payload).status_code == 201
+    assert owner.get("/api/progress/sessions").json()["correction_focus"] == []
+    assert owner.post("/api/sessions", json={**payload, "client_session_id": "repeat-2"}).status_code == 201
+    assert owner.get("/api/progress/sessions").json()["correction_focus"] == [
+        {"category": "articles", "sessions": 2, "turns": 2, "scenario_id": "cafe"},
+    ]
+    assert other.get(f"/api/sessions/{sid}").status_code == 404
+
+
 def test_get_missing_session_returns_404():
     assert client.get("/api/sessions/999999").status_code == 404
 

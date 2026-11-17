@@ -176,7 +176,8 @@ def test_overview_two_thin_queries_preserves_insights_and_latest_radar(engine, c
         response = overview_client(engine).get("/api/progress/sessions")
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == {"sessions", "insights", "latest"}
+    assert set(body) == {"sessions", "insights", "latest", "correction_focus"}
+    assert body["correction_focus"] == []
     assert body["insights"] == old_insights
     assert len(body["sessions"]) == min(count, 50)
     assert all(set(row) == {"id", "scenario_id", "overall", "created_at"} for row in body["sessions"])

@@ -8,6 +8,12 @@ role-play and assessment code paths can run without a catalogue entry.
 from pydantic import BaseModel, Field
 
 
+class PracticeCue(BaseModel):
+    keyword: str = Field(min_length=1, max_length=80)
+    meaning: str = Field(min_length=1, max_length=120)
+    sentence: str = Field(min_length=1, max_length=200)
+
+
 class CustomScene(BaseModel):
     title: str = Field(min_length=1, max_length=80)
     title_zh: str = Field(default="", max_length=80)
@@ -18,6 +24,7 @@ class CustomScene(BaseModel):
     # A short Chinese theme / inspiration tag (NOT a real news citation),
     # e.g. "日常生活·邻里" or "职场沟通". Display-only.
     source: str = Field(default="", max_length=60)
+    practice_cues: list[PracticeCue] = Field(default_factory=list, max_length=3)
 
 
 class CustomSceneRequest(BaseModel):
