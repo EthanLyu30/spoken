@@ -116,11 +116,15 @@ feedback string explaining what worked or which detail to retry. All supplied te
 Judge meaning_preserved against the Chinese and the reference. Require the same speaker, time, negation,
 quantities and important details. A fluent answer that drops or invents a detail is incomplete.
 For focus_correct check the selected edit in its own clause. A correct form somewhere else cannot compensate
-for an error at the target. When it concerns tense, require the intended time and aspect, even with another
-verb. For articles, agreement, order or collocation check the same distinction in context. Accept idiomatic
+for an error at the target. When selected_article is supplied, it names the specific noun phrase being tested.
+For tense, require the intended time and aspect, even with another verb. For articles, agreement, order or
+collocation check the same distinction in context. Accept idiomatic
 alternatives, contractions, synonyms, and reordered clauses that convey the details and demonstrate the
 corrected usage. Do not demand a verbatim match. Ignore harmless punctuation and capitalization in spoken English.
-For natural check that the English works as the intended utterance or fragment. Do not write the answer in feedback."""
+For natural check that the English works as the intended utterance or fragment. In feedback, discuss only
+the selected edit. If it is correct but the translation fails, briefly explain the actual meaning or
+naturalness issue. Do not suggest unrelated grammar edits, repeat an edit the learner already made,
+or write out the answer."""
 
 _GRAMMAR_NOTE = re.compile(r"(?:这里|此处|这个句子|这句话|描述[过去昨天]+的动作).{0,16}"
                            r"(?:用|加|改|省略|删|注意).{0,8}(?:动词|冠词|时态|过去式|过去时|单复数|主谓一致|介词)")
@@ -362,10 +366,10 @@ def _added_definite_articles(before: list[str], after: list[str]) -> dict[int, t
     }
 
 
-def _grounded_definite_articles(
+def _selected_definite_positions(
     exercise: TranslationExercise, reference: list[str],
-) -> tuple[_GroundedArticle, ...] | None:
-    """Return grounded corrections to 'the'. Empty means unresolved, None means another focus."""
+) -> tuple[int, ...] | None:
+    """Locate corrections to 'the'. Empty means unresolved, None means another focus."""
     if exercise.focus.category != "articles":
         return None
     before, after = _words(exercise.focus.original), _words(exercise.focus.suggestion)
@@ -383,11 +387,20 @@ def _grounded_definite_articles(
         matches = [i for i in matches if all(changed.get(i + offset) == old for offset, old in selected.items())]
     if len(matches) != 1:
         return ()
+    return tuple(matches[0] + offset for offset in selected)
+
+
+def _grounded_definite_articles(
+    exercise: TranslationExercise, reference: list[str],
+) -> tuple[_GroundedArticle, ...] | None:
+    positions = _selected_definite_positions(exercise, reference)
+    if not positions:
+        return None if positions is None else ()
     # Require a textual cue before asking the model to produce demonstratives.
     partner = _words(exercise.previous_partner_message, keep_stop=True)
     articles = []
-    for index in selected:
-        article = _ground_article(reference, matches[0] + index, partner)
+    for position in positions:
+        article = _ground_article(reference, position, partner)
         if article is None:
             return ()
         articles.append(article)
@@ -581,11 +594,17 @@ async def check_translation(exercise: TranslationAttempt, client: DeepSeekClient
     repeated_error = attempt == _words(exercise.original)
     # Also catch the selected mistake when the learner repaired every other error.
     old, new = _words(exercise.focus.original), _words(exercise.focus.suggestion)
+    short_definite = exercise.focus.category == "articles" and new == ["the"]
+    selected = _selected_definite_positions(exercise, _words(exercise.reference, keep_stop=True)) if short_definite else None
     if new and old != new:
-        positions = [i for i in range(len(reference)) if reference[i:i + len(new)] == new]
+        positions = selected if selected is not None else tuple(
+            i for i in range(len(reference)) if reference[i:i + len(new)] == new
+        )
         if len(positions) == 1:
             i = positions[0]
             repeated_error |= attempt == reference[:i] + old + reference[i + len(new):]
+    if repeated_error and short_definite:
+        return TranslationGrade(correct=False, feedback="这里指的是特定对象，试着用定冠词。")
     if repeated_error or not re.search(r"[a-z]", exercise.attempt, re.I):
         return TranslationGrade(correct=False, feedback="再看一遍中文，把这处用法改过来。")
     if _same_demonstrative(exercise, reference, attempt):
@@ -593,5 +612,9 @@ async def check_translation(exercise: TranslationAttempt, client: DeepSeekClient
     if mismatch := _clear_mismatch(exercise, reference, attempt):
         return TranslationGrade(correct=False, feedback=mismatch)
 
-    grade = await _ask(client, _GRADE, exercise.model_dump(), TranslationAssessment.model_validate_json)
+    payload = exercise.model_dump()
+    if selected and len(selected) == 1:
+        if noun := _noun_phrase(reference, selected[0] + 1):
+            payload["selected_article"] = " ".join(("the", *noun))
+    grade = await _ask(client, _GRADE, payload, TranslationAssessment.model_validate_json)
     return TranslationGrade(correct=grade.meaning_preserved and grade.focus_correct and grade.natural, feedback=grade.feedback)

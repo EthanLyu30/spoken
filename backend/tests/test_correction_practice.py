@@ -77,6 +77,27 @@ def test_an_exact_reference_passes_and_repeating_the_recorded_mistake_fails_with
     assert not coach.prompts
 
 
+@pytest.mark.parametrize(("article", "correct", "feedback"), [
+    ("a", False, "这里指的是特定对象，试着用定冠词。"),
+    ("the", True, "原意和这处用法都说对了。"),
+])
+def test_short_article_grading_only_comments_on_the_selected_article(monkeypatch, article, correct, feedback):
+    coach = Coach({"meaning_preserved": True, "focus_correct": False, "natural": True,
+                   "feedback": "那只狗要用定冠词 the，park 前也应有 the。"})
+    monkeypatch.setitem(app.dependency_overrides, get_client, lambda: coach)
+    result = client.post("/api/correction-practice/check", json={
+        "original": "I saw a dog then went to park.",
+        "reference": "I saw the dog then went to the park.",
+        "previous_partner_message": "Did you see the dog?",
+        "focus": {"original": "a", "suggestion": "the", "category": "articles"},
+        "chinese": "我看见你说的那只狗了，然后去了公园。",
+        "attempt": f"I saw {article} dog then went to the park.",
+    })
+    assert result.status_code == 200
+    assert result.json() == {"correct": correct, "feedback": feedback}
+    assert not coach.prompts
+
+
 def test_incomplete_grades_and_whitespace_answers_never_pass(monkeypatch):
     coach = Coach({"natural": True, "focus_correct": True, "feedback": "不错。"})
     monkeypatch.setitem(app.dependency_overrides, get_client, lambda: coach)
