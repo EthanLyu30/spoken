@@ -43,6 +43,7 @@ _AI_PREFIXES = (
     "/api/feedback",
     "/api/hint",
     "/api/turn-correction",
+    "/api/correction-practice/",
     "/api/custom-scenario",
     "/api/scenario-suggestion",
     "/api/dictionary/lookup",
@@ -53,6 +54,8 @@ _AUTH_PREFIXES = ("/api/auth/login", "/api/auth/register", "/api/auth/password-r
 
 def limit_for(path: str) -> tuple[int, int] | None:
     """Return (requests, window seconds) for a costly path."""
+    if path == "/api/progress/coaching/plan":
+        return 6, 60
     if path.startswith(_AUTH_PREFIXES):
         return 20, 60
     if path.startswith(_VOICE_PREFIXES):

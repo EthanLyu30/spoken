@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -23,9 +23,11 @@ class PracticeSession(Base):
     client_session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     scenario_id: Mapped[str] = mapped_column(String(64), index=True)
     overall: Mapped[int] = mapped_column(Integer, default=0)
+    scored: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     summary: Mapped[str] = mapped_column(Text, default="")
     tip: Mapped[str] = mapped_column(Text, default="")
     corrections: Mapped[list[dict]] = mapped_column(JSON, default=list, server_default="[]")
+    custom: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
 
     turns: Mapped[list[Turn]] = relationship(
@@ -34,6 +36,10 @@ class PracticeSession(Base):
     scores: Mapped[list[SkillScore]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
+
+    @property
+    def reported_score(self) -> int | None:
+        return self.overall if self.scored else None
 
 
 class Turn(Base):

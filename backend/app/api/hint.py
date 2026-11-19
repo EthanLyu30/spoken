@@ -3,7 +3,6 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import ValidationError
 
 from app.api.chat import _resolve_scenario, get_client
 from app.schemas.hint import HintRequest, HintResponse
@@ -50,7 +49,10 @@ async def hint(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
         data = json.loads(raw)
-        items = [s for s in data.get("suggestions", []) if isinstance(s, str) and s.strip()]
-        return HintResponse(suggestions=items[:3])
-    except (json.JSONDecodeError, ValidationError, TypeError) as exc:
+        choices = data.get("suggestions") if isinstance(data, dict) else None
+        if not isinstance(choices, list):
+            raise ValueError("Expected a list of suggestions")
+        items = [s.strip() for s in choices if isinstance(s, str) and 0 < len(s.strip()) <= 600]
+        return HintResponse(suggestions=list(dict.fromkeys(items))[:3])
+    except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=502, detail="Could not parse hints") from exc

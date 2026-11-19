@@ -6,7 +6,16 @@ NATIVE_START_FIELDS = {"reason", "error_code", "state_before", "state_after", "v
 NATIVE_END_FIELDS = {"reason", "error_code", "state_at_event", "watchdog_budget_ms", "pause_count", "resume_count", "paused_duration_ms", "visibility_state"}
 ASR_ATTEMPT_FIELDS = {"stage", "attempt", "fallback_reason", "audio_bytes", "result_class"}
 PRONUNCIATION_FIELDS = {"entry", "audio_bytes"}
-PLAYBACK_FIELDS = {"playback_started", "reason", "error_code", "voice_type"}
+SPEECH_COMPLETION_FIELDS = {
+    "voice_initial_state", "voice_discovery_trigger", "voice_discovery_ms",
+    "voice_recheck_ms", "speech_failure_stage", "speech_fallback",
+    "speech_fallback_failure", "speech_fallback_error_code", "voice_recheck_trigger",
+}
+VoiceDiscoveryTrigger = Literal["initial", "event", "poll", "deadline", "aborted"]
+NativeErrorCode = Literal["canceled", "interrupted", "audio-busy", "audio-hardware", "network",
+                          "synthesis-unavailable", "synthesis-failed", "language-unavailable",
+                          "voice-unavailable", "text-too-long", "invalid-argument", "not-allowed", "unknown"]
+PLAYBACK_FIELDS = {"playback_started", "reason", "error_code", "voice_type", "voice_availability"} | SPEECH_COMPLETION_FIELDS
 TEST_FIELDS = {"test_run_id"}
 GLOBAL_DIAGNOSTIC_FIELDS = {"test_run_id", "provider_code"}
 SINK_DIAGNOSTIC_FIELDS = NATIVE_START_FIELDS | NATIVE_END_FIELDS | ASR_ATTEMPT_FIELDS | PRONUNCIATION_FIELDS | PLAYBACK_FIELDS | GLOBAL_DIAGNOSTIC_FIELDS
@@ -31,12 +40,23 @@ class BrowserTiming(BaseModel):
 
     reason: Literal["started", "startup_timeout", "end_before_start", "speech_error", "speak_exception", "cancelled",
                     "end", "native_error", "completion_timeout"] | None = None
-    error_code: Literal["canceled", "interrupted", "audio-busy", "audio-hardware", "network", "synthesis-unavailable", "synthesis-failed", "language-unavailable", "voice-unavailable", "text-too-long", "invalid-argument", "not-allowed", "unknown"] | None = None
+    error_code: NativeErrorCode | None = None
     state_before: int | None = Field(default=None, ge=0, le=7, strict=True)
     state_after: int | None = Field(default=None, ge=0, le=7, strict=True)
     voice_type: Literal["enhanced", "remote", "local", "unknown"] | None = None
     voice_matched: bool | None = Field(default=None, strict=True)
     playback_started: bool | None = Field(default=None, strict=True)
+    voice_availability: Literal["unsupported", "empty_list", "no_english_voice", "lookup_failed"] | None = None
+    voice_initial_state: Literal["english_available", "unsupported", "empty_list", "no_english_voice", "lookup_failed"] | None = None
+    voice_discovery_trigger: VoiceDiscoveryTrigger | None = None
+    voice_discovery_ms: float | None = Field(default=None, ge=0, le=300_000, strict=True)
+    voice_recheck_ms: float | None = Field(default=None, ge=0, le=300_000, strict=True)
+    voice_recheck_trigger: VoiceDiscoveryTrigger | None = None
+    speech_failure_stage: Literal["voice_discovery", "native_start", "native_end", "local_synthesis", "local_playback", "queue"] | None = None
+    speech_fallback: Literal["no_local_voice", "attempted"] | None = None
+    speech_fallback_failure: Literal["startup_timeout", "end_before_start", "speech_error",
+                                     "speak_exception", "native_error", "completion_timeout"] | None = None
+    speech_fallback_error_code: NativeErrorCode | None = None
     state_at_event: int | None = Field(default=None, ge=0, le=7, strict=True)
     watchdog_budget_ms: float | None = Field(default=None, ge=0, le=3_600_000, strict=True)
     pause_count: int | None = Field(default=None, ge=0, le=100, strict=True)
@@ -75,6 +95,19 @@ class BrowserTiming(BaseModel):
         asr_only = ASR_ATTEMPT_FIELDS - {"audio_bytes"}
         if "playback_started" in supplied and self.operation != "speech.complete":
             raise ValueError("playback_started belongs to speech.complete")
+        if supplied & SPEECH_COMPLETION_FIELDS and self.operation != "speech.complete":
+            raise ValueError("playback diagnostics belong to speech.complete")
+        if self.speech_failure_stage is not None and self.outcome != "error":
+            raise ValueError("failure stage requires an error outcome")
+        if self.speech_fallback_failure is not None and (self.speech_fallback != "attempted" or self.outcome != "error"):
+            raise ValueError("fallback failure requires an attempted fallback and an error outcome")
+        if self.speech_fallback_error_code is not None and self.speech_fallback_failure is None:
+            raise ValueError("fallback error code requires a fallback failure")
+        if "voice_availability" in supplied and (
+            self.operation != "speech.complete" or self.outcome != "error"
+            or self.playback_started is not False or self.reason is not None or self.voice_availability is None
+        ):
+            raise ValueError("voice availability belongs to playback that could not start")
         if self.operation == "speech.complete":
             if (supplied & SINK_DIAGNOSTIC_FIELDS) - PLAYBACK_FIELDS:
                 raise ValueError("fields do not belong to speech.complete")

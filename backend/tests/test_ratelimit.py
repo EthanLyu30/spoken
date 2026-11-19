@@ -6,6 +6,8 @@ from app.main import app
 
 def test_costly_path_rules_cover_ai_voice_and_auth():
     assert limit_for("/api/chat/stream") == (60, 60)
+    assert limit_for("/api/correction-practice/translation") == (60, 60)
+    assert limit_for("/api/correction-practice/check") == (60, 60)
     assert limit_for("/api/asr") == (120, 60)
     assert limit_for("/api/auth/login") == (20, 60)
     assert limit_for("/api/health") is None

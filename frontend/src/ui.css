@@ -1190,20 +1190,12 @@
 .route-report main h1 {
   font-size: 27px;
 }
-.route-report main > section.relative,
 .route-session main section.card {
   border-radius: 0;
   border: 0;
   border-block: 1px solid var(--border);
   background: none;
   padding: 24px 0;
-}
-.route-report main > section.relative > div {
-  gap: 25px;
-}
-.route-report main > section.relative .buddy-art {
-  width: 85px !important;
-  height: 85px !important;
 }
 .route-report main .grid > section.card {
   border: 0;
@@ -2253,12 +2245,6 @@
   }
   .route-report main h1 {
     font-size: 23px;
-  }
-  .route-report main > section.relative > div {
-    gap: 15px;
-  }
-  .route-report main > section.relative .buddy-art {
-    display: none;
   }
   .focus-header {
     height: 65px;

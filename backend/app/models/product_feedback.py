@@ -22,6 +22,7 @@ class ProductFeedback(Base):
     id: Mapped[str] = mapped_column(String(24), primary_key=True)
     request_digest: Mapped[str] = mapped_column(String(64))
     owner_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    guest_owner_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     pilot_id: Mapped[str | None] = mapped_column(String(32), index=True, nullable=True)
     category: Mapped[str] = mapped_column(String(24))
     description: Mapped[str] = mapped_column(Text)

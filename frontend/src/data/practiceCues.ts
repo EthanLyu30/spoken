@@ -1,4 +1,5 @@
 import type { CustomScene } from "../lib/api";
+import type { SceneCue } from "../lib/sceneCuesApi";
 
 type PracticeCue = readonly [keyword: string, meaning: string, sentence: string];
 
@@ -11,8 +12,8 @@ const general: readonly PracticeCue[] = [
 const byScene: Record<string, readonly PracticeCue[]> = {
   cafe: [
     ["a latte", "点一杯拿铁", "I'd like a latte, please."],
-    ["oat milk", "问能否换燕麦奶", "Can I get it with oat milk?"],
-    ["pay by card", "结账时问能否刷卡", "Can I pay by card?"],
+    ["oat milk", "换燕麦奶", "Can I get it with oat milk?"],
+    ["pay by card", "刷卡结账", "Can I pay by card?"],
   ],
   airport: [
     ["check in", "办理登机", "I'd like to check in for my flight."],
@@ -106,4 +107,16 @@ export function practiceCues(scenarioId: string, custom?: CustomScene | null): r
     return custom.practice_cues.map(({ keyword, meaning, sentence }) => [keyword, meaning, sentence]);
   }
   return byScene[scenarioId] ?? general;
+}
+
+function defaultKind(keyword: string): SceneCue["kind"] {
+  if (/[?…]|\.{3}/.test(keyword) || /^(?:if\b|I(?:['’](?:m|ve|d)| (?:am|was))\b)/i.test(keyword)) return "pattern";
+  const expression = keyword.trim().replace(/^(?:a|an|the)\s+/i, "");
+  return /\s/.test(expression) ? "phrase" : "word";
+}
+
+export function defaultSceneCues(scenarioId: string, custom?: CustomScene): SceneCue[] {
+  return practiceCues(scenarioId, custom).map(([keyword, meaning, sentence], index) => ({
+    id: `default-${index + 1}`, kind: defaultKind(keyword), keyword, meaning, sentence,
+  }));
 }

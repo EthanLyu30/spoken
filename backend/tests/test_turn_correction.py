@@ -102,6 +102,56 @@ def test_turn_correction_validates_text_and_scenario():
     ).status_code == 404
 
 
+def test_old_custom_replay_does_not_assume_a_scene(monkeypatch):
+    stub = _Stub(json.dumps({"natural": True, "suggestion": "How much is a repair?", "issues": [], "explanation": "原意保留。"}))
+    monkeypatch.setitem(app.dependency_overrides, get_client, lambda: stub)
+    response = client.post("/api/turn-correction", json=_body(scenario_id="custom", text="How much is a repair?",
+        replay_original="How much is repair?", previous_partner_message="What's broken?"))
+    assert response.status_code == 200
+    prompt = stub.calls[0][0][1]["content"]
+    assert "What's broken?" in prompt and "How much is repair?" in prompt
+    assert "Ordering at a Café" not in prompt
+
+
+def test_exercise_checks_the_target_even_when_the_english_is_natural(monkeypatch):
+    exercise = {"partner_line": "What would you like to borrow?", "task": "用 a 或 an 借一盏露营灯。",
+                "hint": "Could I borrow ___?", "example": "Could I borrow a camping lantern?"}
+    incomplete_grade = {"natural": True, "suggestion": "Could I borrow a camping lantern?", "issues": [],
+                        "explanation": "对方听得懂。再试着用 a 加单数名词开口。"}
+
+    class ChecksExercise(_Stub):
+        async def chat(self, messages, **kwargs):
+            await super().chat(messages, **kwargs)
+            return json.dumps(incomplete_grade if len(self.calls) == 1 else {**incomplete_grade, "task_met": False})
+
+    stub = ChecksExercise("")
+    monkeypatch.setitem(app.dependency_overrides, get_client, lambda: stub)
+    response = client.post("/api/turn-correction", json=_body(text="I'd like to borrow one, please.", practice_exercise=exercise))
+    assert response.status_code == 200
+    assert response.json()["natural"] is True
+    assert response.json()["task_met"] is False
+    assert len(stub.calls) == 2
+    prompt = json.loads(stub.calls[0][0][1]["content"])
+    assert prompt["partner_line"] == exercise["partner_line"]
+    assert prompt["task"] == exercise["task"]
+
+
+def test_guided_past_tense_rejects_an_auxiliary_even_when_the_model_marks_it_complete(monkeypatch):
+    exercise = {"partner_line": "What did you do yesterday?", "task": "告诉同事你昨天发了幻灯片。",
+                "hint": "Yesterday I ___ the slides.", "example": "Yesterday I sent the slides.",
+                "target": {"kind": "past", "form": "sent", "instruction": "用 send 的一般过去式说已经完成的事。"}}
+    stub = _Stub(json.dumps({"natural": True, "task_met": True, "suggestion": "Yesterday I sent the slides.",
+                            "issues": [], "explanation": "练到目标了。"}))
+    monkeypatch.setitem(app.dependency_overrides, get_client, lambda: stub)
+    result = client.post("/api/turn-correction", json=_body(text="I have already sent the slides.", practice_exercise=exercise))
+    assert result.status_code == 200
+    assert result.json()["natural"] is True
+    assert result.json()["task_met"] is False
+    assert "一般过去式" in result.json()["explanation"]
+    retry = client.post("/api/turn-correction", json=_body(text="I sent the slides yesterday.", practice_exercise=exercise))
+    assert retry.json()["task_met"] is True
+
+
 def test_turn_correction_bad_model_json_maps_to_503():
     stub = _Stub("not json")
     app.dependency_overrides[get_client] = lambda: stub

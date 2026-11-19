@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { BookOpen, Check, Plus, Trash2, Volume2 } from "lucide-react";
-import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import { Button } from "../components/ui/Button";
@@ -89,7 +88,6 @@ export default function WordBag() {
 
   return (
     <div className="min-h-screen pb-24">
-      <PlayfulBackground />
       <main className="mx-auto wordbag-page">
         <div className="ui-page-head">
           <div>

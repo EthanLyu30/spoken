@@ -45,7 +45,7 @@ def inbox(monkeypatch):
         return httpx.Response(200, json={"id": f"mail-{len(mail)}"}, request=httpx.Request("POST", url))
     monkeypatch.setattr(httpx, "post", post)
     try:
-        with TestClient(app) as client:
+        with TestClient(app, headers={"X-Client-Id": "feedback-original-device"}) as client:
             yield client, mail
     finally:
         with SessionLocal.begin() as db:
@@ -82,11 +82,78 @@ def get_receipt(client, item):
     return client.get(f"/api/product-feedback/{item['id']}", headers={"X-Feedback-Key": item["receipt_key"]})
 
 
-def test_feedback_is_saved_once_and_private(inbox):
-    client, mail = inbox
+def test_guest_receipt_is_read_only_off_device_and_cannot_be_opened_or_claimed_by_an_account(inbox):
+    client, _ = inbox
+    account = admin_token(client)
     item, payload = submit(client)
+    assert review(client, account, item, 25).status_code == 200
+    path = f"/api/product-feedback/{item['id']}"
+    key = {"X-Feedback-Key": item["receipt_key"]}
+    account_and_key = key | account
+    for headers, expected in [(account_and_key, 404), (key | {"X-Client-Id": "new-device"}, 403)]:
+        assert client.put(f"{path}/claim", headers=headers, json={"wechat": "sample-contact"}).status_code == expected
+    assert client.get(path, headers=account_and_key).status_code == 404
+    assert client.get(path, headers=key | {"X-Client-Id": "new-device"}).json()["can_manage"] is False
+    assert client.post("/api/product-feedback", headers={"X-Client-Id": "new-device"}, json=payload).status_code == 409
+    assert get_receipt(client, item).json()["can_manage"] is True
+    assert client.put(f"{path}/claim", headers=key, json={"wechat": "sample-contact"}).status_code == 200
+    assert get_receipt(client, item).json()["claim_code"]
+    assert client.get(path, headers=key | {"X-Client-Id": "new-device"}).json()["claim_code"] is None
+
+
+def test_registered_receipt_requires_the_owner_even_with_a_shared_link(inbox):
+    client, _ = inbox
+    owner, other = admin_token(client), admin_token(client)
+    item, _ = submit(client, owner)
+    key = {"X-Feedback-Key": item["receipt_key"]}
+    path = f"/api/product-feedback/{item['id']}"
+    assert client.get(path, headers=owner).json()["can_manage"] is True
+    assert client.get(path, headers=key | other).status_code == 404
+    assert get_receipt(client, item).status_code == 404
+
+
+def test_legacy_guest_receipts_still_allow_the_signed_out_holder_to_manage_them(inbox):
+    client, _ = inbox
+    account = admin_token(client)
+    item, _ = submit(client)
+    assert review(client, account, item, 10).status_code == 200
+    with SessionLocal.begin() as db:
+        db.execute(update(ProductFeedback).where(ProductFeedback.id == item["id"]).values(guest_owner_digest=None))
+    path = f"/api/product-feedback/{item['id']}"
+    key = {"X-Feedback-Key": item["receipt_key"], "X-Client-Id": ""}
+    assert client.get(path, headers=key).json()["can_manage"] is True
+    assert client.put(f"{path}/claim", headers=key | account, json={"wechat": "saved-link"}).status_code == 404
+    assert client.put(f"{path}/claim", headers=key, json={"wechat": "saved-link"}).status_code == 200
+
+
+def test_my_feedback_cursor_respects_ownership_and_same_timestamp_order(inbox):
+    client, _ = inbox
+    owner, other = admin_token(client), admin_token(client)
+    owned = [submit(client, owner)[0]["id"] for _ in range(3)]
+    foreign = submit(client, other)[0]["id"]
+    with SessionLocal.begin() as db:
+        db.execute(update(ProductFeedback).where(ProductFeedback.id.in_(owned)).values(created_at=utcnow()))
+    newest, middle, oldest = sorted(owned, reverse=True)
+    url = "/api/product-feedback/mine/page"
+    first = client.get(url, headers=owner, params={"limit": 2})
+    assert first.status_code == 200
+    assert [row["id"] for row in first.json()["items"]] == [newest, middle]
+    assert first.json()["next_cursor"] == middle
+    assert client.get(url, headers=owner, params={"before": foreign}).status_code == 404
+    submit(client, owner)
+    second = client.get(url, headers=owner, params={"before": middle, "limit": 2}).json()
+    assert [row["id"] for row in second["items"]] == [oldest]
+    assert second["next_cursor"] is None
+
+
+@pytest.mark.parametrize(("source", "source_label"), [("scene_report", "课后小结"), ("coaching", "专项复练")])
+def test_feedback_is_saved_once_and_private(inbox, source, source_label):
+    client, mail = inbox
+    item, payload = submit(client, source=source)
     assert item["status"] == "pending"
-    assert get_receipt(client, item).json()["description"] == payload["description"]
+    receipt = get_receipt(client, item).json()
+    assert receipt["description"] == payload["description"]
+    assert receipt["source"] == source
     assert client.get(f"/api/product-feedback/{item['id']}").status_code == 404
     assert get_receipt(client, {**item, "receipt_key": "f" * 64}).status_code == 404
     assert client.get("/api/admin/product-feedback").status_code == 401
@@ -101,6 +168,7 @@ def test_feedback_is_saved_once_and_private(inbox):
     assert item["id"] in notice["text"]
     assert item["receipt_key"] not in notice["text"]
     assert payload["description"] in notice["text"]
+    assert source_label in notice["text"]
 
 
 def test_approval_reserves_and_wechat_is_only_for_an_awarded_receipt(inbox):

@@ -20,6 +20,7 @@ from app.models.monitoring import SiteVisit
 from app.models.practice import PracticeRecord
 from app.models.progress import EarnedBadge, GuestClaim, LearningEvent, ProgressOwner
 from app.models.request_receipt import RequestReceipt
+from app.models.scene_cues import ScenePreparation
 from app.models.session import PracticeSession, SkillScore, Turn
 from app.models.telemetry import AdminAccount, AdminBootstrap
 from app.models.user import AccountAction, User
@@ -143,7 +144,7 @@ def delete_account(payload: PasswordConfirmation, request: Request, db: Session 
     owned_sessions = select(PracticeSession.id).where(PracticeSession.client_id == owner)
     for model in (Turn, SkillScore):
         db.execute(delete(model).where(model.session_id.in_(owned_sessions)))
-    for model in (PracticeSession, PracticeRecord, WordEntry, LearningEvent, EarnedBadge, RequestReceipt, ProgressOwner):
+    for model in (PracticeSession, PracticeRecord, WordEntry, ScenePreparation, LearningEvent, EarnedBadge, RequestReceipt, ProgressOwner):
         db.execute(delete(model).where(model.client_id == owner))
     db.execute(delete(GuestClaim).where(GuestClaim.owner_id == owner))
     db.execute(delete(AccountAction).where(AccountAction.user_id == user.id))

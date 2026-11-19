@@ -66,7 +66,7 @@ export function BrowserGuestHistory() {
                 <h3 className="font-semibold">场景对话</h3>
                 <ul>{history.sessions.map((session) => <li key={session.id} className="break-words py-1">
                   {getScenario(session.scenario_id)?.titleZh ?? (session.scenario_id === "custom" ? "自定义场景" : session.scenario_id)}
-                  {" · "}{session.overall} 分
+                  {" · "}{session.overall === null ? "未评分" : `${session.overall} 分`}
                 </li>)}</ul>
               </div>
               <div>

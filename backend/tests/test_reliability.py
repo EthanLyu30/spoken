@@ -89,8 +89,8 @@ def test_existing_sqlite_history_survives_the_session_identity_migration(monkeyp
         db.init_db()
         db.init_db()  # upgrades are idempotent
         with legacy.connect() as conn:
-            row = conn.exec_driver_sql("SELECT client_id, overall, client_session_id, corrections FROM sessions WHERE id = 1").one()
-            assert tuple(row) == ("old-device", 82, None, "[]")
+            row = conn.exec_driver_sql("SELECT client_id, overall, client_session_id, corrections, custom FROM sessions WHERE id = 1").one()
+            assert tuple(row) == ("old-device", 82, None, "[]", None)
             indexes = {row[1] for row in conn.exec_driver_sql("PRAGMA index_list(sessions)")}
             assert "uq_sessions_owner_practice" in indexes
     finally:

@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.schemas.auth import _EMAIL_RE, _normalize_email
 
 Category = Literal["ui", "feature", "bug", "learning", "other"]
-Source = Literal["home", "profile", "scene_report", "interview_result", "direct"]
+Source = Literal["home", "profile", "scene_report", "interview_result", "coaching", "direct"]
 Award = Literal[10, 25, 50]
 
 

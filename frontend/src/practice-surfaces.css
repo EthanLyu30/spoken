@@ -1,0 +1,68 @@
+@font-face {
+  font-family: "Spoken Reading"; font-weight: 200 900; font-display: swap;
+  src: url("@fontsource-variable/nunito/files/nunito-latin-wght-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spoken Display"; font-weight: 300 700; font-display: swap;
+  src: url("@fontsource-variable/fredoka/files/fredoka-latin-wght-normal.woff2") format("woff2");
+}
+
+/* Shared by the scene catalogue, practice, debrief and return visits. */
+:where(.route-scenes, .route-custom, .route-prepare, .route-practice, .route-report, .route-session, .route-progress) {
+  --muted: #786152;
+  --border: #e7dace;
+  --coral: #f26952;
+  --coral-deep: #b83c2f;
+  --practice-font: "Spoken Reading", "Microsoft YaHei", system-ui, sans-serif;
+  font-family: var(--practice-font); color: var(--ink); background: var(--bg);
+}
+:where(.route-scenes, .route-custom, .route-prepare, .route-practice, .route-report, .route-session, .route-progress)
+  :is(.app-header, .focus-header) { background: var(--bg); }
+:where(.route-scenes, .route-custom, .route-prepare, .route-practice, .route-report, .route-session, .route-progress)
+  :is(.app-header, .focus-header) .wordmark { font-family: "Spoken Display", sans-serif; font-weight: 650; }
+
+.route-scenes .chapter-bar button.active { background: transparent; box-shadow: inset 0 -2px var(--coral); border-radius: 0; }
+.route-scenes .stop-latte { background: var(--bg); }
+.stop-latte b { background: var(--coral-deep); }
+.stop-latte img { width: 82%; height: auto; }
+.route-scenes .stop-label > span { font: 14px/1.4 Georgia, serif; }
+
+.route-practice .practice-context { background: var(--bg); }
+.practice-context[data-scene="cafe"]::before {
+  content: ""; display: block; aspect-ratio: 2.6; margin-bottom: 16px;
+  background: url("./assets/prep/cafe-counter.webp") center 49% / cover;
+}
+.route-practice .chat-message > p:nth-child(2),
+.app-route .review-full-line, .app-route .coaching-example-line {
+  font: 400 clamp(17px, 1.6vw, 22px)/1.5 Georgia, serif;
+}
+.route-practice .practice-composer > .practice-call {
+  min-height: 45px; width: fit-content; max-width: 100%; padding-inline: 20px; border-radius: 10px;
+  background: var(--coral-deep); color: white; font-size: 15px;
+}
+.practice-call:hover:not(:disabled) { filter: brightness(.9); }
+
+.practice-summary {
+  display: flex; align-items: center; justify-content: space-between; gap: clamp(18px, 5vw, 72px);
+  padding: clamp(16px, 3vw, 36px) 0; border-block: 1px solid var(--border);
+}
+.practice-summary > div:first-child { min-width: 0; }
+.practice-summary-scene { color: var(--coral-deep); font-size: 14px; font-weight: 800; overflow-wrap: anywhere; }
+.app-route .practice-summary h1 {
+  font: 800 clamp(24px, 2.9vw, 40px)/1.25 var(--practice-font);
+  letter-spacing: -.035em; margin: 8px 0; overflow-wrap: anywhere;
+}
+.practice-summary-meta { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.practice-summary .report-score { align-self: center; padding-left: 20px; border-left: 1px solid var(--border); }
+.practice-summary .report-score strong { font-family: var(--practice-font); font-variant-numeric: tabular-nums; }
+.route-progress .learning-overview { gap: 0; border-block: 1px solid var(--border); }
+.route-progress .learning-metric { border: 0; border-radius: 0; background: transparent; min-width: 0; }
+.route-progress .learning-metric + .learning-metric { border-left: 1px solid var(--border); }
+@media (max-width: 760px) {
+  .practice-summary { flex-wrap: wrap; gap: 6px; }
+  .practice-summary .report-score { border: 0; padding: 0; display: flex; align-items: baseline; gap: 6px; }
+  .practice-summary .report-score strong { font-size: 30px; }
+  .route-progress .learning-overview { grid-template-columns: 1fr 1fr; }
+  .route-progress .learning-metric:nth-child(odd) { border-left: 0; }
+  .route-progress .learning-metric:nth-child(n+3) { border-top: 1px solid var(--border); }
+}

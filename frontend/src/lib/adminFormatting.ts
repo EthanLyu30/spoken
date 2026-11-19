@@ -18,7 +18,10 @@ const dataDeleteOperations = new Set(['DELETE /api/words/{word_id}']);
 export function modelLabel(trace: AdminTrace): string {
   if (trace.model && !trace.model.startsWith('unknown') && !trace.model.startsWith('browser/')) return trace.model;
   if (trace.source === 'browser') return '浏览器端';
-  if (trace.operation === 'GET /api/scenario-suggestion') return 'AI 场景生成';
+  // Openers, scope redirects and a cached daily scene use these same routes.
+  // A historical row without a model cannot distinguish the branches.
+  if (trace.operation === 'POST /api/chat' || trace.operation === 'POST /api/chat/stream') return '场景对话（无模型记录）';
+  if (trace.operation === 'GET /api/scenario-suggestion') return '场景推荐（无模型记录）';
   if (dataOperations.has(trace.operation) || trace.operation.startsWith('GET /api/')) return '数据读取';
   if (voiceOperation.test(trace.operation)) return '语音引擎';
   if (trace.operation === 'POST /api/sessions' || trace.operation === 'POST /api/practice') return '数据写入';

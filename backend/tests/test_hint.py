@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app.api.chat import get_client
@@ -40,6 +42,15 @@ def test_hint_returns_suggestions():
 def test_hint_unknown_scenario_404():
     resp = client.post("/api/hint", json={"scenario_id": "nope", "messages": []})
     assert resp.status_code == 404
+
+
+@pytest.mark.parametrize("response", [[], {"suggestions": "Hello"}, {"suggestions": [None, " "]}])
+def test_hint_rejects_invalid_or_empty_provider_choices(response):
+    app.dependency_overrides[get_client] = lambda: _Stub(json.dumps(response))
+    try:
+        assert client.post("/api/hint", json=_body()).status_code == 502
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_hint_service_error_503():

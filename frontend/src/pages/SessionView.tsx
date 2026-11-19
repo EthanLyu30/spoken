@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
-import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import { CorrectionReview } from "../components/CorrectionReview";
 import { InteractiveEnglishText } from "../components/dictionary/InteractiveEnglishText";
 import { Button } from "../components/ui/Button";
-import { Ring } from "../components/ui/Ring";
+import { PracticeSummary } from "../components/PracticeSummary";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { getSession, type SessionDetail } from "../lib/api";
 import { getScenario } from "../data/scenarios";
 import { cn } from "../lib/utils";
 import { correctionDrills, isCorrectionCategory } from "../lib/practiceCorrections";
+import { getAuthGeneration } from "../lib/authToken";
 
 const SCORE_COLORS = ["#ff6f5e", "#ff9f45", "#41c08c", "#57b7e8"];
 
@@ -28,6 +28,7 @@ function formatTime(iso: string): string {
 
 export default function SessionView() {
   const { id } = useParams();
+  const [generation] = useState(getAuthGeneration);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
 
@@ -40,7 +41,7 @@ export default function SessionView() {
     const ctrl = new AbortController();
     getSession(num, ctrl.signal)
       .then((d) => {
-        if (!ctrl.signal.aborted) {
+        if (!ctrl.signal.aborted && generation === getAuthGeneration()) {
           setDetail(d);
           setStatus("ready");
         }
@@ -49,26 +50,25 @@ export default function SessionView() {
         if (!ctrl.signal.aborted) setStatus("error");
       });
     return () => ctrl.abort();
-  }, [id]);
+  }, [id, generation]);
 
   const scenario = detail?.scenario_id ? getScenario(detail.scenario_id) : undefined;
   const sceneLabel = scenario
     ? `${scenario.titleZh} · ${scenario.title}`
     : detail?.scenario_id === "custom"
-      ? "自定义场景"
+      ? detail.custom?.title_zh || detail.custom?.title || "自定义场景"
       : (detail?.scenario_id ?? "");
   const tags = new Map<number, Set<string>>();
   for (const entry of detail?.corrections ?? []) {
     const category = entry.category ?? null;
-    if (entry.turn_index == null || !isCorrectionCategory(category)) continue;
+    if (entry.turn_index == null || (!entry.self_marked && !isCorrectionCategory(category))) continue;
     const labels = tags.get(entry.turn_index) ?? new Set<string>();
-    labels.add(correctionDrills[category].label);
+    labels.add(isCorrectionCategory(category) ? correctionDrills[category].label : "自己收藏");
     tags.set(entry.turn_index, labels);
   }
 
   return (
     <div className="min-h-screen pb-24">
-      <PlayfulBackground celebrate={status === "ready"} />
 
       <header className="mx-auto w-full max-w-3xl px-5 pt-6">
         <Link to="/progress" className={backLink}>
@@ -96,24 +96,15 @@ export default function SessionView() {
 
         {status === "ready" && detail && (
           <>
-            <section className="relative overflow-hidden rounded-huge border border-border bg-surface p-6 shadow-pop md:p-8">
-              <div className="grid items-center gap-6 md:grid-cols-[auto_1fr_auto]">
-                <Buddy mood="cheer" size={112} className="mx-auto" />
-                <div className="text-center md:text-left">
-                  <p className="eyebrow">课后小结 · Debrief{sceneLabel ? ` · ${sceneLabel}` : ""}</p>
-                  <h1 className="mt-1 font-display text-xl font-semibold leading-snug text-ink md:text-2xl">
-                    {detail.summary || "这次练习的小结"}
-                  </h1>
-                  <p className="mt-2 text-xs text-muted">{formatTime(detail.created_at)}</p>
-                </div>
-                <Ring pct={detail.overall} size={104} stroke={11} color="var(--coral)">
-                  <div className="text-center">
-                    <div className="font-display text-2xl font-bold tabnum text-ink">{detail.overall}</div>
-                    <div className="text-[0.58rem] font-bold uppercase text-muted">总分</div>
-                  </div>
-                </Ring>
-              </div>
-            </section>
+            <PracticeSummary scene={sceneLabel} summary={detail.summary || (detail.overall === null ? "这次练习的对话记录" : "这次练习的小结")} score={detail.overall}>
+              {formatTime(detail.created_at)}
+            </PracticeSummary>
+            {detail.scenario_id === "custom" && detail.custom?.practice_exercises?.length === 2 && (
+              <Link className="coaching-secondary mt-4" to={`/prepare/custom?lesson=${detail.id}`}>再做这次的专项练习</Link>
+            )}
+            {detail.overall === null && detail.client_session_id && (
+              <Link className="coaching-secondary mt-4" to={`/report/saved/${detail.id}`}>为这次对话生成小结</Link>
+            )}
 
             {detail.scores.length > 0 && (
               <section className="card mt-6 p-6">
@@ -144,7 +135,7 @@ export default function SessionView() {
             )}
 
             {detail.corrections && detail.corrections.length > 0 && (
-              <CorrectionReview corrections={detail.corrections} messages={detail.messages} scenarioId={detail.scenario_id} className="mt-6" />
+              <CorrectionReview corrections={detail.corrections} messages={detail.messages} scenarioId={detail.scenario_id} custom={detail.custom ?? undefined} className="mt-6" />
             )}
 
             <section className="card mt-6 p-6">
@@ -162,7 +153,7 @@ export default function SessionView() {
                             "max-w-[82%] rounded-3xl px-4 py-2.5 text-sm shadow-soft",
                             isPip ? "rounded-tl-md bg-surface-2 text-ink" : "rounded-tr-md text-primary-fg",
                           )}
-                          style={isPip ? undefined : { background: "var(--coral)" }}
+                          style={isPip ? undefined : { background: "var(--coral-deep)" }}
                         >
                           <p className="text-[0.6rem] font-bold uppercase tracking-wide opacity-70">
                             {isPip ? "Pip" : "You"}

@@ -1,22 +1,59 @@
 """Ground sentence corrections and count recurring patterns across sessions."""
 
 from collections import defaultdict
-from typing import get_args
+import logging
+import re
+
+from pydantic import ValidationError
 
 from app.schemas.chat import ChatMessage
-from app.schemas.feedback import Correction, CorrectionCategory, CorrectionFocus
+from app.schemas.feedback import Correction, CorrectionFocus
 
+logger = logging.getLogger(__name__)
+
+
+def read_corrections(stored, session_id: int | None = None) -> list[Correction]:
+    """Read legacy JSON without letting invalid entries hide valid corrections."""
+    corrections = []
+    rejected = 0
+    if isinstance(stored, list):
+        for item in stored:
+            try:
+                corrections.append(Correction.model_validate(item))
+            except ValidationError:
+                rejected += 1
+    elif stored is not None:
+        rejected = 1
+    if rejected and session_id is not None:
+        logger.warning("Ignored %d invalid corrections in practice session %d", rejected, session_id)
+    return corrections
 
 def ground_corrections(corrections: list[Correction], messages: list[ChatMessage]) -> list[Correction]:
     kept = {}
     for correction in corrections:
         original = correction.original.strip().casefold()
-        if not original or not correction.suggestion.strip():
+        if not original:
             continue
         index = correction.turn_index
+        if correction.self_marked:
+            if (correction.marked and index is not None and index < len(messages)
+                    and messages[index].role == "user" and original == messages[index].content.strip().casefold()):
+                kept[(index, "saved", original)] = Correction(
+                    original=messages[index].content, suggestion="", note="", turn_index=index,
+                    marked=True, self_marked=True,
+                )
+            continue
+        # A categorized empty replacement deletes the quoted text. Blank
+        # uncategorized entries and whitespace-only suggestions are unusable.
+        if not correction.suggestion.strip() and (correction.category is None or correction.suggestion != ""):
+            continue
         if index is not None or correction.category is not None or correction.marked:
-            if (index is None or index >= len(messages) or messages[index].role != "user"
-                    or original not in messages[index].content.casefold()):
+            if index is None or index >= len(messages) or messages[index].role != "user":
+                continue
+            line = messages[index].content.casefold()
+            if original not in line:
+                continue
+            if correction.suggestion == "" and not re.search(rf"(?<!\w){re.escape(original)}(?!\w)", line):
                 continue
         key = (index, correction.category, original)
         if key not in kept or correction.marked and not kept[key].marked:
@@ -26,14 +63,12 @@ def ground_corrections(corrections: list[Correction], messages: list[ChatMessage
 
 def repeated_focus(snapshots, catalogue_ids: set[str]) -> list[CorrectionFocus]:
     """Count distinct learner turns per category in each saved session."""
-    categories = get_args(CorrectionCategory)
     by_category = defaultdict(list)
     for scenario_id, corrections in snapshots:
         distinct_turns = defaultdict(set)
-        for item in corrections or []:
-            category, index = item.get("category"), item.get("turn_index")
-            if category in categories and type(index) is int:
-                distinct_turns[category].add(index)
+        for correction in read_corrections(corrections):
+            if correction.category is not None and correction.turn_index is not None:
+                distinct_turns[correction.category].add(correction.turn_index)
         for category, indexes in distinct_turns.items():
             by_category[category].append((scenario_id, len(indexes)))
 

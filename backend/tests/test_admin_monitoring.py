@@ -22,6 +22,10 @@ def utcnow():
 def client(monkeypatch):
     monkeypatch.setattr(get_settings(), 'jwt_secret', 'monitoring-local-test-secret-0123456789abcdef')
     from app.api.telemetry import _rates
+    from app.core.ratelimit import SlidingWindowLimiter
+    # TestClient uses the same peer for every case. Keep real limits within
+    # each test without charging its account setup to the previous test.
+    monkeypatch.setattr("app.main.limiter", SlidingWindowLimiter())
     _rates.clear()
     with TestClient(app) as value:
         yield value
@@ -587,6 +591,25 @@ def test_user_page_counts_all_accounts_and_sorts_by_durable_activity(client):
         assert filtered["guest_activity"] == result["guest_activity"]
         assert [user["id"] for user in filtered["items"]] == [105]
     engine.dispose()
+
+
+def test_missing_voice_reason_is_private_and_only_allowed_on_unstarted_failures(client):
+    owner = account(client, admin=True)
+    release = "test-voice-availability"
+    event = {"operation": "speech.complete", "outcome": "error", "duration_ms": 2001,
+             "release": release, "playback_started": False, "voice_availability": "empty_list",
+             "voice_initial_state": "empty_list", "voice_discovery_trigger": "deadline",
+             "voice_discovery_ms": 2000, "speech_failure_stage": "voice_discovery"}
+    assert client.post("/api/telemetry/client", json=event).status_code == 202
+    for change in ({"operation": "speech.native_start"}, {"outcome": "ok"},
+                   {"playback_started": True}, {"voice_availability": "a private voice name"},
+                   {"voice_discovery_ms": -1}, {"voice_initial_state": "a private voice name"}):
+        assert client.post("/api/telemetry/client", json=event | change).status_code == 422
+    traces = client.get("/api/admin/traces", headers=owner, params={"source": "browser", "release": release}).json()
+    detail = client.get("/api/admin/traces/" + traces["items"][0]["trace_id"], headers=owner).json()
+    attributes = detail["spans"][0]["attributes"]
+    for key in ("voice_availability", "voice_initial_state", "voice_discovery_trigger", "voice_discovery_ms", "speech_failure_stage"):
+        assert attributes[key] == event[key]
 
 
 def test_overview_counts_playback_once_and_keeps_recovery_diagnostics(client):

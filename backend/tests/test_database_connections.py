@@ -32,6 +32,7 @@ def test_legacy_telemetry_migration_preserves_rows_and_is_repeatable(tmp_path, m
             connection.exec_driver_sql("CREATE TABLE telemetry_records (id INTEGER PRIMARY KEY, trace_id TEXT)")
             connection.exec_driver_sql("INSERT INTO telemetry_records VALUES (1, 'legacy-trace')")
         monkeypatch.setattr(database, "engine", legacy)
+        monkeypatch.setattr(database, "_url", str(legacy.url))
         database._migrate_telemetry_errors()
         database._migrate_telemetry_errors()
         columns = {column['name'] for column in inspect(legacy).get_columns('telemetry_records')}

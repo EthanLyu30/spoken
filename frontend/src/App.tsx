@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, matchPath, useLocation } from "react-router-dom";
 import { DictionaryProvider } from "./components/dictionary/DictionaryProvider";
 import { Onboarding } from "./components/Onboarding";
 import { AppHeader } from "./components/AppHeader";
@@ -37,6 +37,7 @@ export default function App() {
   const resolving = useAuth((s) => s.resolving);
   const resolutionError = useAuth((s) => s.resolutionError);
   const focused = location.pathname.startsWith("/practice/");
+  const cafeCounter = matchPath("/prepare/cafe", location.pathname) && !new URLSearchParams(location.search).has("review");
   const section = location.pathname.split("/")[1] || "home";
   const hasSkipTarget = focused || section === "prepare" || section === "feedback" || ["/", "/scenes", "/custom", "/interview"].includes(location.pathname);
   // Account resolution must never hide the routes: Home, Scenes and practice
@@ -78,7 +79,7 @@ export default function App() {
             )}
           </div>
         )}
-        {!focused && <AppHeader />}
+        {!focused && !cafeCounter && <AppHeader />}
         <RouteErrorBoundary key={location.pathname}>
         <Suspense
           fallback={
@@ -98,6 +99,7 @@ export default function App() {
               element={<Conversation key={location.pathname} />}
             />
             <Route path="/report/:sessionId" element={<Report />} />
+            <Route path="/report/saved/:savedSessionId" element={<Report />} />
             <Route path="/session/:id" element={<SessionView />} />
             <Route path="/progress" element={<Progress />} />
             <Route path="/words" element={<WordBag />} />

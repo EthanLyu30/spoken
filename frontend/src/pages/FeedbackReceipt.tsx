@@ -75,7 +75,7 @@ export default function FeedbackReceiptPage() {
 
   async function update(event: FormEvent, action: Parameters<typeof updateFeedbackReceipt>[2], data: object, success: string) {
     event.preventDefault();
-    if (!item || mutation.current) return;
+    if (!item || item.can_manage === false || mutation.current) return;
     const controller = new AbortController();
     mutation.current = controller;
     setWorking(true); setError(""); setNotice("");
@@ -106,7 +106,7 @@ export default function FeedbackReceiptPage() {
     <main id="spoken-main" tabIndex={-1} className="feedback-main">
       <Link to="/feedback" className="feedback-back"><ArrowLeft size={17} aria-hidden="true" /> 返回反馈信箱</Link>
       <div className="feedback-panel">
-        <span className="feedback-kicker"><Mail size={15} aria-hidden="true" /> 仅持有链接或提交账号可查看</span>
+        <span className="feedback-kicker"><Mail size={15} aria-hidden="true" /> 私密回执</span>
         <h1 ref={heading} tabIndex={-1}>{location.state?.newFeedback ? "Pip 收到你的来信了" : "我的私密回执"}</h1>
         {(!ticketValid || !keyValid) && <p role="alert" className="feedback-error">请打开完整的私密回执链接。</p>}
         {ticketValid && keyValid && !item && !readError && <p role="status">正在读取回执…</p>}
@@ -115,6 +115,7 @@ export default function FeedbackReceiptPage() {
         {readError && !item && <button className="ui-secondary" type="button" onClick={() => refresh(n => n + 1)}>重试读取</button>}
         {notice && <p role="status" className="feedback-notice">{notice}</p>}
         {item && <>
+          {item.can_manage === false && <p role="status">此链接可以查看进度。修改信息或领取奖励需要提交时的游客身份。</p>}
           <div className="feedback-receipt-meta">
             <span>{feedbackCategories[item.category]} · {feedbackDate(item.created_at, true)}</span>
             <strong className="feedback-status">{feedbackStatuses[item.status]}</strong>
@@ -122,7 +123,7 @@ export default function FeedbackReceiptPage() {
           <p className="feedback-number">反馈编号 <code>{item.id}</code></p>
           {privateLink && <div className="feedback-receipt-link">
             <button className="ui-secondary" type="button" onClick={() => void copy()}><Copy size={16} aria-hidden="true" />复制私密回执</button>
-            <small>换设备时也可以打开，请妥善保存。</small>
+            <small>游客可用私密链接查看结果。请妥善保存。</small>
             {showLink && <input readOnly value={privateLink} aria-label="私密回执链接" onFocus={event => event.target.select()} />}
           </div>}
           <dl className="feedback-review-results">
@@ -135,7 +136,7 @@ export default function FeedbackReceiptPage() {
           </details>
         </>}
       </div>
-      {item?.status === "more_info" && <section className="feedback-panel">
+      {item?.status === "more_info" && item.can_manage !== false && <section className="feedback-panel">
         <h2>补充一点细节</h2>
         <form className="feedback-form" onSubmit={event => void update(event, "supplement", { description: supplement }, "补充说明已送回审核。")}>
           <label htmlFor="feedback-supplement">补充说明</label>
@@ -147,7 +148,7 @@ export default function FeedbackReceiptPage() {
       {item && item.amount !== 0 && <section className="feedback-panel feedback-reward">
         <span className="feedback-kicker"><Gift size={17} aria-hidden="true" /> PIP 请客</span>
         <h2>{awardLabels[item.amount]} · ¥{item.amount}</h2>
-        {item.status === "awarded" && <>
+        {item.status === "awarded" && item.can_manage !== false && <>
           <p>可在 {feedbackDate(item.claim_until, "seconds")}（北京时间）前自愿填写微信号。Spoken 负责人核对后会添加你并手动转账。</p>
           <form className="feedback-form" onSubmit={event => void update(event, "claim", { wechat: wechat.trim() }, "微信号已提交，请留意好友申请。")}>
             <label htmlFor="feedback-wechat">微信号</label>
@@ -157,7 +158,7 @@ export default function FeedbackReceiptPage() {
             <button className="ui-button" disabled={working}>提交微信号，领取 ¥{item.amount}</button>
           </form>
         </>}
-        {item.status === "ready_to_pay" && <p>联系方式已提交，等待负责人手动转账。核验码 <code>{item.claim_code}</code>，仅在确认对方是 Spoken 负责人后提供。</p>}
+        {item.status === "ready_to_pay" && <p>联系方式已提交，等待负责人手动转账。{item.claim_code && <>核验码 <code>{item.claim_code}</code>，仅在确认对方是 Spoken 负责人后提供。</>}</p>}
         {item.status === "paid" && <p><CheckCircle2 size={17} aria-hidden="true" />已于 {feedbackDate(item.paid_at, true)} 发放，请查看微信转账记录。</p>}
         {item.status === "expired" && <p>领取期限已过，这笔预留额度已释放。</p>}
       </section>}
@@ -175,14 +176,14 @@ export default function FeedbackReceiptPage() {
               item.verification_mail_status === "failed" ? "确认邮件暂未发出。系统会重试，你也可以稍后手动重发。" :
               "邮箱已登记，正在发送确认邮件。"}
           </p>}
-          {item.email_pending && !editingEmail && item.email_notifications && <div className="feedback-inline feedback-mail-actions">
+          {item.can_manage !== false && item.email_pending && !editingEmail && item.email_notifications && <div className="feedback-inline feedback-mail-actions">
             <button type="button" className="ui-secondary" disabled={working || now < canResendAt}
               onClick={event => void update(event, "email", {}, "已请求重新发送确认邮件。")}>
               {now < canResendAt ? "稍后可重发" : "重发确认邮件"}
             </button>
             <button type="button" className="ui-secondary" onClick={() => setEditingEmail(true)}>更换接收邮箱</button>
           </div>}
-          {(!item.email_pending || editingEmail) && item.email_notifications && <>
+          {item.can_manage !== false && (!item.email_pending || editingEmail) && item.email_notifications && <>
             <p className="feedback-muted">可选。确认后会收到审核结论，也可以直接保留此回执。</p>
             <form className="feedback-form" onSubmit={event => void update(event, "email", { email: email.trim() }, "邮箱已登记，请查收确认邮件。")}>
               <label htmlFor="feedback-email">接收邮箱</label>

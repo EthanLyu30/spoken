@@ -17,11 +17,13 @@ import type { EChartsOption } from "echarts";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import { BrowserGuestHistory } from "../components/BrowserGuestHistory";
+import { GrammarStatistics } from "../components/GrammarStatistics";
 import { InterviewResults } from "../components/InterviewResults";
+import { PersonalCoaching } from "../components/PersonalCoaching";
 import { useProgressData } from "../hooks/useProgressData";
 import { useAuth } from "../store/auth";
 import { getClientId } from "../lib/clientId";
-import { getPracticeDetail, type InterviewScore } from "../lib/api";
+import { getPracticeDetail, type InterviewScore, type ProgressSessions } from "../lib/api";
 import { getScenario } from "../data/scenarios";
 import { tokens } from "../lib/tokens";
 import { interviewProgressSummary } from "../lib/interviewScoring";
@@ -51,6 +53,26 @@ function scenarioTitle(id: string) {
   return getScenario(id)?.titleZh ?? (id === "custom" ? "自定义场景" : id);
 }
 
+function RecurringFocus({ focus }: { focus: ProgressSessions["correction_focus"] }) {
+  if (!focus?.length) return null;
+  return <section className="learning-panel mb-6" aria-label="优先复练">
+    <div className="learning-section-title"><h2>优先复练</h2><Target size={20} /></div>
+    <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {focus.map(({ category, sessions, turns, scenario_id }) => {
+        if (!isCorrectionCategory(category)) return null;
+        const drill = correctionDrills[category];
+        const scene = getScenario(scenario_id) ?? getScenario("cafe")!;
+        return <li key={category} className="min-w-0 rounded-2xl bg-surface-2 p-4">
+          <h3 className="font-display font-bold text-ink">{drill.label}</h3>
+          <p className="mt-1 text-sm text-muted">近期有 {sessions} 次练习、{turns} 句话出现过</p>
+          <p className="mt-2 text-sm leading-relaxed text-ink">{drill.task}</p>
+          <Link to={`/prepare/${scene.id}?focus=${category}`} className="coaching-example-link">在{scene.titleZh}练{drill.label}<ArrowRight size={16} /></Link>
+        </li>;
+      })}
+    </ul>
+  </section>;
+}
+
 export default function Progress() {
   const navigate = useNavigate();
   const account = useAuth((s) => s.user?.id);
@@ -68,6 +90,7 @@ export default function Progress() {
     reload,
   } = data;
   const [filter, setFilter] = useState("all");
+  const [grammarRefresh, setGrammarRefresh] = useState(0);
   const sessionsFailed = errors.includes("sessions");
   const practiceFailed = errors.includes("practice");
   const includesSessions = filter === "all" || filter === "session";
@@ -99,12 +122,14 @@ export default function Progress() {
     return () => {unsubscribe();cancelReview();};
   }, [owner, closeReview, cancelReview]);
   const interview = practice.filter((p) => p.kind === "interview");
-  const average = mean(sessions.map((s) => s.overall));
+  const trendSessions = useMemo(() => sessions.filter(
+    (session): session is typeof session & { overall: number } => session.overall !== null,
+  ).reverse(), [sessions]);
+  const average = mean(trendSessions.map((s) => s.overall));
   const interviewSummary = interviewProgressSummary(interview);
   const total = stats ? stats.total_sessions + stats.total_practice : null;
   const goal = stats?.today_goal ?? 3;
   const today = stats?.today_count;
-  const trendSessions = useMemo(() => [...sessions].reverse(), [sessions]);
   const lineOption = useMemo<EChartsOption>(
     () => ({
       grid: { left: 32, right: 18, top: 20, bottom: 28 },
@@ -218,7 +243,7 @@ export default function Progress() {
             <h1>把每一次开口，连成进步。</h1>
             <p>看见积累，也找到下一步的方向。</p>
           </div>
-          <button className="ui-secondary" onClick={reload}>
+          <button className="ui-secondary" onClick={() => { reload(); setGrammarRefresh((count) => count + 1); }}>
             <RefreshCw size={15} />
             刷新记录
           </button>
@@ -255,9 +280,9 @@ export default function Progress() {
             value={average}
             suffix="/ 100"
             note={
-              sessions.length
-                ? "最近 " + sessions.length + " 次场景对话"
-                : sessionsFailed ? "场景记录暂时无法加载" : "完成场景对话后点亮"
+              trendSessions.length
+                ? "最近 " + trendSessions.length + " 次已评分场景对话"
+                : sessionsFailed ? "场景记录暂时无法加载" : sessions.length ? "暂无已评分对话" : "完成场景对话后点亮"
             }
           />
           <Metric
@@ -322,6 +347,10 @@ export default function Progress() {
             <ArrowRight size={16} />
           </Link>
         </section>
+        <GrammarStatistics key={`grammar:${owner}`} refresh={grammarRefresh} />
+        {(sessions.length > 0 || Boolean(correctionFocus?.length)) && !sessionsFailed && (
+          <PersonalCoaching key={`coach:${owner}`} fallback={<RecurringFocus focus={correctionFocus} />} />
+        )}
         <div className="learning-analysis-grid">
           <section className="learning-panel">
             <div className="learning-section-title">
@@ -331,7 +360,7 @@ export default function Progress() {
               </div>
               <span className="learning-unit">场景对话 · /100</span>
             </div>
-            {sessions.length > 0 ? (
+            {trendSessions.length > 0 ? (
               <>
                 <Suspense fallback={<div className="chart-placeholder">正在绘制你的练习趋势…</div>}>
                   <EChart option={lineOption} height={230} />
@@ -367,7 +396,7 @@ export default function Progress() {
                     ? "场景对话记录暂时无法加载。"
                     : data.sessionsPending
                       ? "正在读取练习记录…"
-                      : "第一条曲线，从第一次开口开始。"}
+                      : sessions.length > 0 ? "已有对话记录，评分生成后会显示趋势。" : "第一条曲线，从第一次开口开始。"}
                 </p>
                 {!sessionsFailed && !data.sessionsPending && (
                   <Link to="/scenes">
@@ -461,31 +490,6 @@ export default function Progress() {
             ) : null}
           </section>
         </div>
-        {Boolean(correctionFocus?.length) && !sessionsFailed && (
-          <section className="learning-panel mb-6" aria-labelledby="correction-focus-heading">
-            <div className="learning-section-title">
-              <h2 id="correction-focus-heading">优先复练</h2>
-              <Target size={20} />
-            </div>
-            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {correctionFocus?.map(({ category, sessions, turns, scenario_id }) => {
-                if (!isCorrectionCategory(category)) return null;
-                const drill = correctionDrills[category];
-                const scene = getScenario(scenario_id) ?? getScenario("cafe")!;
-                return (
-                  <li key={category} className="min-w-0 rounded-2xl bg-surface-2 p-4">
-                    <h3 className="font-display font-bold text-ink">{drill.label}</h3>
-                    <p className="mt-1 text-sm text-muted">近期有 {sessions} 次练习、{turns} 句话出现过</p>
-                    <p className="mt-2 text-sm leading-relaxed text-ink">{drill.task}</p>
-                    <Link to={`/prepare/${scene.id}?focus=${category}`} className="mt-2 inline-flex min-h-9 items-center gap-1 text-sm font-bold text-ink underline underline-offset-2">
-                      在{scene.titleZh}练{drill.label} <ArrowRight size={16} />
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        )}
         <section className="learning-history">
           <div className="learning-section-title">
             <div>
@@ -656,7 +660,7 @@ function HistoryRow({
     kind: string;
     title: string;
     at: string;
-    score: number;
+    score: number | null;
     scale: number;
   };
 }) {
@@ -683,8 +687,7 @@ function HistoryRow({
         </small>
       </span>
       <span className="learning-history-score">
-        {item.score}
-        <small> / {item.scale}</small>
+        {item.score === null ? "未评分" : <>{item.score}<small> / {item.scale}</small></>}
       </span>
       <ChevronRight size={17} />
     </>

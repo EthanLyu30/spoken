@@ -20,6 +20,26 @@ export function floatToPcm16(input: Float32Array): ArrayBuffer {
   }
   return buf;
 }
+/** Retry an empty recognition result only when the retained 16 kHz PCM contains
+ * sustained sound. Ignore microphone DC offset and isolated clicks. */
+export function hasSustainedAudio(pcm: ArrayBuffer): boolean {
+  const samples = new Int16Array(pcm, 0, Math.floor(pcm.byteLength / 2));
+  const frame = 320; // 20 ms
+  const minVariance = (32768 * 0.008) ** 2;
+  let activeFrames = 0;
+  for (let start = 0; start + frame <= samples.length; start += frame) {
+    let sum = 0, squares = 0;
+    for (let i = start; i < start + frame; i++) {
+      sum += samples[i];
+      squares += samples[i] ** 2;
+    }
+    const variance = squares / frame - (sum / frame) ** 2;
+    activeFrames = variance >= minVariance ? activeFrames + 1 : 0;
+    if (activeFrames >= 4) return true;
+  }
+  return false;
+}
+
 /** Absolute output indices avoid per-block rounding and accumulated float drift. */
 export class IncrementalPcm16 {
   private readonly ratio: number;

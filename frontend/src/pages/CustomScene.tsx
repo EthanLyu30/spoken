@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, Sparkles, Wand2 } from "lucide-react";
-import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import { SceneTabs } from "../components/SceneTabs";
@@ -41,7 +40,6 @@ export default function CustomScenePage() {
 
   return (
     <div className="min-h-screen pb-24">
-      <PlayfulBackground />
 
       <main id="spoken-main" tabIndex={-1} className="mx-auto w-full max-w-2xl px-5 py-6 custom-page">
         <div className="ui-page-head">

@@ -27,6 +27,7 @@ class Correction(BaseModel):
     category: CorrectionCategory | None = None
     turn_index: int | None = Field(default=None, ge=0, strict=True)
     marked: bool = False
+    self_marked: bool = False
 
 
 class CorrectionFocus(BaseModel):

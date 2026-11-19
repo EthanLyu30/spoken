@@ -38,6 +38,27 @@ type Operation = typeof ASR_OPERATIONS[number] | "speech.first_audio" | "speech.
   | "pronunciation.click_to_result" | "pronunciation.stop_to_result";
 type Engine = "local" | "xfyun" | "browser" | "unknown";
 export type Transport = "direct" | "relay" | "buffered" | "local" | "unknown";
+const VOICE_AVAILABILITY = ["unsupported", "empty_list", "no_english_voice", "lookup_failed"] as const;
+export type VoiceAvailability = typeof VOICE_AVAILABILITY[number];
+const SPEECH_COMPLETION_VALUES = {
+  voice_initial_state: ["english_available", ...VOICE_AVAILABILITY],
+  voice_discovery_trigger: ["initial", "event", "poll", "deadline", "aborted"],
+  voice_recheck_trigger: ["initial", "event", "poll", "deadline", "aborted"],
+  speech_failure_stage: ["voice_discovery", "native_start", "native_end", "local_synthesis", "local_playback", "queue"],
+  speech_fallback: ["no_local_voice", "attempted"],
+  speech_fallback_failure: ["startup_timeout", "end_before_start", "speech_error", "speak_exception", "native_error", "completion_timeout"],
+  speech_fallback_error_code: NATIVE_ERRORS,
+} as const;
+const SPEECH_COMPLETION_TIMINGS = ["voice_discovery_ms", "voice_recheck_ms"] as const;
+export type SpeechCompletionDiagnostic = {
+  -readonly [Key in keyof typeof SPEECH_COMPLETION_VALUES]?: typeof SPEECH_COMPLETION_VALUES[Key][number];
+} & {
+  [Key in typeof SPEECH_COMPLETION_TIMINGS[number]]?: number;
+};
+const SPEECH_COMPLETION_FIELDS = new Set<string>([
+  ...Object.keys(SPEECH_COMPLETION_VALUES), ...SPEECH_COMPLETION_TIMINGS,
+]);
+const SPEECH_FAILURE_DETAIL_FIELDS = new Set(["voice_recheck_trigger", "speech_fallback_failure", "speech_fallback_error_code"]);
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const interactions = new WeakMap<object, string>();
 export function newInteractionId(): string | undefined {
@@ -103,9 +124,24 @@ async function deliverTiming(sample: { operation: Operation; outcome: string }, 
     } finally { deferredAsrRetries--; }
   }
   if (status !== 422) return;
+  const previousCompletion = Object.fromEntries(Object.entries(diagnostics).filter(([key]) => !SPEECH_FAILURE_DETAIL_FIELDS.has(key)));
+  if (Object.keys(previousCompletion).length < Object.keys(diagnostics).length) {
+    status = (await sendTiming(fetcher, { ...sample, ...previousCompletion, ...(eventId ? { event_id: eventId } : {}) }))?.status;
+    if (status !== 422) return;
+  }
+  // A previous collector may accept playback fields but reject the newer diagnostics.
+  const compatible = Object.fromEntries(Object.entries(previousCompletion).filter(([key]) => !SPEECH_COMPLETION_FIELDS.has(key)));
+  if (Object.keys(compatible).length < Object.keys(previousCompletion).length) {
+    status = (await sendTiming(fetcher, { ...sample, ...compatible, ...(eventId ? { event_id: eventId } : {}) }))?.status;
+    if (status !== 422) return;
+  }
   // Older API versions reject new fields before accepting an event.
   const legacy = { ...sample, outcome: sample.outcome === "timeout" ? "error" : sample.outcome };
-  const { asr_reason: reason, ...previousDiagnostics } = diagnostics;
+  const { asr_reason: reason, voice_availability: availability, ...previousDiagnostics } = compatible;
+  if (availability) {
+    status = (await sendTiming(fetcher, { ...sample, ...previousDiagnostics, ...(eventId ? { event_id: eventId } : {}) }))?.status;
+    if (status !== 422) return;
+  }
   if (eventId || reason !== undefined || sample.outcome === "timeout") {
     status = (await sendTiming(fetcher, { ...legacy, ...previousDiagnostics }))?.status;
   }
@@ -119,6 +155,8 @@ export function reportTiming(operation: Operation, durationMs: number, options: 
   outcome?: "ok" | "error" | "timeout" | "cancelled"; engine?: Engine; transport?: Transport; interactionId?: string;
   reason?: NativeDiagnostic["reason"] | NativeEndDiagnostic["reason"];
   playback_started?: boolean;
+  voice_availability?: VoiceAvailability;
+  speechDiagnostics?: SpeechCompletionDiagnostic;
 } & Omit<NativeDiagnostic, "reason"> & Omit<NativeEndDiagnostic, "reason"> & AsrAttemptDiagnostic & PronunciationDiagnostic = {}): void {
   const maxDuration = operation === "speech.native_end" ? 3_600_000 : 300_000;
   if (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > maxDuration) return;
@@ -150,7 +188,27 @@ export function reportTiming(operation: Operation, durationMs: number, options: 
     if (typeof options.voice_matched === "boolean") diagnostics.voice_matched = options.voice_matched;
   } else if (operation === "speech.complete") {
     if (typeof options.playback_started === "boolean") diagnostics.playback_started = options.playback_started;
+    if (options.outcome === "error" && options.playback_started === false && VOICE_AVAILABILITY.includes(options.voice_availability!))
+      diagnostics.voice_availability = options.voice_availability;
     if (diagnostics.reason && ["enhanced", "remote"].includes(options.voice_type ?? "")) diagnostics.voice_type = options.voice_type;
+    const completion = options.speechDiagnostics;
+    if (completion) {
+      for (const key of Object.keys(SPEECH_COMPLETION_VALUES) as (keyof typeof SPEECH_COMPLETION_VALUES)[]) {
+        const values: readonly string[] = SPEECH_COMPLETION_VALUES[key];
+        const value = completion[key];
+        if (value && values.includes(value))
+          diagnostics[key] = value;
+      }
+      if (options.outcome !== "error") {
+        delete diagnostics.speech_failure_stage;
+        delete diagnostics.speech_fallback_failure;
+        delete diagnostics.speech_fallback_error_code;
+      }
+      for (const key of SPEECH_COMPLETION_TIMINGS) {
+        const value = numeric(completion[key], 0, 300_000);
+        if (value !== undefined) diagnostics[key] = value;
+      }
+    }
   } else if (operation === "speech.native_end") {
     const stateAtEvent = integer(options.state_at_event, 0, 7);
     if (stateAtEvent !== undefined) diagnostics.state_at_event = stateAtEvent;

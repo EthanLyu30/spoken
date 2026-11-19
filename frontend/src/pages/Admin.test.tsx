@@ -51,8 +51,8 @@ it("refreshes current browser diagnostics against the deployed release with an o
   expect(releaseFetcher).toHaveBeenCalledWith("/index.html", expect.objectContaining({ cache: "no-store" }));
   const nextRelease = "5e8da79282bd1dff93eb46486f28ca54367b097b";
   releaseFetcher.mockImplementation(async () => releasePage(nextRelease));
-  const refresh = screen.getByRole("button", { name: "刷新数据" });
-  await waitFor(() => expect(refresh).toBeEnabled());
+  const refresh = await screen.findByRole("button", { name: "刷新数据" });
+  expect(refresh).toBeEnabled();
   fireEvent.click(refresh);
   await waitFor(() => expect(browserTraceReleases().at(-1)).toBe(nextRelease));
   expect(screen.getAllByText(/当前发布（5e8da79282）/).length).toBeGreaterThan(0);
@@ -62,6 +62,8 @@ it("labels non-model operations by type instead of claiming a missing model", ()
   expect(modelLabel({ ...trace, operation: "DELETE /api/words/{word_id}", model: null })).toBe("数据删除");
   expect(modelLabel({ ...trace, operation: "POST /api/telemetry/visit", model: null })).toBe("非模型调用");
   expect(modelLabel({ ...trace, operation: "POST /api/hint", model: null })).toBe("AI 调用未记录");
+  expect(modelLabel({ ...trace, operation: "POST /api/chat", model: null })).toBe("场景对话（无模型记录）");
+  expect(modelLabel({ ...trace, operation: "GET /api/scenario-suggestion", model: null })).toBe("场景推荐（无模型记录）");
   expect(modelLabel({ ...trace, operation: "POST /api/chat/stream", model: "deepseek-flash" })).toBe("deepseek-flash");
 });
 
@@ -608,6 +610,21 @@ it("shows empty measurements honestly and keeps business filters aligned", async
   expect(screen.queryByText("0 ms")).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("业务操作"), { target: { value: "POST /api/interview/score" } });
   await waitFor(() => expect(fetcher.mock.calls.filter(([url]) => String(url).includes("operation=POST+%2Fapi%2Finterview%2Fscore"))).toHaveLength(2));
+});
+
+it.each([
+  [{voice_availability: "empty_list", voice_discovery_trigger: "deadline", speech_failure_stage: "voice_discovery"}, /英语音色发现超时/],
+  [{speech_fallback: "attempted", speech_fallback_failure: "native_error", speech_failure_stage: "native_end"}, /回退音色播放过程中报错/],
+])("shows the playback failure cause in the trace summary", async (attributes, message) => {
+  const failure = { ...trace, source: "browser", operation: "speech.complete", outcome: "error",
+    spans: [{ ...trace.spans[0], name: "speech.complete", outcome: "error", attributes }] };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes("/overview")
+    ? { ...overview, count: 1, errors: 1 } : url.includes(`/traces/${trace.trace_id}`) ? failure : { items: [failure], total: 1 })));
+  show();
+  fireEvent.click(screen.getByRole("tab", {name: "浏览器体验"}));
+  fireEvent.click(await screen.findByRole("button", {name: /查看调用/}));
+  const detail = await screen.findByRole("complementary", {name: "调用详情"});
+  expect(within(detail).getByText(message)).toBeVisible();
 });
 
 it("displays a trace without treating nested spans as additive duration", async () => {

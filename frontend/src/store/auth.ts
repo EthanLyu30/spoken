@@ -4,7 +4,7 @@ import {
   beginOwnerTransition, completeOwnerTransition, enableOwnerWriteQueue, flushPendingWrites, retryPendingOwnerWrites,
   type AuthUser, ApiError,
 } from "../lib/api";
-import { clearToken, setToken, getToken, getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
+import { clearToken, setToken, getToken, getAuthGeneration, subscribeAuthGeneration, tokenCacheIdentity } from "../lib/authToken";
 import { rotateClientId } from "../lib/clientId";
 import { useWords } from "./words";
 import { useSession } from "./session";
@@ -23,19 +23,8 @@ interface AuthState {
 }
 const USER_KEY = "spoken-user";
 
-/** JWT `sub` is a cache key, never an authorization decision. */
-function tokenSubject(token: string | null): string | null {
-  if (!token) return null;
-  try {
-    const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    const payload = JSON.parse(atob(part + "=".repeat((4 - part.length % 4) % 4)));
-    return typeof payload.sub === "string" && payload.sub ? payload.sub : null;
-  } catch {
-    return null;
-  }
-}
 function readCachedUser(token: string | null): AuthUser | null {
-  const subject = tokenSubject(token);
+  const subject = tokenCacheIdentity(token)?.subject;
   if (!subject) return null;
   try {
     const parsed = JSON.parse(localStorage.getItem(USER_KEY) ?? "null") as
@@ -53,7 +42,7 @@ function readCachedUser(token: string | null): AuthUser | null {
 }
 function writeCachedUser(token: string | null, user: AuthUser | null): void {
   try {
-    const subject = tokenSubject(token);
+    const subject = tokenCacheIdentity(token)?.subject;
     if (!subject || !user) localStorage.removeItem(USER_KEY);
     else localStorage.setItem(USER_KEY, JSON.stringify({ subject, user }));
   } catch {

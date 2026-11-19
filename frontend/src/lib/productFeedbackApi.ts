@@ -1,11 +1,12 @@
 import { getToken } from "./authToken";
+import { getClientId } from "./clientId";
 import { withTimeout } from "./requestTimeout";
 
 export const feedbackCategories = {
   ui: "界面与易用性", feature: "功能建议", bug: "故障", learning: "练习与评分", other: "其他",
 } as const;
 export const feedbackSources = {
-  home: "首页", profile: "我的", scene_report: "课后小结", interview_result: "面试结果", direct: "反馈信箱",
+  home: "首页", profile: "我的", scene_report: "课后小结", interview_result: "面试结果", coaching: "专项复练", direct: "反馈信箱",
 } as const;
 export const feedbackStatuses = {
   pending: "待审核", more_info: "需要补充", awarded: "审核通过", ready_to_pay: "待手动发放",
@@ -36,6 +37,7 @@ export interface FeedbackListItem {
   amount: Award | 0;
 }
 export interface FeedbackReceipt extends FeedbackListItem {
+  can_manage?: boolean;
   description: string;
   source: FeedbackSource;
   supplement: string;
@@ -81,31 +83,47 @@ export function newFeedbackRequestId() {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-const localKey = "spoken.feedback.receipts.v1";
+const localKey = "spoken.feedback.receipts.v2";
+const maxLocalReceipts = 200;
+type LocalReceipt = { id: string; key: string; guest: string; receivedAt: number };
 
-export function localFeedbackReceipts(): Record<string, string> {
+function readLocalReceipts(): LocalReceipt[] {
   try {
-    const stored: unknown = JSON.parse(localStorage.getItem(localKey) ?? "{}");
-    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
-    return Object.fromEntries(Object.entries(stored).filter(([id, key]) =>
-      validId.test(id) && typeof key === "string" && validKey.test(key)));
-  } catch { return {}; }
+    const stored: unknown = JSON.parse(localStorage.getItem(localKey) ?? "[]");
+    if (!Array.isArray(stored)) return [];
+    return stored.filter((entry): entry is LocalReceipt => !!entry && typeof entry === "object"
+      && typeof entry.id === "string" && validId.test(entry.id)
+      && typeof entry.key === "string" && validKey.test(entry.key)
+      && typeof entry.guest === "string" && Number.isFinite(entry.receivedAt));
+  } catch { return []; }
 }
 
-export function rememberGuestReceipt(id: string, key: string) {
-  if (!validId.test(id) || !validKey.test(key)) return;
+export function localFeedbackReceipts(): Record<string, string> {
+  if (getToken()) return {};
+  const guest = getClientId();
+  return Object.fromEntries(readLocalReceipts().filter(entry => entry.guest === guest)
+    .sort((a, b) => b.receivedAt - a.receivedAt).map(({id, key}) => [id, key]));
+}
+
+export function rememberGuestReceipt(id: string, key: string, createdAt?: string) {
+  if (getToken() || !validId.test(id) || !validKey.test(key)) return;
   try {
-    const current = { ...localFeedbackReceipts(), [id]: key };
-    localStorage.setItem(localKey, JSON.stringify(Object.fromEntries(Object.entries(current).slice(-20))));
+    const guest = getClientId();
+    const timestamp = Date.parse(createdAt ?? "");
+    const receivedAt = Number.isFinite(timestamp) ? timestamp : Date.now();
+    const current = [{id, key, guest, receivedAt}, ...readLocalReceipts().filter(entry => entry.id !== id)]
+      .sort((a, b) => b.receivedAt - a.receivedAt);
+    localStorage.setItem(localKey, JSON.stringify(current.slice(0, maxLocalReceipts)));
   } catch { /* The receipt remains available by copying the private link. */ }
 }
 
 async function request<T>(path: string, options: { method?: string; body?: object; key?: string; signal?: AbortSignal; auth?: boolean } = {}): Promise<T> {
-  const token = options.auth === false || options.key ? null : getToken();
+  const token = options.auth === false ? null : getToken();
   const response = await fetch(base + path, {
     method: options.method ?? "GET",
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(!token && options.auth !== false ? { "X-Client-Id": getClientId() } : {}),
       ...(options.key ? { "X-Feedback-Key": options.key } : {}),
       ...(options.body ? { "Content-Type": "application/json" } : {}),
     },
@@ -135,7 +153,10 @@ export const getFeedbackPool = (signal?: AbortSignal) => request<FeedbackPool>(`
 export const submitProductFeedback = (body: {
   request_id: string; category: FeedbackCategory; source: FeedbackSource; description: string; allow_ai: boolean; email?: string;
 }, signal?: AbortSignal) => request<FeedbackReceipt & { receipt_key: string }>(root, { method: "POST", body, signal });
-export const getMyFeedback = (signal?: AbortSignal) => request<FeedbackListItem[]>(`${root}/mine`, { signal });
+export const getMyFeedbackPage = (before: string | null, signal?: AbortSignal) =>
+  request<{ items: FeedbackListItem[]; next_cursor: string | null }>(
+    `${root}/mine/page${before ? `?before=${encodeURIComponent(before)}` : ""}`, { signal },
+  );
 export const getFeedbackReceipt = (id: string, key: string | undefined, signal?: AbortSignal) =>
   request<FeedbackReceipt>(`${root}/${encodeURIComponent(id)}`, { key, signal });
 export function updateFeedbackReceipt(

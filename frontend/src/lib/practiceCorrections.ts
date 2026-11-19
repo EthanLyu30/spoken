@@ -1,4 +1,6 @@
-import type { Correction, CorrectionCategory, FeedbackResponse } from "./api";
+import type { ChatMessage, CoachingExample, CoachingPattern, Correction, CorrectionCategory, FeedbackResponse } from "./api";
+import { getScenario } from "../data/scenarios";
+import { previousPartnerMessage } from "./conversationTurns";
 
 export const correctionDrills = {
   articles: { label: "冠词", task: "第一次提到一个可数的人或物时，用 a 或 an。对方已知道你指哪一个时，用 the。", prompt: "第一次提到一把雨伞，接着再提同一把雨伞。用英语说两句。", answer: "I need an umbrella. Is the umbrella by the door?" },
@@ -15,11 +17,54 @@ export function isCorrectionCategory(value: string | null): value is CorrectionC
 }
 
 export function correctionKey(entry: Correction): string {
-  return JSON.stringify([entry.turn_index ?? null, entry.category ?? null, entry.original.trim().toLowerCase()]);
+  return JSON.stringify([entry.turn_index ?? null, entry.self_marked ? "saved" : entry.category ?? null, entry.original.trim().toLowerCase()]);
 }
 
 export function includeMarkedCorrections(feedback: FeedbackResponse, marked: Correction[]): FeedbackResponse {
   if (!marked.length) return feedback;
   const marks = new Set(marked.map(correctionKey));
   return { ...feedback, corrections: [...marked, ...(feedback.corrections ?? []).filter((entry) => !marks.has(correctionKey(entry)))] };
+}
+
+const patternNames: Partial<Record<CoachingPattern["kind"], string>> = {
+  article_missing: "漏掉冠词", article_choice: "冠词选错", article_extra: "多用了冠词",
+};
+
+export const coachingPatternLabel = (pattern: CoachingPattern) => patternNames[pattern.kind] ?? correctionDrills[pattern.category]?.label ?? "表达练习";
+
+export function replayHref(example: CoachingExample) {
+  const scene = getScenario(example.scenario_id) ? example.scenario_id : "custom";
+  return `/prepare/${scene}?review=${example.session_id}:${example.turn_index}`;
+}
+
+export type ReplaySentence = Pick<CoachingExample, "original" | "previous_partner_message" | "corrections">;
+
+export function sentenceForReplay(messages: ChatMessage[], corrections: Correction[], index: number): ReplaySentence | undefined {
+  if (messages[index]?.role !== "user") return undefined;
+  return {
+    original: messages[index].content,
+    previous_partner_message: previousPartnerMessage(messages, index) ?? "",
+    corrections: corrections.filter((fix) => fix.turn_index === index),
+  };
+}
+
+export function replayReference({ original, corrections }: ReplaySentence): string | null {
+  const text = original.toLowerCase();
+  const fixes = corrections.filter((fix) => fix.original.trim() && fix.suggestion.trim());
+  const complete = fixes.find((fix) => fix.original.trim().toLowerCase() === text.trim());
+  if (complete) return complete.suggestion;
+
+  const matches = fixes.flatMap((fix) => {
+    const before = fix.original.trim().toLowerCase();
+    const start = text.indexOf(before);
+    return start >= 0 && start === text.lastIndexOf(before) ? [{ start, end: start + before.length, after: fix.suggestion }] : [];
+  }).sort((a, b) => a.start - b.start || b.end - a.end);
+  let corrected = "";
+  let cursor = 0;
+  for (const { start, end, after } of matches) {
+    if (start < cursor) continue;
+    corrected += original.slice(cursor, start) + after;
+    cursor = end;
+  }
+  return cursor ? corrected + original.slice(cursor) : null;
 }

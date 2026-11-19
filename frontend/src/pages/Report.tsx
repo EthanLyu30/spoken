@@ -1,24 +1,23 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Download,
   Lightbulb,
   RotateCcw,
-  Sparkles,
 } from "lucide-react";
 import { Buddy } from "../components/Buddy";
 import { CorrectionReview } from "../components/CorrectionReview";
+import { PracticeSummary } from "../components/PracticeSummary";
 import { PracticeFeedbackInvite } from "../components/FeedbackEntry";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { Button } from "../components/ui/Button";
 import { InteractiveEnglishText } from "../components/dictionary/InteractiveEnglishText";
-import { PlayfulBackground } from "../components/PlayfulBackground";
 import { useSession } from "../store/session";
-import { useCustomScene } from "../store/custom";
-import { postFeedback, type FeedbackResponse } from "../lib/api";
+import { getSession, postFeedback, type FeedbackResponse, type SessionDetail } from "../lib/api";
+import { useAuth } from "../store/auth";
 import { useWords } from "../store/words";
-import { persistSessionOnce } from "../lib/sessionSave";
+import { persistSessionOnce, unscoredSession } from "../lib/sessionSave";
 import { getAuthGeneration } from "../lib/authToken";
 import { getScenario } from "../data/scenarios";
 import { includeMarkedCorrections } from "../lib/practiceCorrections";
@@ -28,26 +27,81 @@ const SCORE_COLORS = ["#ff6f5e", "#ff9f45", "#41c08c", "#57b7e8"];
 const backLink =
   "inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5";
 
+type ReportSession = Pick<ReturnType<typeof useSession.getState>, "scenarioId" | "practiceId" | "messages" | "markedCorrections" | "custom">;
+type SavedAssessment = Awaited<ReturnType<typeof persistSessionOnce>>;
+
+function reportFromSaved(scenarioId: string, saved: NonNullable<SavedAssessment>, candidate?: FeedbackResponse): FeedbackResponse | null {
+  if (saved.overall === null) return null;
+  const sameAssessment = candidate?.overall === saved.overall && candidate.summary === saved.summary && candidate.tip === saved.tip;
+  return {scenario_id: scenarioId, overall: saved.overall, summary: saved.summary || "这次练习的小结",
+    tip: saved.tip ?? "", scores: saved.scores ?? [], corrections: saved.corrections ?? [],
+    phrases: sameAssessment ? candidate.phrases : []};
+}
+
 export default function Report() {
+  const { sessionId, savedSessionId } = useParams();
+  const generation = useAuth(state => state.generation);
+  return savedSessionId ? <SavedReport key={`${generation}:${savedSessionId}`} id={savedSessionId} />
+    : <ActiveReport key={`${generation}:${sessionId}`} id={sessionId} />;
+}
+
+function ActiveReport({id}: {id?: string}) {
+  const session = useSession();
+  if (!id || session.practiceId !== id) return <EmptyReport />;
+  return <ReportContent session={session} />;
+}
+
+function EmptyReport() {
+  return <div className="grid min-h-screen place-items-center px-5">
+    <div className="text-center">
+      <Buddy mood="happy" size={150} className="mx-auto" />
+      <h1 className="mt-4 font-display text-2xl font-semibold text-ink">还没有可复盘的对话</h1>
+      <p className="mt-2 text-muted">已保存的对话可以在练习历史里查看。</p>
+      <Link to="/progress" className="mt-6 inline-block">
+        <Button size="lg">查看练习历史</Button>
+      </Link>
+    </div>
+  </div>;
+}
+
+function SavedReport({id}: {id: string}) {
+  const [detail, setDetail] = useState<SessionDetail | null>();
+  useEffect(() => {
+    const generation = getAuthGeneration();
+    const controller = new AbortController();
+    const current = () => !controller.signal.aborted && generation === getAuthGeneration();
+    if (!/^\d{1,15}$/.test(id) || Number(id) < 1) { setDetail(null); return; }
+    void getSession(Number(id), controller.signal).then(result => {
+      if (current()) setDetail(result);
+    }).catch(() => { if (current()) setDetail(null); });
+    return () => controller.abort();
+  }, [id]);
+  if (!detail) return <main className="mx-auto max-w-3xl px-5 py-10">
+    <p role="status">{detail === null ? "暂时无法打开这次对话。" : "正在读取这次对话…"}</p>
+    <Link to="/progress">返回练习历史</Link>
+  </main>;
+  return <ReportContent storedReport={reportFromSaved(detail.scenario_id, detail)} session={{
+    practiceId: detail.client_session_id ?? null, scenarioId: detail.scenario_id, messages: detail.messages,
+    markedCorrections: (detail.corrections ?? []).filter(correction => correction.marked), custom: detail.custom ?? null,
+  }} />;
+}
+
+function ReportContent({session, storedReport}: {session: ReportSession; storedReport?: FeedbackResponse | null}) {
   const generation = useRef(getAuthGeneration()).current;
-  const scenarioId = useSession((s) => s.scenarioId);
-  const practiceId = useSession((s) => s.practiceId);
-  const messages = useSession((s) => s.messages);
-  const marked = useSession((s) => s.markedCorrections);
+  const { scenarioId, practiceId, messages, markedCorrections: marked, custom: customScene } = session;
   const isCustom = scenarioId === "custom";
-  const customScene = useCustomScene((s) => s.scene);
   const scenario =
     scenarioId && !isCustom ? getScenario(scenarioId) : undefined;
   const sceneLabel =
     scenario?.titleZh ?? (isCustom ? customScene?.title_zh : undefined);
   const hasSession = !!scenarioId && messages.some((m) => m.role === "user");
 
-  const [feedback, setFeedback] = useState<FeedbackResponse | null>(null);
-  const [loading, setLoading] = useState(hasSession);
+  const [feedback, setFeedback] = useState<FeedbackResponse | null>(storedReport ?? null);
+  const [loading, setLoading] = useState(hasSession && !storedReport);
   const [error, setError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState(Boolean(storedReport));
   const [attempt, setAttempt] = useState(0);
   // phrase index -> saved word id, so the chip can toggle collect / un-collect.
   const words = useWords((s) => s.words);
@@ -61,9 +115,24 @@ export default function Report() {
   }, [ensureWords]);
 
   useEffect(() => {
-    if (!hasSession || !scenarioId || generation !== getAuthGeneration()) return;
+    if (storedReport || !hasSession || !scenarioId || generation !== getAuthGeneration()) return;
     const ctrl = new AbortController();
     const myId = ++reqId.current;
+    const current = () => !ctrl.signal.aborted && myId === reqId.current && generation === getAuthGeneration();
+    const saveResult = async (candidate?: FeedbackResponse) => {
+      if (!practiceId) { if (candidate && current()) setFeedback(candidate); return; }
+      try {
+        const result = await persistSessionOnce(scenarioId, messages, candidate ?? unscoredSession(marked), practiceId, generation, customScene);
+        if (!current()) return;
+        const canonical = result ? reportFromSaved(scenarioId, result, candidate) : null;
+        if (canonical) { setFeedback(canonical); setError(null); }
+        else if (candidate) setFeedback(candidate);
+        setSaved(true);
+        setSaveError(Boolean(candidate && result?.overall === null));
+      } catch {
+        if (current()) { if (candidate) setFeedback(candidate); setSaveError(true); }
+      }
+    };
     setLoading(true);
     setError(null);
     postFeedback(
@@ -73,17 +142,13 @@ export default function Report() {
       isCustom ? (customScene ?? undefined) : undefined,
     )
       .then((f) => {
-        if (myId !== reqId.current || ctrl.signal.aborted || generation !== getAuthGeneration()) return;
-        const result = includeMarkedCorrections(f, marked);
-        setFeedback(result);
-        if (practiceId)
-          void persistSessionOnce(scenarioId, messages, result, practiceId, generation)
-            .then(() => { if (generation === getAuthGeneration() && !ctrl.signal.aborted) setSaved(true); })
-            .catch(() => { if (generation === getAuthGeneration() && !ctrl.signal.aborted) setSaveError(true); });
+        if (myId !== reqId.current || generation !== getAuthGeneration()) return;
+        return saveResult(includeMarkedCorrections(f, marked));
       })
       .catch(() => {
-        if (!ctrl.signal.aborted && myId === reqId.current && generation === getAuthGeneration())
-          setError("生成小结失败，请确认后端在运行后重试。");
+        if (myId !== reqId.current || generation !== getAuthGeneration()) return;
+        if (current()) setError("暂时无法生成小结，请重试。");
+        return saveResult();
       })
       .finally(() => {
         if (!ctrl.signal.aborted && myId === reqId.current && generation === getAuthGeneration()) setLoading(false);
@@ -94,11 +159,16 @@ export default function Report() {
   }, [attempt]);
 
   async function retrySave() {
-    if (!scenarioId || !practiceId || !feedback || saving || generation !== getAuthGeneration()) return;
+    if (!scenarioId || !practiceId || saving || generation !== getAuthGeneration()) return;
     setSaving(true);
     try {
-      await persistSessionOnce(scenarioId, messages, feedback, practiceId, generation);
-      if (generation === getAuthGeneration()) { setSaveError(false); setSaved(true); }
+      const result = await persistSessionOnce(scenarioId, messages, feedback ?? unscoredSession(marked), practiceId, generation, customScene);
+      if (generation === getAuthGeneration()) {
+        const canonical = result ? reportFromSaved(scenarioId, result, feedback ?? undefined) : null;
+        if (canonical) { setFeedback(canonical); setError(null); }
+        setSaveError(Boolean(feedback && result?.overall === null));
+        setSaved(true);
+      }
     } catch {
       if (generation === getAuthGeneration()) setSaveError(true);
     } finally {
@@ -106,29 +176,10 @@ export default function Report() {
     }
   }
 
-  if (!hasSession) {
-    return (
-      <div className="grid min-h-screen place-items-center px-5">
-        <PlayfulBackground />
-        <div className="text-center">
-          <Buddy mood="happy" size={150} className="mx-auto" />
-          <h1 className="mt-4 font-display text-2xl font-semibold text-ink">
-            还没有可复盘的对话
-          </h1>
-          <p className="mt-2 text-muted">
-            先去和 Pip 聊一段，这里就会出现你的课后小结。
-          </p>
-          <Link to="/" className="mt-6 inline-block">
-            <Button size="lg">去挑一个场景</Button>
-          </Link>
-        </div>
-      </div>
-    );
-  }
+  if (!hasSession) return <EmptyReport />;
 
   return (
     <div className="min-h-screen">
-      <PlayfulBackground celebrate={!!feedback} />
 
       <header className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-5 pt-6 print:hidden">
         <Link to="/" className={backLink}>
@@ -152,7 +203,7 @@ export default function Report() {
             role="alert"
             className="mb-4 rounded-2xl border border-border bg-surface p-4 text-sm text-ink"
           >
-            小结已生成，记录暂未保存。
+            {feedback ? "小结已生成，记录暂未保存。" : "对话和错句标记暂未保存。"}
             <button
               type="button"
               onClick={() => void retrySave()}
@@ -179,6 +230,7 @@ export default function Report() {
             <p role="alert" className="font-semibold text-ink">
               {error}
             </p>
+            {saved && <Link to="/progress" className="font-semibold text-coral-deep">对话和错句标记已保存为未评分 · 查看历史</Link>}
             <div className="flex gap-3">
               <Button onClick={() => setAttempt((value) => value + 1)}>
                 重试生成
@@ -193,33 +245,20 @@ export default function Report() {
           </section>
         )}
 
+        {error && !loading && marked.length > 0 && (
+          <CorrectionReview className="mt-4" corrections={marked} messages={messages} scenarioId={scenarioId}
+            custom={isCustom ? customScene ?? undefined : undefined} />
+        )}
+
         {feedback && !loading && (
           <>
             <p className="mb-4 hidden text-sm font-semibold text-muted print:block">
               Spoken 课后报告{sceneLabel ? ` · ${sceneLabel}` : ""} ·{" "}
               {new Date().toLocaleDateString("zh-CN")}
             </p>
-            <section className="relative overflow-hidden rounded-huge border border-border bg-surface p-6 shadow-pop md:p-9">
-              <div className="grid items-center gap-6 md:grid-cols-[auto_1fr_auto]">
-                <Buddy mood="cheer" size={128} className="mx-auto" />
-                <div className="text-center md:text-left">
-                  <p className="eyebrow">
-                    课后小结 · Debrief{sceneLabel ? ` · ${sceneLabel}` : ""}
-                  </p>
-                  <h1 className="mt-1 font-display text-2xl font-semibold leading-snug text-ink md:text-3xl">
-                    {feedback.summary}
-                  </h1>
-                  <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[#fff5d8] px-3 py-1.5 text-sm font-bold text-[#cf9612]">
-                    <Sparkles className="h-4 w-4" /> +
-                    {40 + Math.round(feedback.overall)} XP
-                  </span>
-                </div>
-                <div className="report-score">
-                  <strong>{feedback.overall}</strong>
-                  <span>/ 100 · 练习参考分</span>
-                </div>
-              </div>
-            </section>
+            <PracticeSummary scene={sceneLabel} summary={feedback.summary} score={feedback.overall}>
+              {saved ? "这次对话已计入练习进度" : "本次评分"}
+            </PracticeSummary>
 
             <div className="mt-6 grid gap-6 md:grid-cols-2">
               <section className="card p-6">
@@ -252,7 +291,7 @@ export default function Report() {
                 </div>
               </section>
 
-              <CorrectionReview corrections={feedback.corrections} messages={messages} scenarioId={scenarioId} />
+              <CorrectionReview corrections={feedback.corrections} messages={messages} scenarioId={scenarioId} custom={isCustom ? customScene ?? undefined : undefined} />
             </div>
 
             <div className="mt-6 grid gap-6 md:grid-cols-2">

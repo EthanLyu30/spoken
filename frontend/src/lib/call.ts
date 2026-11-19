@@ -12,15 +12,16 @@ import { createCaptureProcessor, type CaptureProcessor } from "./audioCapture";
 import { bindInteraction, newInteractionId, reportTiming } from "./telemetry";
 import { assertAuthGeneration, getAuthGeneration, subscribeAuthGeneration } from "./authToken";
 import { asrTurnBudgetMs } from "./transcribe";
+import { hasSustainedAudio } from "./incrementalPcm";
 import { ASR_QUOTA_MESSAGE, isAsrQuotaError } from "./asrQuota";
-import { asrFailure, AsrUserCancellation } from "./asrDiagnostics";
+import { asrFailure, asrFallbackReason, AsrUserCancellation, type AsrFallbackReason } from "./asrDiagnostics";
 
 export type CallPhase = "listening" | "thinking" | "speaking";
 
 export interface CallCallbacks {
   onPhase: (p: CallPhase) => void;
   /** Buffered transcription using the engine selected at utterance start. */
-  transcribe: (pcm: ArrayBuffer, engine: "local" | "cloud", signal: AbortSignal) => Promise<string>;
+  transcribe: (pcm: ArrayBuffer, engine: "local" | "cloud", signal: AbortSignal, liveFailure?: AsrFallbackReason) => Promise<string>;
   /** Read once when speech starts; the selected engine is fixed for that turn. */
   preferLocalAsr?: () => boolean;
   /**
@@ -186,7 +187,7 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     else void ensureStream(turnInteractionId);
   };
 
-  const handle = async (pcm: ArrayBuffer, useLocalAsr: boolean) => {
+  const handle = async (pcm: ArrayBuffer, useLocalAsr: boolean, sentLiveAudio: boolean) => {
     if (ended || identityGeneration !== getAuthGeneration()) return;
     const startedAt = performance.now();
     const interactionId = turnInteractionId ?? newInteractionId();
@@ -209,20 +210,23 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
       let text = "";
       let streamAttempted = false;
       let streamFailed = false;
+      let liveFailure: AsrFallbackReason | undefined = sentLiveAudio ? "disconnect" : undefined;
       if (!useLocalAsr && asr) {
         streamAttempted = true;
         try {
           text = (await asr.finishUtterance()).trim();
+          if (!text) liveFailure = "empty";
         } catch (error) {
           if (isAsrQuotaError(error)) throw error;
           streamFailed = true;
+          liveFailure = asrFallbackReason(asrFailure(error).asr_reason);
         }
       }
       assertAuthGeneration(identityGeneration, signal);
-      if (!text && (!streamAttempted || streamFailed)) {
-        // One complete-clip recovery. Its own direct→HTTP fallback is not
-        // wrapped in another retry, and a real empty stream final is not retried.
-        text = (await cb.transcribe(pcm, useLocalAsr ? "local" : "cloud", signal)).trim();
+      if (!text && (!streamAttempted || streamFailed || hasSustainedAudio(pcm))) {
+        // Recover at most once from the retained clip, including a live final
+        // that lost audible input. Never submit partial captions as answers.
+        text = (await cb.transcribe(pcm, useLocalAsr ? "local" : "cloud", signal, liveFailure)).trim();
       }
       assertAuthGeneration(identityGeneration, signal);
       clearTimeout(asrTimer);
@@ -242,7 +246,11 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
           cb.onPhase("speaking");
         }, signal);
         if (playback === "cancelled") outcome = "cancelled";
-      } else outcome = signal.aborted || ended ? "cancelled" : "error";
+      } else if (signal.aborted || ended) outcome = "cancelled";
+      else {
+        outcome = "error";
+        cb.onError("这句没有识别出文字，请再说一次。");
+      }
     } catch (error) {
       outcome = asrFailure(error, signal, ended).outcome;
       if (outcome === "timeout") cb.onError(recognizing ? "语音识别等待超时，请再说一次。" : "回复等待超时，请再试一次。");
@@ -348,8 +356,9 @@ export async function startVoiceCall(cb: CallCallbacks): Promise<VoiceCall> {
     if (done) {
       const pcm = floatToPcm16(resampleTo16k(flatten(collected), rate));
       const useLocalAsr = utteranceUsesLocalAsr;
+      const sentLiveAudio = cloudFramesSent > 0;
       reset();
-      void handle(pcm, useLocalAsr);
+      void handle(pcm, useLocalAsr, sentLiveAudio);
     }
   };
 

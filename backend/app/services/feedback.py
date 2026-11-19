@@ -27,6 +27,7 @@ Return a single JSON object, no prose, with exactly these keys:
 - "phrases": array (0-5) of natural words/phrases the learner could use next time, each {"text","note"} with a short Chinese gloss.
 - "tip": one actionable Chinese tip for next time.
 
+For an article error, isolate a short noun phrase and its article edit without rewording the rest of the sentence. For a pure deletion, quote exactly the text to remove and use an empty suggestion. Do not count translation as an article error.
 Be supportive and specific. Base everything only on what the learner actually said; do not invent mistakes. If the learner barely spoke, encourage them and give gentle, lower scores."""
 
 
@@ -67,7 +68,7 @@ async def generate_feedback(
             for item in data["corrections"]:
                 if isinstance(item, dict):
                     try:
-                        corrections.append(Correction.model_validate({**item, "marked": False}))
+                        corrections.append(Correction.model_validate({**item, "marked": False, "self_marked": False}))
                     except ValidationError:
                         continue
             data["corrections"] = ground_corrections(corrections, history)[:4]

@@ -12,7 +12,7 @@ from itertools import islice
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import Date, and_, case, cast, delete, func, literal, select, update
+from sqlalchemy import Date, and_, case, cast, delete, func, inspect, literal, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection, Engine
@@ -184,7 +184,7 @@ def _supplied_activity(events: list[LearningEvent], zone: ZoneInfo, today: date)
         collected=len({e.word_text for e in events if e.event_type == "word_collected" and e.word_text is not None}),
         reviewed=len({e.word_text for e in events if e.event_type == "word_reviewed" and e.word_text is not None}),
         interviews=sum(e.kind == "interview" for e in practices),
-        conversation_max=max((e.score or 0 for e in conversations), default=0),
+        conversation_max=max((e.score for e in conversations if e.score is not None), default=0),
         pronunciation_max=max((e.score or 0 for e in practices if e.kind == "pronunciation"), default=0),
         scenarios=len({e.scenario_id for e in conversations if e.scenario_id}),
         days={_local_date(e.occurred_at, zone) for e in events if e.occurred_at is not None},
@@ -310,12 +310,15 @@ def _legacy_events(db: Session):
     # Every row has the same nullable column shape, including batches crossing
     # source types. Unknown legacy dates stay NULL; source text is never loaded.
     empty = {column.name: None for column in LearningEvent.__table__.columns}
+    session_columns = {column["name"] for column in inspect(db.connection()).get_columns("sessions")}
+    session_score = (case((PracticeSession.scored, PracticeSession.overall))
+                     if "scored" in session_columns else PracticeSession.overall)
     for row in db.execute(select(PracticeSession.id, PracticeSession.client_id,
             PracticeSession.client_session_id, PracticeSession.created_at,
-            PracticeSession.scenario_id, PracticeSession.overall).execution_options(yield_per=90)):
+            PracticeSession.scenario_id, session_score.label("score")).execution_options(yield_per=90)):
         yield empty | dict(event_key=f"legacy:session:{row.id}", client_id=row.client_id,
             event_type="session", source_id=row.id, client_session_id=row.client_session_id,
-            occurred_at=row.created_at, scenario_id=row.scenario_id, score=row.overall)
+            occurred_at=row.created_at, scenario_id=row.scenario_id, score=row.score)
     for row in db.execute(select(PracticeRecord.id, PracticeRecord.client_id,
             PracticeRecord.created_at, PracticeRecord.kind, PracticeRecord.score).execution_options(yield_per=90)):
         yield empty | dict(event_key=f"legacy:practice:{row.id}", client_id=row.client_id,

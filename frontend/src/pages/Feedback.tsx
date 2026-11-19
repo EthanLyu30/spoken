@@ -1,15 +1,18 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowRight, ArrowUpRight, Check, Coffee, Drumstick, Gift, Mail, Sandwich } from "lucide-react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Buddy } from "../components/Buddy";
 import { BottomNav } from "../components/BottomNav";
 import {
   awardLabels, feedbackCategories, feedbackDate, feedbackEmailError, feedbackEmailPattern, feedbackSources, feedbackStatuses,
-  getFeedbackPool, getMyFeedback,
+  FeedbackApiError, getFeedbackPool, getMyFeedbackPage,
   localFeedbackReceipts, newFeedbackRequestId, privateReceiptPath, rememberGuestReceipt, submitProductFeedback,
   type FeedbackCategory, type FeedbackListItem, type FeedbackPool, type FeedbackSource,
 } from "../lib/productFeedbackApi";
 import { useAuth } from "../store/auth";
+import { getAuthGeneration, getToken } from "../lib/authToken";
+
+const guestPageSize = 20;
 
 const tiers = [
   { amount: 10, icon: Coffee, heading: "确认一个小问题",
@@ -46,16 +49,27 @@ export default function Feedback() {
   const [params] = useSearchParams();
   const rawSource = params.get("from") ?? "";
   const source: FeedbackSource = Object.prototype.hasOwnProperty.call(feedbackSources, rawSource) ? rawSource as FeedbackSource : "direct";
+  const location = useLocation();
   const user = useAuth(state => state.user);
   const navigate = useNavigate();
   const [pool, setPool] = useState<FeedbackPool | null>(null);
   const [poolError, setPoolError] = useState(false);
-  const [history, setHistory] = useState<FeedbackListItem[]>([]);
+  const [accountHistory, setHistory] = useState<{ owner: number; items: FeedbackListItem[]; next: string | null }>();
+  const accountId = user?.id;
+  const currentHistory = accountHistory?.owner === accountId ? accountHistory : undefined;
+  const history = currentHistory?.items ?? [];
   const [historyError, setHistoryError] = useState(false);
-  const [historyRevision, refreshHistory] = useState(0);
-  const [guestReceipts] = useState(localFeedbackReceipts);
-  const [category, setCategory] = useState<FeedbackCategory | "">("");
-  const [description, setDescription] = useState("");
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const historyWork = useRef<AbortController | null>(null);
+  const [guestVisible, setGuestVisible] = useState(guestPageSize);
+  const guestHistory = accountId == null ? Object.entries(localFeedbackReceipts()) : [];
+  const [category, setCategory] = useState<FeedbackCategory | "">(source === "coaching" ? "learning" : "");
+  const [description, setDescription] = useState(() => {
+    if (source !== "coaching") return "";
+    const coaching = location.state?.coaching as { title?: string; tasks?: string[] } | undefined;
+    const context = coaching?.title ? [`练习场景 · ${coaching.title}`, ...(coaching.tasks ?? [])] : [];
+    return ["这组练习没有练到我的错误。", ...context, ""].join("\n");
+  });
   const [email, setEmail] = useState("");
   const [emailError, setEmailError] = useState(false);
   const [allowAI, setAllowAI] = useState(false);
@@ -65,6 +79,10 @@ export default function Feedback() {
   const request = useRef<{ body: string; id: string } | null>(null);
   const work = useRef<AbortController | null>(null);
   const formStart = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (source === "coaching") formStart.current?.focus();
+  }, [source]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -87,13 +105,48 @@ export default function Feedback() {
     };
   }, []);
 
-  useEffect(() => {
+  const loadHistory = useCallback(async (before: string | null) => {
+    if (accountId == null || historyWork.current) return;
     const controller = new AbortController();
-    if (user?.id != null) void getMyFeedback(controller.signal).then(items => {
-      if (!controller.signal.aborted) { setHistory(items); setHistoryError(false); }
-    }).catch(() => { if (!controller.signal.aborted) setHistoryError(true); });
-    return () => controller.abort();
-  }, [user?.id, historyRevision]);
+    historyWork.current = controller;
+    const generation = getAuthGeneration();
+    const current = () => !controller.signal.aborted && generation === getAuthGeneration();
+    setHistoryLoading(true);
+    setHistoryError(false);
+    try {
+      let cursor = before;
+      const page = await getMyFeedbackPage(cursor, controller.signal).catch(failure => {
+        if (!cursor || !(failure instanceof FeedbackApiError) || failure.status !== 404 || !current()) throw failure;
+        cursor = null;
+        setHistory(previous => previous?.owner === accountId ? {...previous, next: null} : previous);
+        return getMyFeedbackPage(null, controller.signal);
+      });
+      if (!current()) return;
+      setHistory(previous => ({
+        owner: accountId,
+        items: cursor && previous?.owner === accountId
+          ? [...new Map([...previous.items, ...page.items].map(item => [item.id, item])).values()]
+          : page.items,
+        next: page.next_cursor,
+      }));
+    } catch {
+      if (current()) setHistoryError(true);
+    } finally {
+      if (historyWork.current === controller) historyWork.current = null;
+      if (current()) setHistoryLoading(false);
+    }
+  }, [accountId]);
+
+  useEffect(() => {
+    setHistory(undefined);
+    setHistoryError(false);
+    setHistoryLoading(false);
+    void loadHistory(null);
+    return () => {
+      historyWork.current?.abort();
+      historyWork.current = null;
+    };
+  }, [loadHistory]);
 
   useEffect(() => () => work.current?.abort(), []);
 
@@ -106,6 +159,8 @@ export default function Feedback() {
       return;
     }
     inFlight.current = true;
+    const generation = getAuthGeneration();
+    const isGuest = !getToken();
     setBusy(true);
     setError("");
     const controller = new AbortController();
@@ -115,9 +170,9 @@ export default function Feedback() {
     if (request.current?.body !== body) request.current = { body, id: newFeedbackRequestId() };
     try {
       const item = await submitProductFeedback({ ...payload, request_id: request.current.id }, controller.signal);
-      if (controller.signal.aborted) return;
-      if (user?.id == null) rememberGuestReceipt(item.id, item.receipt_key);
-      navigate(privateReceiptPath(item.id, item.receipt_key), { state: { newFeedback: true } });
+      if (controller.signal.aborted || generation !== getAuthGeneration()) return;
+      if (isGuest) rememberGuestReceipt(item.id, item.receipt_key, item.created_at);
+      navigate(privateReceiptPath(item.id, isGuest ? item.receipt_key : undefined), { state: { newFeedback: true } });
     } catch (failure) {
       if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "暂时无法提交，请重试。");
     } finally {
@@ -212,15 +267,19 @@ export default function Feedback() {
         </aside>
       </div>
 
-      {(history.length > 0 || Object.keys(guestReceipts).length > 0 || historyError) && <section className="feedback-panel feedback-history">
+      {(history.length > 0 || guestHistory.length > 0 || historyError) && <section className="feedback-panel feedback-history">
         <h2>我的反馈</h2>
-        {historyError && <p className="feedback-muted">账号反馈暂时无法读取。 <button className="ui-link" type="button"
-          onClick={() => refreshHistory(n => n + 1)}>重试</button></p>}
+        {historyError && <p className="feedback-muted" role="status">账号反馈暂时无法读取。 <button className="ui-link" type="button"
+          onClick={() => void loadHistory(currentHistory?.next ?? null)}>重试</button></p>}
         {history.map(item => <Link key={item.id} to={privateReceiptPath(item.id)}>
           <span>{feedbackCategories[item.category]} · {feedbackDate(item.created_at)}</span><span>{feedbackStatuses[item.status]} <ArrowUpRight size={15} aria-hidden="true" /></span>
         </Link>)}
-        {Object.entries(guestReceipts).filter(([id]) => !history.some(item => item.id === id)).map(([id, key]) =>
+        {currentHistory?.next && <button className="ui-secondary" type="button" disabled={historyLoading}
+          onClick={() => void loadHistory(currentHistory.next)}>{historyLoading ? "正在加载…" : "查看更早"}</button>}
+        {guestHistory.slice(0, guestVisible).map(([id, key]) =>
           <Link key={id} to={privateReceiptPath(id, key)}><span>本机游客回执 · {id.slice(-6).toUpperCase()}</span><ArrowUpRight size={15} aria-hidden="true" /></Link>)}
+        {guestHistory.length > guestVisible && <button className="ui-secondary" type="button"
+          onClick={() => setGuestVisible(visible => visible + guestPageSize)}>查看更早的游客回执</button>}
       </section>}
     </main>
     <BottomNav />

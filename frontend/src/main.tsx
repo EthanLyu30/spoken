@@ -6,6 +6,7 @@ import App from "./App";
 import "./index.css";
 import "./ui.css";
 import "./learning.css";
+import "./practice-surfaces.css";
 import "./product-feedback.css";
 import { bootstrapLocalSpeechModels } from "./lib/localSpeech/bootstrap";
 import { initializeAuthSync } from "./lib/authSync";

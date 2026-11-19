@@ -64,7 +64,7 @@ it("uses a late browser voice without preparing a cloud connection", async () =>
   vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([]);
   const fetcher=vi.fn(async()=>Response.json({ticket:"e".repeat(32)}));vi.stubGlobal("fetch",fetcher);
   const preparation=prepareSpeech();
-  await vi.advanceTimersByTimeAsync(600);
+  await vi.advanceTimersByTimeAsync(2_100);
   vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([{name:"Late Natural",voiceURI:"late",lang:"en-US"} as SpeechSynthesisVoice]);
   const speaking=speakText("Final reply.","cafe",{preparation});
   await vi.advanceTimersByTimeAsync(0);
@@ -129,13 +129,13 @@ it("waits for the final signal before speaking a single sentence at the buffer e
   await done;
 });
 
-it("overlaps empty browser discovery with generation so final text has no repeated 500 ms wait", async () => {
+it("overlaps empty browser discovery with generation so final text has no second discovery window", async () => {
   vi.useFakeTimers(); mocks.settings.engine="browser";
   const subscribe=vi.fn(), unsubscribe=vi.fn();
   vi.stubGlobal("speechSynthesis",{getVoices:()=>[],addEventListener:subscribe,removeEventListener:unsubscribe,cancel:nativeCancel,speak:vi.fn()});
   const q=createSpeechQueue(); q.feed("Partial text.");
   expect(subscribe).toHaveBeenCalledOnce();
-  await vi.advanceTimersByTimeAsync(500);
+  await vi.advanceTimersByTimeAsync(2_000);
   expect(unsubscribe).toHaveBeenCalledOnce();
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
   const done=q.end("Final whole reply.");
@@ -148,7 +148,7 @@ it("rechecks late Natural voices after an early empty discovery result", async (
   const voices=vi.fn<()=>SpeechSynthesisVoice[]>().mockReturnValue([]);
   vi.spyOn(window.speechSynthesis,"getVoices").mockImplementation(voices);
   const q=createSpeechQueue();
-  await vi.advanceTimersByTimeAsync(700);
+  await vi.advanceTimersByTimeAsync(2_100);
   voices.mockReturnValue([{name:"Microsoft Jenny Online (Natural)",voiceURI:"late-natural",lang:"en-US"} as SpeechSynthesisVoice]);
   const done=q.end("A final complete sentence.");
   await vi.advanceTimersByTimeAsync(0);
@@ -158,14 +158,32 @@ it("rechecks late Natural voices after an early empty discovery result", async (
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
 });
 
+it("starts a standalone read when English voices appear after 500 ms without an event", async () => {
+  vi.useFakeTimers();
+  const voices = vi.spyOn(window.speechSynthesis, "getVoices").mockReturnValue([]);
+  const speaking = speakText("Could you help me?");
+  await vi.advanceTimersByTimeAsync(800);
+  expect(utterances).toHaveLength(0);
+  voices.mockReturnValue([{ name: "Device English", voiceURI: "en", lang: "en-US" } as SpeechSynthesisVoice]);
+  await vi.advanceTimersByTimeAsync(100);
+  expect(utterances).toHaveLength(1);
+  utterances[0].onstart?.();
+  utterances[0].onend?.();
+  await speaking.done;
+  const finished = samples.find(s => s.operation === "speech.complete");
+  expect(finished).toMatchObject({ outcome: "ok", playback_started: true, interaction_id: expect.stringMatching(/^[a-f0-9]{32}$/) });
+  expect(finished).toMatchObject({voice_initial_state: "empty_list", voice_discovery_trigger: "poll", voice_discovery_ms: expect.any(Number)});
+  expect(samples.find(s => s.operation === "speech.voice_resolution")?.interaction_id).toBe(finished?.interaction_id);
+});
+
 it("does not select browser mode from an English voice that disappeared during generation", async () => {
   vi.useFakeTimers(); mocks.settings.engine="browser";
   const voices=vi.spyOn(window.speechSynthesis,"getVoices");
   const q=createSpeechQueue();
-  await vi.advanceTimersByTimeAsync(700);
+  await vi.advanceTimersByTimeAsync(2_100);
   voices.mockReturnValue([]);
   const done=q.end("A complete reply.");
-  await vi.advanceTimersByTimeAsync(500);
+  await vi.advanceTimersByTimeAsync(2_000);
   expect(utterances).toHaveLength(0);
   await done;expect(q.failed).toBe(true);expect(audios).toHaveLength(0);
 });
@@ -176,7 +194,7 @@ it("waits only the unfinished discovery budget after final text and cancels that
   const q=createSpeechQueue();
   await vi.advanceTimersByTimeAsync(200);
   const done=q.end("A whole reply.");
-  await vi.advanceTimersByTimeAsync(299);
+  await vi.advanceTimersByTimeAsync(1_799);
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(1);
   await done;expect(q.failed).toBe(true);expect(audios).toHaveLength(0);
@@ -424,11 +442,12 @@ it("stops after one failed local recovery rather than cycling through voices", a
   await vi.advanceTimersByTimeAsync(0);
   utterances[0].onend?.();await vi.advanceTimersByTimeAsync(0);
   expect(utterances).toHaveLength(2);
-  utterances[1].onend?.();await done;
+  utterances[1].onerror?.({error: "synthesis-failed"});await done;
   expect(utterances).toHaveLength(2);
   expect(q.failed).toBe(true);
   expect(samples.filter(s=>s.operation==="speech.complete")).toEqual([expect.objectContaining({
     outcome: "error", playback_started: false, reason: "end_before_start",
+    speech_fallback_failure: "speech_error", speech_fallback_error_code: "synthesis-failed",
   })]);
 });
 
@@ -528,7 +547,7 @@ it("releases late local audio results after stop without starting playback", asy
 });
 it("keeps failed local inference without an English voice as a failure", async () => {
   vi.useFakeTimers();mocks.settings.engine="local";mocks.localReady=true;vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([]);
-  mocks.synthesize.mockRejectedValue(new Error("unavailable"));const q=createSpeechQueue();const done=q.end("Whole reply.");await vi.advanceTimersByTimeAsync(500);await done;
+  mocks.synthesize.mockRejectedValue(new Error("unavailable"));const q=createSpeechQueue();const done=q.end("Whole reply.");await vi.advanceTimersByTimeAsync(2_000);await done;
   expect(q.failed).toBe(true);expect(samples).toContainEqual(expect.objectContaining({operation:"speech.complete",outcome:"error"}));
   expect(samples).not.toContainEqual(expect.objectContaining({operation:"speech.playback"}));expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
 });
@@ -583,10 +602,13 @@ it.each(["end", "error"])("reports an error when native reports %s without start
 });
 it("reports unavailable for a device with only non-English voices", async () => {
   vi.useFakeTimers();vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([{lang:"zh-CN"} as SpeechSynthesisVoice]);
-  const q=createSpeechQueue();const done=q.end("First sentence. Second sentence.");await vi.advanceTimersByTimeAsync(500);await done;
+  const q=createSpeechQueue();const done=q.end("First sentence. Second sentence.");await vi.advanceTimersByTimeAsync(2_000);await done;
   expect(q.failed).toBe(true);expect(q.status).toMatchObject({phase:"error",effectiveEngine:null,fallbackReason:"browser-unavailable"});
   expect(utterances).toHaveLength(0);expect(audios).toHaveLength(0);expect(mocks.synthesize).not.toHaveBeenCalled();expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
-  expect(samples).toContainEqual(expect.objectContaining({operation:"speech.complete",outcome:"error"}));
+  expect(samples).toContainEqual(expect.objectContaining({
+    operation: "speech.complete", outcome: "error", voice_availability: "no_english_voice",
+    voice_initial_state: "no_english_voice", voice_discovery_trigger: "deadline", speech_failure_stage: "voice_discovery",
+  }));
 });
 it("cancels a silent native startup and ignores late callbacks without replay", async () => {
   vi.useFakeTimers();const q=createSpeechQueue();const done=q.end("A whole reply.");await vi.advanceTimersByTimeAsync(0);
@@ -783,7 +805,7 @@ it("amortizes standalone empty discovery without owning playback and cancels its
   expect(subscribe).toHaveBeenCalledOnce(); controller.abort();
   expect(unsubscribe).toHaveBeenCalledOnce(); expect(discarded.consume()).toBeUndefined(); expect(vi.getTimerCount()).toBe(0);
   const preparation=prepareSpeech();
-  await vi.advanceTimersByTimeAsync(600);
+  await vi.advanceTimersByTimeAsync(2_100);
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled(); expect(nativeCancel).not.toHaveBeenCalled();
   const speech=speakText("Final reply.","cafe",{preparation});
   await vi.advanceTimersByTimeAsync(0);
@@ -821,7 +843,7 @@ it("browser-only policy reports missing English voices without cloud requests", 
   vi.useFakeTimers();mocks.settings.engine="browser";
   vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValue([]);
   const q=createSpeechQueue();const done=q.end("A whole reply.");
-  await vi.advanceTimersByTimeAsync(500);
+  await vi.advanceTimersByTimeAsync(2_000);
   expect(mocks.fetchTtsUrl).not.toHaveBeenCalled();
   await done;expect(q.failed).toBe(true);
   expect(q.status).toMatchObject({phase:"error",effectiveEngine:null,fallbackReason:"browser-unavailable"});
@@ -842,7 +864,7 @@ it("browser-only preparation does not request cloud connections without English 
 
 it("does not use an implicit default when English voices vanish at final selection",async()=>{
   const english={name:"Device English",voiceURI:"device-en",lang:"en-US"} as SpeechSynthesisVoice;
-  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValueOnce([english]).mockReturnValueOnce([english]).mockReturnValue([]);
+  vi.spyOn(window.speechSynthesis,"getVoices").mockReturnValueOnce([english]).mockReturnValue([]);
   const q=createSpeechQueue();const done=q.end("A complete reply.");
   await Promise.resolve();await Promise.resolve();
   expect(utterances).toHaveLength(0);await done;

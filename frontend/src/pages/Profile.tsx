@@ -16,7 +16,6 @@ import {
   Trophy,
   Volume2,
 } from "lucide-react";
-import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { Ring } from "../components/ui/Ring";
 import type { EChartsOption } from "echarts";
@@ -67,9 +66,10 @@ export default function Profile() {
 
   const sessionCount = stats?.total_sessions ?? sessions.length;
   const wordCount = words.length;
-  const avg = sessions.length
-    ? Math.round(sessions.reduce((a, s) => a + s.overall, 0) / sessions.length)
-    : 0;
+  const scoredSessions = sessions.flatMap(({overall}) => overall === null ? [] : [overall]);
+  const avg = scoredSessions.length
+    ? Math.round(scoredSessions.reduce((a, score) => a + score, 0) / scoredSessions.length)
+    : null;
 
   const level = stats?.level ?? 1;
   const xp = stats?.xp ?? 0;
@@ -158,7 +158,6 @@ export default function Profile() {
 
   return (
     <div className="min-h-screen pb-24">
-      <PlayfulBackground />
 
       <main className="mx-auto w-full max-w-3xl px-5 py-8">
         <div className="ui-page-head">
@@ -238,7 +237,7 @@ export default function Profile() {
                   />
                   <Stat
                     icon={<Trophy className="h-4 w-4" />}
-                    value={!sessions.length && (pending.includes("sessions") || errors.includes("sessions")) ? "—" : avg || "—"}
+                    value={avg ?? "—"}
                     label="近期平均分"
                   />
                 </div>

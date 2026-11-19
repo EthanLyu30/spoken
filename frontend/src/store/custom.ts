@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import { getToken, subscribeAuthGeneration, tokenCacheIdentity } from "../lib/authToken";
+import { getClientId } from "../lib/clientId";
 import { resilientStorage } from "../lib/resilientStorage";
 import { type CustomScene } from "../lib/api";
 
@@ -13,13 +14,37 @@ interface CustomState {
   clear: () => void;
 }
 
-export const useCustomScene = create<CustomState>()(
-  persist(
-    (set) => ({
-      scene: null,
-      setScene: (scene) => set({ scene }),
-      clear: () => set({ scene: null }),
-    }),
-    { name: "spoken-custom-scene", storage: createJSONStorage(() => resilientStorage) },
-  ),
-);
+function storageKey(): string | null {
+  const token = getToken();
+  if (!token) return "spoken-custom-scene:guest:" + getClientId();
+  const identity = tokenCacheIdentity(token);
+  return identity ? "spoken-custom-scene:account:" + JSON.stringify([identity.subject, identity.version]) : null;
+}
+
+function readScene(): CustomScene | null {
+  const key = storageKey();
+  try {
+    const raw = key ? resilientStorage.getItem(key) : null;
+    return raw ? JSON.parse(raw) as CustomScene : null;
+  } catch {
+    return null;
+  }
+}
+
+export const useCustomScene = create<CustomState>((set) => ({
+  scene: readScene(),
+  setScene(scene) {
+    const key = storageKey();
+    if (key) resilientStorage.setItem(key, JSON.stringify(scene));
+    set({ scene });
+  },
+  clear() {
+    const key = storageKey();
+    if (key) resilientStorage.removeItem(key);
+    set({ scene: null });
+  },
+}));
+
+subscribeAuthGeneration(() => {
+  useCustomScene.setState({ scene: readScene() });
+});

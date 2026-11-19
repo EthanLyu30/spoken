@@ -2,8 +2,9 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, StrictBool, ValidationError, field_validator
 
+from app.schemas.coaching import PracticeExercise
 from app.schemas.custom import CustomScene
 from app.schemas.feedback import CorrectionCategory
 
@@ -28,7 +29,9 @@ class TurnCorrectionRequest(BaseModel):
     scenario_id: str = Field(min_length=1, max_length=64)
     text: str = Field(min_length=1, max_length=600)
     previous_partner_message: str = Field(default="", max_length=600)
+    replay_original: str = Field(default="", max_length=2000)
     custom: CustomScene | None = None
+    practice_exercise: PracticeExercise | None = None
 
     @field_validator("text")
     @classmethod
@@ -50,3 +53,7 @@ class TurnCorrectionResponse(BaseModel):
     suggestion: str = Field(min_length=1, max_length=800)
     issues: list[TurnCorrectionIssue] = Field(default_factory=list, max_length=6)
     explanation: str = Field(min_length=1, max_length=800)
+
+
+class PracticeExerciseCorrection(TurnCorrectionResponse):
+    task_met: StrictBool

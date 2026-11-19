@@ -3,6 +3,7 @@ import { Flag } from "lucide-react";
 import { type Scenario, difficultyLabel } from "../data/scenarios";
 import { scenarioIcons } from "../lib/icons";
 import { xpReward } from "../data/progress";
+import latte from "../assets/prep/latte.webp";
 
 /** All labels and links remain live catalogue data; illustration is decorative. */
 export function JourneyPath({ scenarios }: { scenarios: Scenario[] }) {
@@ -17,8 +18,8 @@ export function JourneyPath({ scenarios }: { scenarios: Scenario[] }) {
                 to={`/prepare/${s.id}`}
                 className={`journey-stop stop-${i + 1}`}
               >
-                <span className="stop-icon">
-                  <Icon />
+                <span className={s.id === "cafe" ? "stop-icon stop-latte" : "stop-icon"}>
+                  {s.id === "cafe" ? <img src={latte} width={56} height={47} alt="" /> : <Icon />}
                   <b>{i + 1}</b>
                 </span>
                 <span className="stop-label">

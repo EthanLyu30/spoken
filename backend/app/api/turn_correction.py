@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.chat import get_client
 from app.data import scenarios as catalog
 from app.schemas.turn_correction import (
+    PracticeExerciseCorrection,
     TurnCorrectionRequest,
     TurnCorrectionResponse,
 )
@@ -17,7 +18,7 @@ from app.core.observability import trace_classify
 router = APIRouter(tags=["turn-correction"])
 
 
-@router.post("/turn-correction", response_model=TurnCorrectionResponse)
+@router.post("/turn-correction", response_model=PracticeExerciseCorrection | TurnCorrectionResponse)
 async def turn_correction(
     request: TurnCorrectionRequest,
     client: DeepSeekClient = Depends(get_client),
@@ -26,7 +27,7 @@ async def turn_correction(
         scenario = catalog.scene_from_custom(request.custom)
     else:
         scenario = catalog.get_scenario(request.scenario_id)
-        if scenario is None:
+        if scenario is None and not (request.scenario_id == "custom" and request.replay_original.strip()):
             raise HTTPException(
                 status_code=404,
                 detail=f"Unknown scenario: {request.scenario_id}",

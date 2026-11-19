@@ -59,6 +59,10 @@ def owner_id(authorization: str | None = Header(default=None), db: Session = Dep
     return authenticated_user(db, authorization).id if authorization is not None else None
 
 
+def guest_digest(client_id: str | None = Header(default=None, alias="X-Client-Id")) -> str | None:
+    return service.guest_owner_digest(client_id)
+
+
 def owned_feedback(
     ticket_id: str,
     secret: str | None = Header(None, alias="X-Feedback-Key", min_length=64, max_length=64,
@@ -67,6 +71,13 @@ def owned_feedback(
     db: Session = Depends(get_db),
 ) -> ProductFeedback:
     return service.verify_access(db, ticket_id, secret, owner)
+
+
+def editable_feedback(row: ProductFeedback = Depends(owned_feedback),
+                      device: str | None = Depends(guest_digest)) -> ProductFeedback:
+    if not service.can_manage_receipt(row, device):
+        raise HTTPException(403, "请在最初提交反馈的浏览器打开回执后操作。")
+    return row
 
 
 def admin_feedback(ticket_id: str, db: Session = Depends(get_db)) -> ProductFeedback:
@@ -84,11 +95,13 @@ def pilot(db: Session = Depends(get_db)):
 @router.post("/product-feedback", status_code=201, dependencies=[Depends(no_cache)])
 def submit(payload: SubmitFeedback, request: Request, tasks: BackgroundTasks,
            owner: int | None = Depends(owner_id), db: Session = Depends(get_db),
-           client: DeepSeekClient = Depends(get_client)):
+           client: DeepSeekClient = Depends(get_client), device: str | None = Depends(guest_digest)):
     _limit(request, "submit", 24)
     if owner is not None:
         authenticated_user(db, request.headers.get("authorization"), lock_progress=True)
-    record, created = service.store_feedback(db, payload, owner)
+    elif device is None:
+        raise HTTPException(400, "无法识别本机游客身份，请刷新后重试。")
+    record, created = service.store_feedback(db, payload, owner, device if owner is None else None)
     if record.email and not record.email_verified:
         tasks.add_task(mail.send_verification, record.id)
     tasks.add_task(mail.notify_owner, record.id)
@@ -100,18 +113,43 @@ def submit(payload: SubmitFeedback, request: Request, tasks: BackgroundTasks,
 @router.get("/product-feedback/mine", dependencies=[Depends(no_cache)])
 def mine(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     rows = db.scalars(select(ProductFeedback).where(ProductFeedback.owner_id == user.id)
-                      .order_by(ProductFeedback.created_at.desc()).limit(50))
+                      .order_by(ProductFeedback.created_at.desc(), ProductFeedback.id.desc()).limit(50))
+    return _feedback_entries(rows)
+
+
+@router.get("/product-feedback/mine/page", dependencies=[Depends(no_cache)])
+def mine_page(user: User = Depends(get_current_user), db: Session = Depends(get_db),
+              before: str | None = Query(default=None, pattern=r"^[a-f0-9]{24}$"),
+              limit: int = Query(default=20, ge=1, le=50)):
+    query = select(ProductFeedback).where(ProductFeedback.owner_id == user.id)
+    if before is not None:
+        cursor = db.scalar(query.where(ProductFeedback.id == before))
+        if cursor is None:
+            raise HTTPException(404, "反馈分页位置已失效，请刷新列表。")
+        query = query.where(or_(ProductFeedback.created_at < cursor.created_at,
+            and_(ProductFeedback.created_at == cursor.created_at, ProductFeedback.id < cursor.id)))
+    rows = db.scalars(query.order_by(ProductFeedback.created_at.desc(), ProductFeedback.id.desc()).limit(limit + 1)).all()
+    return {"items": _feedback_entries(rows[:limit]), "next_cursor": rows[limit - 1].id if len(rows) > limit else None}
+
+
+def _feedback_entries(rows):
     return [{"id": row.id, "category": row.category, "created_at": service.iso(row.created_at),
              "status": service.displayed_status(row), "amount": row.amount} for row in rows]
 
 
 @router.get("/product-feedback/{ticket_id}", dependencies=[Depends(no_cache)])
-def receipt(row: ProductFeedback = Depends(owned_feedback), db: Session = Depends(get_db)):
-    return service.serialize(service.expire_receipt(db, row))
+def receipt(row: ProductFeedback = Depends(owned_feedback), db: Session = Depends(get_db),
+            device: str | None = Depends(guest_digest)):
+    row = service.expire_receipt(db, row)
+    can_manage = service.can_manage_receipt(row, device)
+    result = service.serialize(row)
+    if not can_manage:
+        result["claim_code"] = None
+    return {**result, "can_manage": can_manage}
 
 
 @router.put("/product-feedback/{ticket_id}/claim", dependencies=[Depends(no_cache)])
-def claim(payload: ClaimFeedback, request: Request, row: ProductFeedback = Depends(owned_feedback),
+def claim(payload: ClaimFeedback, request: Request, row: ProductFeedback = Depends(editable_feedback),
           db: Session = Depends(get_db)):
     _limit(request, "claim", 60)
     row = service.lock_ticket(db, row, reward=True)
@@ -127,7 +165,7 @@ def claim(payload: ClaimFeedback, request: Request, row: ProductFeedback = Depen
 
 
 @router.put("/product-feedback/{ticket_id}/supplement", dependencies=[Depends(no_cache)])
-def supplement(payload: SupplementFeedback, row: ProductFeedback = Depends(owned_feedback),
+def supplement(payload: SupplementFeedback, row: ProductFeedback = Depends(editable_feedback),
                db: Session = Depends(get_db)):
     row = service.lock_ticket(db, row)
     if row.removed_at is not None:
@@ -145,7 +183,7 @@ def supplement(payload: SupplementFeedback, row: ProductFeedback = Depends(owned
 
 @router.post("/product-feedback/{ticket_id}/email", status_code=202, dependencies=[Depends(no_cache)])
 def request_email(payload: FeedbackEmail, request: Request, tasks: BackgroundTasks,
-                  row: ProductFeedback = Depends(owned_feedback), db: Session = Depends(get_db)):
+                  row: ProductFeedback = Depends(editable_feedback), db: Session = Depends(get_db)):
     if not email_actions_enabled():
         raise HTTPException(503, "邮件暂不可用，你仍可在私密回执查看进度。")
     _limit(request, "email", 12)

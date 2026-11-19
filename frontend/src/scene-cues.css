@@ -1,0 +1,72 @@
+.cue-editor-heading, .cue-form-actions, .cue-reference-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem 1rem;
+}
+.cue-editor-heading { justify-content: space-between; }
+.cue-editor-heading h2 { margin: 0; color: var(--ink); font-size: 1.23rem; font-weight: 800; }
+.cue-text-action, .cue-bookmark, .cue-reference-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .35rem;
+  min-height: 36px;
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--coral-deep);
+}
+.cue-text-action:hover, .cue-bookmark:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
+.cue-editor {
+  margin-block: .6rem 1rem;
+  padding-block: .75rem 1rem;
+  border-block: 1px solid var(--border);
+}
+.cue-editor label { display: grid; gap: .25rem; min-width: 0; margin-bottom: .6rem; font-size: .82rem; font-weight: 700; }
+.cue-editor input, .cue-editor select, .cue-editor textarea {
+  width: 100%;
+  min-width: 0;
+  padding: .5rem .65rem;
+  border: 1px solid var(--border);
+  border-radius: .5rem;
+  color: var(--ink);
+  background: var(--surface);
+  font: inherit;
+  font-weight: 500;
+}
+.cue-editor textarea { resize: vertical; }
+.cue-fields { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: .7rem; }
+.cue-reference-controls { gap: .45rem; }
+.cue-reference-controls button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: .35rem .75rem;
+  color: var(--ink);
+  background: var(--surface);
+}
+.cue-reference-controls button[aria-expanded="true"] { border-color: var(--coral-deep); color: var(--coral-deep); }
+.cue-reference button:disabled { cursor: default; }
+.cue-reference-controls button:disabled { opacity: .6; }
+.cue-reference-list { display: grid; list-style: none; padding: 0; margin-top: .5rem; }
+.cue-reference-list li { display: flex; align-items: center; gap: .5rem; border-bottom: 1px solid var(--border); }
+.cue-insert {
+  min-width: 0; flex: 1;
+  padding-block: .65rem;
+  text-align: left;
+  font-size: .94rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.cue-insert:hover:not(:disabled) { color: var(--coral-deep); }
+.cue-insert small { display: block; margin-top: .12rem; color: var(--muted); font-size: .77rem; }
+.cue-bookmark { flex-shrink: 0; font-size: .75rem; }
+.cue-bookmark:disabled { color: var(--muted); }
+.cue-status { font-size: .82rem; color: var(--muted); padding-block: .2rem; }
+.cue-reference button:focus-visible, .cue-editor-heading button:focus-visible, .cue-editor :focus-visible {
+  outline: 2px solid var(--coral-deep); outline-offset: 2px;
+}
+@media (max-width: 900px) {
+  .practice-composer .cue-reference { margin-top: .4rem; }
+  .practice-composer .cue-reference-controls { justify-content: center; }
+  .practice-composer .cue-reference-list { max-height: min(25dvh, 12rem); overflow-y: auto; overscroll-behavior: contain; }
+}

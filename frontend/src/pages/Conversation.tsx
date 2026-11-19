@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
-  Lightbulb,
   Loader2,
   Mic,
   Phone,
@@ -13,10 +12,9 @@ import {
   Square,
   Volume2,
   VolumeX,
-  X,
 } from "lucide-react";
 import { getScenario } from "../data/scenarios";
-import { practiceCues } from "../data/practiceCues";
+import { ConversationReferences } from "../components/ConversationReferences";
 import { scenarioIcons } from "../lib/icons";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
 import {
@@ -33,7 +31,7 @@ import {
   type UserTurnMeta,
   type UserTurnMetaMap,
 } from "../lib/conversationTurns";
-import { createPracticeId, persistSessionOnce } from "../lib/sessionSave";
+import { createPracticeId, persistSessionOnce, unscoredSession } from "../lib/sessionSave";
 import { correctionDrills, correctionKey, includeMarkedCorrections, isCorrectionCategory } from "../lib/practiceCorrections";
 import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
 import {
@@ -61,7 +59,6 @@ import {
 import { ASR_QUOTA_MESSAGE, isAsrQuotaError } from "../lib/asrQuota";
 import { Buddy, type BuddyMood } from "../components/Buddy";
 import { ChatBubble } from "../components/ChatBubble";
-import { PlayfulBackground } from "../components/PlayfulBackground";
 import { Wordmark } from "../components/Wordmark";
 import { cn } from "../lib/utils";
 import { MAX_AUDIO_BYTES, MAX_RECORDING_MS } from "../lib/audioLimits";
@@ -76,6 +73,14 @@ const localOpeners: Record<string, string> = {
   party: "Hey! I don't think we've met yet — how do you know everyone here?",
 };
 
+const desktopQuery = "(min-width: 901px)";
+const hasSidebar = () => window.matchMedia?.(desktopQuery).matches ?? window.innerWidth > 900;
+function subscribeLayout(update: () => void) {
+  const media = window.matchMedia?.(desktopQuery);
+  media?.addEventListener("change", update);
+  return () => media?.removeEventListener("change", update);
+}
+
 export default function Conversation() {
   const generation = useRef(getAuthGeneration()).current;
   const { scenarioId } = useParams();
@@ -83,15 +88,15 @@ export default function Conversation() {
   const focusId = search.get("focus");
   const focus = isCorrectionCategory(focusId) ? correctionDrills[focusId] : null;
   const isCustom = scenarioId === "custom";
-  const customScene = useCustomScene((s) => s.scene);
+  const [customScene] = useState(() => isCustom ? useCustomScene.getState().scene : null);
   const scenario =
     scenarioId && !isCustom ? getScenario(scenarioId) : undefined;
   const id = isCustom ? "custom" : (scenario?.id ?? "");
   const t = {
     ...themeFor(id),
-    base: "#ff6251",
-    soft: "#fcf4eb",
-    deep: "#dc493b",
+    base: "var(--coral)",
+    soft: "var(--surface-2)",
+    deep: "var(--coral-deep)",
   };
   const ScenarioIcon = scenario
     ? scenarioIcons[scenario.icon]
@@ -105,6 +110,7 @@ export default function Conversation() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [turnMeta, setTurnMeta] = useState<UserTurnMetaMap>({});
   const [input, setInput] = useState("");
+  const replyInput = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false); // awaiting Pip's reply (text)
   const [streaming, setStreaming] = useState(false); // reply is streaming in
   const [booting, setBooting] = useState(true); // fetching the opener
@@ -114,7 +120,7 @@ export default function Conversation() {
   const [transcribing, setTranscribing] = useState(false);
   const [callPhase, setCallPhase] = useState<CallPhase | null>(null);
   const [liveCaption, setLiveCaption] = useState(""); // streaming ASR preview while speaking
-  const [hints, setHints] = useState<string[] | null>(null);
+  const sidebar = useSyncExternalStore(subscribeLayout, hasSidebar, () => false);
   const [markedCorrections, setMarkedCorrections] = useState<Correction[]>([]);
   const marksRef = useRef<Correction[]>([]);
   const [canRetry, setCanRetry] = useState(false);
@@ -184,8 +190,8 @@ export default function Conversation() {
     requestControllerRef.current?.abort();
     callQueueRef.current?.stop();
     speakingRef.current?.stop();
-    setSession(id, messages, practiceIdRef.current, marksRef.current);
-    navigate(`/report/${id}`);
+    setSession(id, messages, practiceIdRef.current, marksRef.current, customScene);
+    navigate(`/report/${practiceIdRef.current}`);
   }
 
   // Fetch the scene opener once.
@@ -298,7 +304,8 @@ export default function Conversation() {
           const custom = isCustom ? (customScene ?? undefined) : undefined;
           const marked = marksRef.current;
           postFeedback(id, msgs, undefined, custom)
-            .then((f) => persistSessionOnce(id, msgs, includeMarkedCorrections(f, marked), practiceId, generation))
+            .then((f) => includeMarkedCorrections(f, marked), () => unscoredSession(marked))
+            .then((result) => persistSessionOnce(id, msgs, result, practiceId, generation, custom))
             .catch(() => undefined);
         }
       }
@@ -584,9 +591,9 @@ export default function Conversation() {
           if (p !== "listening") setLiveCaption(""); // user finished this turn
         },
         preferLocalAsr: isMoonshineTranscriptionReady,
-        transcribe: (pcm, engine, signal) => {
+        transcribe: (pcm, engine, signal, liveFailure) => {
           if (!isCurrent()) return Promise.reject(new DOMException("Identity changed", "AbortError"));
-          return transcribeSpeech(pcm, signal, engine === "cloud" ? "cloud" : "auto");
+          return transcribeSpeech(pcm, signal, engine === "cloud" ? "cloud" : "auto", undefined, liveFailure);
         },
         onPartial: (t) => { if (isCurrent()) setLiveCaption(t); },
         reply: async (userText, pcm, onSpeaking, signal) => {
@@ -718,16 +725,16 @@ export default function Conversation() {
     speakingRef.current?.stop();
   }
 
-  function toggleCues() {
-    setHints((open) => open ? null : practiceCues(id, customScene).map(([, , sentence]) => sentence));
-  }
-
   function toggleMark(turnIndex: number, issue: TurnCorrectionIssue) {
-    if (!isCurrent() || !issue.category) return;
-    const entry: Correction = {
+    if (!issue.category) return;
+    toggleCorrection({
       turn_index: turnIndex, category: issue.category, marked: true,
       original: issue.original, suggestion: issue.replacement, note: issue.note,
-    };
+    });
+  }
+
+  function toggleCorrection(entry: Correction) {
+    if (!isCurrent()) return;
     const key = correctionKey(entry);
     const current = marksRef.current;
     const next = current.some((mark) => correctionKey(mark) === key)
@@ -736,6 +743,15 @@ export default function Conversation() {
     marksRef.current = next;
     setMarkedCorrections(next);
   }
+
+  const reference = <ConversationReferences scenarioId={id} custom={customScene} messages={messages}
+    waiting={booting || loading || streaming || callPhase === "thinking" || callPhase === "speaking"}
+    canInsert={!inCall && !recording && !transcribing && !callStarting && !booting && !loading}
+    insert={sentence => {
+      setInput(sentence);
+      setInputMode("text");
+      window.requestAnimationFrame(() => replyInput.current?.focus());
+    }} />;
 
   const stageMood: BuddyMood =
     callPhase === "speaking"
@@ -766,7 +782,6 @@ export default function Conversation() {
       className="conversation-page flex h-screen flex-col"
       style={{ height: "100dvh" }}
     >
-      <PlayfulBackground accent={t.base} />
       <header className="focus-header">
         <Wordmark />
         <div className="flex shrink-0 items-center gap-2">
@@ -914,6 +929,9 @@ export default function Conversation() {
                         meta: turnMeta[i] ?? { source: "typed" },
                         markedIssues: markedCorrections.filter((entry) => entry.turn_index === i),
                         onToggleMark: (issue) => toggleMark(i, issue),
+                        onToggleSentence: () => toggleCorrection({
+                          turn_index: i, original: m.content, suggestion: "", note: "", marked: true, self_marked: true,
+                        }),
                         onUseSuggestion: (suggestion) => {
                           setInput(suggestion);
                           setInputMode("text");
@@ -1005,8 +1023,7 @@ export default function Conversation() {
                       transcribing ||
                       callStarting
                     }
-                    className="mb-3 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 font-display text-lg font-bold text-[#271a16] shadow-pop disabled:opacity-50"
-                    style={{ background: t.base }}
+                    className="practice-call mb-3 flex w-full items-center justify-center gap-2 px-5 py-3 font-bold disabled:opacity-50"
                   >
                     {callStarting ? (
                       <Loader2 className="h-5 w-5 animate-spin" />
@@ -1015,35 +1032,6 @@ export default function Conversation() {
                     )}
                     {callStarting ? "正在连接麦克风…" : "开始语音对话"}
                   </button>
-                )}
-                {hints && (
-                  <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <span className="text-[0.66rem] font-bold uppercase tracking-wide text-muted">
-                      场景句型
-                    </span>
-                    {hints.map((h, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => {
-                          setInput(h);
-                          setInputMode("text");
-                          setHints(null);
-                        }}
-                        className="rounded-full border border-border bg-surface-2 px-3 py-1.5 text-xs font-semibold text-ink shadow-soft transition-transform hover:-translate-y-0.5"
-                      >
-                        <span lang="en">{h}</span>
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => setHints(null)}
-                      aria-label="关闭提示"
-                      className="grid h-6 w-6 place-items-center rounded-full text-muted hover:text-ink"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
                 )}
                 <div className="flex items-center gap-2 rounded-full border border-border bg-surface p-2 shadow-pop">
                   <button
@@ -1070,6 +1058,7 @@ export default function Conversation() {
                   </button>
                   {inputMode === "text" ? (
                     <input
+                      ref={replyInput}
                       aria-label="英文回复"
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
@@ -1122,21 +1111,13 @@ export default function Conversation() {
                       ? "通话自动接话 · 点击录音，再点结束"
                       : "按 Enter 发送 · 点英文可查词"}
                   </p>
-                  <button
-                    type="button"
-                    onClick={toggleCues}
-                    aria-expanded={Boolean(hints)}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-1.5 text-xs font-bold text-ink shadow-soft transition-transform hover:-translate-y-0.5 disabled:opacity-50"
-                  >
-                    <Lightbulb className="h-3.5 w-3.5" />
-                    场景句型
-                  </button>
                 </div>
               </>
             )}
+            {!sidebar && reference}
           </footer>
         </div>
-        <aside className="practice-context">
+        <aside className="practice-context" data-scene={id}>
           <p className="eyebrow">YOUR SCENE</p>
           <h2>
             {ScenarioIcon && <ScenarioIcon />}
@@ -1158,16 +1139,7 @@ export default function Conversation() {
           <section>
             <h3>{focus ? `本轮复练 · ${focus.label}` : "场景句型"}</h3>
             {focus && <p>{focus.task}</p>}
-            <button
-              type="button"
-              className="ui-secondary"
-              disabled={inCall}
-              onClick={toggleCues}
-              aria-expanded={Boolean(hints)}
-            >
-              <Lightbulb />
-              {hints ? "收起预习句型" : "查看预习句型"}
-            </button>
+            {sidebar && reference}
           </section>
           <p>点击英文单词可以查释义、听发音并收藏。</p>
         </aside>

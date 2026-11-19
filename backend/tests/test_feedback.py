@@ -67,7 +67,21 @@ def test_feedback_anchors_categorized_corrections_to_learner_turns():
     try:
         response = client.post("/api/feedback", json=_conversation())
         assert response.status_code == 200
-        assert response.json()["corrections"] == [{**valid, "marked": False}]
+        assert response.json()["corrections"] == [{**valid, "marked": False, "self_marked": False}]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_feedback_keeps_an_explicit_deletion_quoted_from_the_learner():
+    payload = _conversation()
+    payload["messages"][1]["content"] = "I like the cats."
+    deletion = {"original": "the", "suggestion": "", "note": "泛指时不加冠词。", "category": "articles", "turn_index": 1}
+    word_fragment = {**deletion, "original": "he"}
+    app.dependency_overrides[get_client] = lambda: _StubClient(json.dumps({**VALID, "corrections": [deletion, word_fragment]}))
+    try:
+        response = client.post("/api/feedback", json=payload)
+        assert response.status_code == 200
+        assert response.json()["corrections"] == [{**deletion, "marked": False, "self_marked": False}]
     finally:
         app.dependency_overrides.clear()
 

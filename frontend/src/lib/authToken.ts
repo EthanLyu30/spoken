@@ -7,6 +7,20 @@ let generation = 0;
 type Listener = (external: boolean) => void;
 const listeners = new Set<Listener>();
 
+/** Claims are used only for local cache keys. The server authorizes requests. */
+export function tokenCacheIdentity(token: string | null): { subject: string; version: string } | null {
+  if (!token) return null;
+  try {
+    const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(part.padEnd(Math.ceil(part.length / 4) * 4, "=")));
+    return typeof payload.sub === "string" && payload.sub
+      ? { subject: payload.sub, version: typeof payload.ver === "string" ? payload.ver : "" }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function getToken(): string | null {
   if (!initialized) {
     initialized = true;

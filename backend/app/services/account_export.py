@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.practice import PracticeRecord
 from app.models.progress import EarnedBadge, LearningEvent
+from app.models.scene_cues import ScenePreparation
 from app.models.session import PracticeSession
 from app.models.user import User
 from app.models.word import WordEntry
@@ -53,6 +54,11 @@ def build_account_export(db: Session, user: User) -> dict:
         "sessions": _sessions(db, owner),
         "practice": _practice(db, owner),
         "words": _words(db, owner),
+        "scene_cues": [
+            {"scene_key": row.scene_key, "title": row.title, "cues": row.cues}
+            for row in db.scalars(select(ScenePreparation).where(ScenePreparation.client_id == owner)
+                                  .order_by(ScenePreparation.scene_key))
+        ],
         "learning_events": _learning_events(db, owner),
         "badges": _badges(db, owner),
         "product_feedback": export_account_feedback(db, user.id),
@@ -117,10 +123,11 @@ def _sessions(db: Session, owner: str) -> list[dict[str, Any]]:
         {
             "id": session.id,
             "scenario_id": session.scenario_id,
-            "overall": session.overall,
+            "overall": session.reported_score,
             "summary": session.summary or "",
             "tip": session.tip or "",
             "corrections": session.corrections,
+            "custom": session.custom,
             "created_at": _iso(session.created_at),
             "turns": [
                 {"idx": turn.idx, "role": turn.role, "content": turn.content}

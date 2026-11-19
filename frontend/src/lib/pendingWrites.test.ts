@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { beginOwnerTransition, completeOwnerTransition, flushPendingWrites, postSession, retryPendingOwnerWrites } from "./api";
 import { clearToken, setToken } from "./authToken";
 import { progressGeneration } from "./progressCache";
+import { changeSceneCues } from "./sceneCuesApi";
 
 function accountToken(id: number): string {
   return `header.${btoa(JSON.stringify({ sub: String(id) }))}.signature`;
@@ -390,6 +391,33 @@ it("keeps a post-logout save as guest even when a legacy tab left the claimed ID
   await expect(postSession({ ...payload })).resolves.toEqual({ id: 18 });
   expect(fetcher).toHaveBeenCalledTimes(2);
   expect(JSON.parse(localStorage.getItem("spoken-owner-pending-writes") || "[]")).toHaveLength(0);
+});
+
+it("does not retry a late claimed cue write into the old guest space after a different tab changes identity", async () => {
+  localStorage.setItem("spoken-client-id", "claim-from-another-tab");
+  let release!: (response: Response) => void;
+  const late = new Promise<Response>(resolve => { release = resolve; });
+  const fetcher = vi.fn().mockReturnValueOnce(late)
+    .mockResolvedValueOnce(Response.json({ revision: 1, cues: [] }));
+  vi.stubGlobal("fetch", fetcher);
+
+  const saving = changeSceneCues({ scenarioId: "cafe" }, [], { action: "add_hint", sentence: "Can I pay here?" });
+  const rejected = expect(saving).rejects.toMatchObject({ name: "AbortError" });
+  setToken(accountToken(31));
+  release(Response.json({ detail: "guest_data_claimed" }, { status: 409 }));
+  await rejected;
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  await expect(flushPendingWrites()).resolves.toBeUndefined();
+});
+
+it("does not retry a claimed cue write before the other tab's identity change is observed locally", async () => {
+  localStorage.setItem("spoken-client-id", "claimed-before-tab-reconciles");
+  const fetcher = vi.fn(async () => Response.json({ detail: "guest_data_claimed" }, { status: 409 }));
+  vi.stubGlobal("fetch", fetcher);
+
+  await expect(changeSceneCues({ scenarioId: "airport" }, [], { action: "add_hint", sentence: "Is this my gate?" }))
+    .rejects.toMatchObject({ status: 409 });
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
 it("continues after a missing delete instead of blocking later saves", async () => {

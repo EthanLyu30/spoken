@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, RefreshCw, Search, Sparkles, Volume2 } from "lucide-react";
-import { PlayfulBackground } from "../components/PlayfulBackground";
 import { BottomNav } from "../components/BottomNav";
 import { InteractiveEnglishText } from "../components/dictionary/InteractiveEnglishText";
 import { PronounceButton } from "../components/PronounceButton";
@@ -121,7 +120,6 @@ export default function Daily() {
 
   return (
     <div className="min-h-screen pb-24">
-      <PlayfulBackground />
 
       <main className="daily-page mx-auto w-full max-w-3xl px-5 py-8">
         <div className="mb-4">

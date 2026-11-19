@@ -37,11 +37,43 @@ const asrReasonLabels: Record<string, string> = {
   unknown: "未采集到可分类的识别失败原因。",
 };
 const measurementLabels: Record<string, string> = {
+  voice_availability: "英语音色可用状态",
+  voice_initial_state: "首次读取音色",
+  voice_discovery_trigger: "音色发现结束方式",
+  voice_discovery_ms: "音色发现耗时",
+  voice_recheck_ms: "音色重新检查耗时",
+  voice_recheck_trigger: "音色重新检查结束方式",
+  speech_failure_stage: "朗读失败阶段",
+  speech_fallback: "系统音色回退",
+  speech_fallback_failure: "回退音色失败原因",
+  speech_fallback_error_code: "回退音色错误码",
   asr_reason: "识别结果分类", provider_code: "供应商错误码",
   llm_tcp: "模型 TCP 建连（ms）", llm_tls: "模型 TLS 握手（ms）",
   llm_headers: "等待模型响应头阶段（ms）", llm_response_headers: "模型请求至响应头（ms）",
   llm_first_event: "模型首个非空响应行（ms）", llm_first_text: "模型请求至首字（ms）",
   llm_headers_to_text: "响应头后等待首字（ms）", llm_keepalives_before_text: "首字前保活行数",
+};
+const speechFailureStages: Record<string, string> = {
+  voice_discovery: "浏览器音色发现",
+  native_start: "系统朗读启动",
+  native_end: "系统朗读完成",
+  local_synthesis: "本地模型合成",
+  local_playback: "本地音频播放",
+  queue: "朗读队列准备",
+};
+const voiceDiscoveryTriggers = { initial: "首次读取", event: "浏览器音色变更事件", poll: "轮询发现", deadline: "等待到期", aborted: "已中止" };
+const speechFallbackFailures: Record<string, string> = {
+  startup_timeout: "朗读启动超时", end_before_start: "还未开始就收到结束通知", speech_error: "朗读启动报错",
+  speak_exception: "调用系统朗读时抛出异常", native_error: "播放过程中报错", completion_timeout: "等待播放结束超时",
+};
+const speechDiagnosticValues: Record<string, Record<string, string>> = {
+  voice_initial_state: { english_available: "已有英语音色", unsupported: "接口不可用", empty_list: "列表为空",
+    no_english_voice: "列表没有英语音色", lookup_failed: "读取音色出错" },
+  voice_discovery_trigger: voiceDiscoveryTriggers,
+  voice_recheck_trigger: voiceDiscoveryTriggers,
+  speech_failure_stage: speechFailureStages,
+  speech_fallback: { no_local_voice: "没有合适的系统英语音色", attempted: "已尝试系统英语音色" },
+  speech_fallback_failure: speechFallbackFailures,
 };
 const names: Record<string, string> = {
   "POST /api/chat/stream": "场景对话 · 流式回复", "POST /api/chat": "场景对话 · 普通回复",
@@ -600,7 +632,24 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
   const asrReason = typeof diagnostic?.asr_reason === "string" ? asrReasonLabels[diagnostic.asr_reason] : undefined;
   const interrupted = diagnostic?.error_code === "canceled" || diagnostic?.error_code === "interrupted";
   const timedOutWhilePaused = diagnostic?.reason === "completion_timeout" && Number(diagnostic.pause_count) > 0;
-  const browserDiagnosis = asrReason ?? (cancelled
+  const voiceAvailabilityLabels: Record<string, string> = {
+    unsupported: "此浏览器没有可用的系统朗读接口。",
+    empty_list: "等待结束时，浏览器仍未提供任何音色。",
+    no_english_voice: "设备已列出音色，列表中没有英语音色。",
+    lookup_failed: "浏览器读取系统音色列表时出错。",
+  };
+  const voiceAvailability = typeof diagnostic?.voice_availability === "string" ? voiceAvailabilityLabels[diagnostic.voice_availability] : undefined;
+  const speechFailure = typeof diagnostic?.speech_failure_stage === "string" ? speechFailureStages[diagnostic.speech_failure_stage] : undefined;
+  const discoveryTimedOut = diagnostic?.speech_failure_stage === "voice_discovery"
+    && (diagnostic.voice_recheck_trigger ?? diagnostic.voice_discovery_trigger) === "deadline"
+    && (diagnostic.voice_availability === "empty_list" || diagnostic.voice_availability === "no_english_voice");
+  const fallbackFailed = failed && diagnostic?.speech_fallback === "attempted";
+  const fallbackFailure = typeof diagnostic?.speech_fallback_failure === "string"
+    ? speechFallbackFailures[diagnostic.speech_fallback_failure] : undefined;
+  const playbackDiagnosis = fallbackFailed
+    ? `切换到系统英语音色后，朗读仍然失败。${fallbackFailure ? `回退音色${fallbackFailure}。` : ""}`
+    : discoveryTimedOut ? `英语音色发现超时。${voiceAvailability ?? ""}` : voiceAvailability;
+  const browserDiagnosis = asrReason ?? playbackDiagnosis ?? (speechFailure ? `失败发生在「${speechFailure}」。可查看下方参数和同一轮的调用记录。` : undefined) ?? (cancelled
     ? interrupted ? "浏览器语音引擎报告朗读被中断。触发来源未采集。" : "浏览器报告此任务已取消。触发来源未采集。"
     : timedOutWhilePaused ? "朗读曾进入暂停状态，之后未在限时内结束。暂停由谁触发尚未采集。"
       : "此浏览器样本没有可确认的失败原因。可结合下方阶段和同一轮调用排查。");
@@ -636,7 +685,7 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
     <h3 className="admin-waterfall-title">阶段耗时</h3><p className="admin-waterfall-note">以下阶段共享该端的单调时钟，重叠阶段不累加为总耗时。</p>
     <div className="admin-waterfall">{detail.spans?.length ? detail.spans.map(span => <article key={span.id}><div><strong>{span.name}</strong><span>{ms(span.duration_ms)} · {spanLabels[span.outcome] ?? span.outcome}</span></div>
       <div className="admin-span-track"><i className={span.outcome} style={{ marginLeft: `${Math.min(99, span.offset_ms / Math.max(1, detail.duration_ms) * 100)}%`, width: `${Math.max(0.5, Math.min(100, span.duration_ms / Math.max(1, detail.duration_ms) * 100))}%` }} /></div>
-      <dl>{Object.entries(span.attributes).map(([key, value]) => <div key={key}><dt>{span.name === "speech.complete" && key === "reason" ? "原音色启动失败原因" : measurementLabels[key] ?? key}</dt><dd>{String(value)}</dd></div>)}</dl>
+      <dl>{Object.entries(span.attributes).map(([key, value]) => <div key={key}><dt>{span.name === "speech.complete" && key === "reason" ? "原音色启动失败原因" : measurementLabels[key] ?? key}</dt><dd>{(key === "voice_discovery_ms" || key === "voice_recheck_ms") && typeof value === "number" ? ms(value) : speechDiagnosticValues[key]?.[String(value)] ?? String(value)}</dd></div>)}</dl>
     </article>) : <p className="admin-empty-spans">此请求没有已采集的子阶段，不据此推测等待位置。</p>}</div>
     <p className="admin-detail-note"><ShieldCheck size={13} />仅保留耗时、状态和白名单元数据，不保存用户问答、音频或凭据。</p>
   </aside>;

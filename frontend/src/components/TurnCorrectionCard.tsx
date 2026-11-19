@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Bookmark,
   Check,
   Copy,
   Loader2,
@@ -38,6 +39,7 @@ export interface TurnCorrectionCardProps {
   onUseSuggestion: (suggestion: string) => void;
   markedIssues?: Correction[];
   onToggleMark?: (issue: TurnCorrectionIssue) => void;
+  onToggleSentence?: () => void;
 }
 
 export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
@@ -62,6 +64,7 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
   }, []);
 
   const canAssessPronunciation = Boolean(props.meta.spokenText && props.meta.pcm);
+  const sentenceMarked = props.markedIssues?.some((mark) => mark.self_marked) ?? false;
 
   function beginRequest(stage: "text" | "pronunciation") {
     controllersRef.current[stage]?.abort();
@@ -152,7 +155,8 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
 
   return (
     <div className="mt-2">
-      <button
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <button
         type="button"
         onClick={toggle}
         aria-label={open ? "收起即时纠错" : "即时纠错"}
@@ -161,8 +165,16 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
       >
         <Sparkles className="h-3.5 w-3.5" />
         {open ? "收起纠错" : "即时纠错"}
-      </button>
-      {!open && Boolean(props.markedIssues?.length) && <span className="ml-2 text-xs font-semibold">已标记复练</span>}
+        </button>
+        {props.onToggleSentence && (
+          <button type="button" onClick={props.onToggleSentence} aria-pressed={sentenceMarked}
+            className="inline-flex min-h-8 items-center gap-1.5 text-xs font-semibold text-coral-deep">
+            <Bookmark size={14} fill={sentenceMarked ? "currentColor" : "none"} />
+            {sentenceMarked ? "已收藏这句" : "收藏这句"}
+          </button>
+        )}
+        {!open && props.markedIssues?.some((mark) => !mark.self_marked) && <span className="text-xs font-semibold">已标记复练</span>}
+      </div>
 
       {open && (
         <section className="mt-2 rounded-2xl bg-surface-2 p-3 text-left text-ink shadow-soft">

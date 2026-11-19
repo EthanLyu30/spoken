@@ -5,7 +5,7 @@ import { useSpeechPlayback, type SpeechPlayback } from "../store/speechPlayback"
 function PlaybackMessage({ playback }: { playback: SpeechPlayback }) {
   if (playback.phase === "error") {
     if (playback.fallbackReason === "browser-unavailable") {
-      return <p>朗读暂时不可用：浏览器尚未提供英语音色。请稍后重试，或检查设备的英语语音设置。</p>;
+      return <p>朗读暂时不可用，浏览器尚未提供英语音色。请在设备的语音设置中添加英语音色，或在个人页的「语音设置」中选择「本地 AI 语音」。</p>;
     }
     if (playback.fallbackReason === "browser-start-failed") {
       return <p>朗读启动失败。请再次点击朗读重试，或在语音设置中更换英语音色。</p>;

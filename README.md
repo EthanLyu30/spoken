@@ -2,7 +2,9 @@
 
 Spoken 是面向中文学习者的 AI 英语口语陪练。在咖啡馆点单、和同事讨论工作，或用 **Take an Interview** 练习新托福口语。可以开麦对话，也可以打字练习。
 
-[![CI](https://github.com/EthanLyu30/spoken/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/EthanLyu30/spoken/actions/workflows/ci.yml) · [在线体验](https://www.spokenai.org/) · [English](README.en.md) · [开发路线图](docs/ROADMAP.md)
+[![CI](https://github.com/EthanLyu30/spoken/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/EthanLyu30/spoken/actions/workflows/ci.yml) · [在线体验](https://www.spokenai.org/) · [GitHub 仓库](https://github.com/EthanLyu30/spoken) · [English](README.en.md) · [开发路线图](docs/ROADMAP.md)
+
+如果这个项目对你有帮助，求一个 Star ⭐
 
 ## 可以练什么
 
@@ -76,6 +78,6 @@ npm run dev
 
 - [当前待办与交付历史](docs/ROADMAP.md)
 - [语音可靠性](docs/VOICE_RELIABILITY.md)
-- 早期演示记录了旧界面。 [仓库短版视频](docs/demo.mp4) · [Bilibili 完整讲解](https://www.bilibili.com/video/BV1yZEW6xEta/)
+- 2026-11 的完整讲解：[Bilibili · 今天，开口就好（第二版）](https://www.bilibili.com/video/BV1MJsh6uEEs)。早期界面记录：[仓库短版视频](docs/demo.mp4)。
 
 [MIT 许可证](LICENSE)

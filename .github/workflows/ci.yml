@@ -49,10 +49,10 @@ jobs:
           pip install -r requirements.txt -r requirements-dev.txt
       - name: Run tests
         run: pytest -q
-      - name: Verify account ownership on PostgreSQL
+      - name: Verify session migration and account ownership on PostgreSQL
         env:
           SPOKEN_TEST_POSTGRES_URL: postgresql+psycopg://spoken_test:spoken_test@localhost:5432/spoken_test
-        run: pytest -q tests/test_account_lifecycle.py tests/test_product_feedback.py
+        run: pytest -q tests/test_sessions.py tests/test_account_lifecycle.py tests/test_product_feedback.py
 
   frontend:
     name: Frontend (lint + typecheck + build)

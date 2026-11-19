@@ -4,7 +4,7 @@ import type { StateStorage } from "zustand/middleware";
 // not make an otherwise successful login, logout or preference change throw.
 const memory = new Map<string, string | null>();
 const overrides = new Set<string>();
-export const resilientStorage: StateStorage = {
+export const resilientStorage = {
   getItem(key) {
     if (overrides.has(key)) return memory.get(key) ?? null;
     try {
@@ -23,4 +23,4 @@ export const resilientStorage: StateStorage = {
     try { localStorage.removeItem(key); overrides.delete(key); }
     catch { overrides.add(key); }
   },
-};
+} satisfies StateStorage;

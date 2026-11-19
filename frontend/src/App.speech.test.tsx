@@ -36,13 +36,20 @@ async function openDaily(){
 }
 function expectNoCloudTts(){expect(fetcher.mock.calls.map(([url])=>String(url)).some(url=>url.includes("/api/tts"))).toBe(false);}
 it("surfaces missing English voices from Daily, dismisses the error, and shows a fresh attempt again",async()=>{
-  await openDaily();fireEvent.click(screen.getAllByRole("button",{name:"朗读"})[0]);
-  await waitFor(()=>expect(useSpeechPlayback.getState().playback?.phase).toBe("error"));
-  expect(screen.getByRole("alert")).toHaveTextContent("浏览器尚未提供英语音色");
-  fireEvent.click(screen.getByRole("button",{name:"关闭朗读错误提示"}));
-  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  fireEvent.click(screen.getAllByRole("button",{name:"朗读"})[0]);
-  expect(await screen.findByRole("alert")).toHaveTextContent("浏览器尚未提供英语音色");expectNoCloudTts();
+  await openDaily();
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(screen.getAllByRole("button",{name:"朗读"})[0]);
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    expect(useSpeechPlayback.getState().playback?.phase).toBe("error");
+    expect(screen.getByRole("alert")).toHaveTextContent("浏览器尚未提供英语音色");
+    fireEvent.click(screen.getByRole("button",{name:"关闭朗读错误提示"}));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button",{name:"朗读"})[0]);
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    expect(screen.getByRole("alert")).toHaveTextContent("浏览器尚未提供英语音色");
+    expectNoCloudTts();
+  } finally { vi.useRealTimers(); }
 }, 15000);
 it("surfaces a real native startup failure from the dictionary overlay without closing it",async()=>{
   voices=[{name:"English",voiceURI:"en",lang:"en-US"} as SpeechSynthesisVoice];

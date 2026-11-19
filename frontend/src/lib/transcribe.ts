@@ -6,7 +6,8 @@ import { getInteraction, bindInteraction, newInteractionId, reportTiming, type T
 import { isAsrQuotaError } from "./asrQuota";
 import { withTimeout } from "./requestTimeout";
 import { assertAuthGeneration, getAuthGeneration } from "./authToken";
-import { asrFailure } from "./asrDiagnostics";
+import { asrFailure, asrFallbackReason, type AsrFallbackReason } from "./asrDiagnostics";
+import { hasSustainedAudio } from "./incrementalPcm";
 
 interface TranscriptionBackends {
   isMoonshineReady: () => boolean;
@@ -66,6 +67,7 @@ export class IncompleteTranscriptionError extends Error {
  * order; if the stream cannot open, `finish` recovers through buffered ASR.
  */
 export function createLiveTranscription(signal?: AbortSignal): LiveTranscription {
+  const generation = getAuthGeneration();
   let stream: AsrStream | null = null;
   let closed = false;
   let openError: unknown;
@@ -107,9 +109,10 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
       bindInteraction(control.signal, interactionId ?? getInteraction(finishSignal));
       const cancel = () => control.abort(finishSignal?.reason);
       finishSignal?.addEventListener("abort", cancel, { once: true });
-      const recover = async () => {
-        const text = (await postAsr(pcm, control.signal, onTransport)).trim();
-        control.signal.throwIfAborted();
+      const recover = async (reason?: AsrFallbackReason) => {
+        assertAuthGeneration(generation, control.signal);
+        const text = (await postAsr(pcm, control.signal, onTransport, reason)).trim();
+        assertAuthGeneration(generation, control.signal);
         return text;
       };
       try {
@@ -120,37 +123,35 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
           if (isAsrQuotaError(openError)) throw openError;
           return await recover();
         }
+        let fallbackReason: AsrFallbackReason = "empty";
         try {
           const text = (await openedStream.finishUtterance()).trim();
           control.signal.throwIfAborted();
-          if (!text && latest.trim()) throw new IncompleteTranscriptionError(latest.trim());
-          return text;
+          if (text || (!latest.trim() && !hasSustainedAudio(pcm))) return text;
         } catch (error) {
-          const partial = latest.trim();
           if (isAsrQuotaError(error)) {
-            if (partial) error.partialText = partial;
+            if (latest.trim()) error.partialText = latest.trim();
             throw error;
           }
           if (finishSignal?.aborted || control.signal.aborted ||
               (error instanceof Error && error.name === "AbortError")) throw error;
-          // A deploy can close the relay mid-utterance. Prefer the complete
-          // recording; an unconfirmed partial must never be auto-submitted.
-          try {
-            const recovered = await recover();
-            if (recovered || !partial) return recovered;
-          } catch (recoveryError) {
-            if (isAsrQuotaError(recoveryError)) {
-              if (partial) recoveryError.partialText = partial;
-              throw recoveryError;
-            }
-            if (finishSignal?.aborted || control.signal.aborted ||
-                (recoveryError instanceof Error && recoveryError.name === "AbortError")) throw recoveryError;
-            if (!partial) throw recoveryError;
-          }
-          throw new IncompleteTranscriptionError(partial);
+          fallbackReason = asrFallbackReason(asrFailure(error).asr_reason);
         } finally {
           openedStream.close();
         }
+        const partial = latest.trim();
+        try {
+          const recovered = await recover(fallbackReason);
+          if (recovered || !partial) return recovered;
+        } catch (recoveryError) {
+          if (isAsrQuotaError(recoveryError)) {
+            if (partial) recoveryError.partialText = partial;
+            throw recoveryError;
+          }
+          if (finishSignal?.aborted || control.signal.aborted ||
+              (recoveryError instanceof Error && recoveryError.name === "AbortError") || !partial) throw recoveryError;
+        }
+        throw new IncompleteTranscriptionError(partial);
       } finally {
         finishSignal?.removeEventListener("abort", cancel);
         signal?.removeEventListener("abort", abort);
@@ -167,7 +168,7 @@ export function createLiveTranscription(signal?: AbortSignal): LiveTranscription
   };
 }
 
-/** One bounded cloud recovery chain, including two possible 1/4-speed uploads. */
+/** Bound direct recognition and its buffered fallback by recording length. */
 export function asrTurnBudgetMs(pcm: ArrayBuffer): number {
   const frames = Math.ceil(pcm.byteLength / 1280);
   return Math.min(105_000, Math.max(20_000, 12_000 + frames * 20));
@@ -178,6 +179,7 @@ export async function transcribeSpeech(
   signal?: AbortSignal,
   mode: "auto" | "cloud" = "auto",
   live?: LiveTranscription,
+  liveFailure?: AsrFallbackReason,
 ): Promise<string> {
   const generation = getAuthGeneration();
   const start = performance.now();
@@ -211,7 +213,7 @@ export async function transcribeSpeech(
         cloud: (audio) => {
           measurement.engine = "xfyun";
           measurement.transport = "unknown";
-          return postAsr(audio, turnSignal, transport => { measurement.transport = transport; });
+          return postAsr(audio, turnSignal, transport => { measurement.transport = transport; }, liveFailure);
         },
       }, turnSignal);
     }

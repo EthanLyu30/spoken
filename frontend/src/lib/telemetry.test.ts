@@ -4,6 +4,45 @@ import { AsrUserCancellation } from "./asrDiagnostics";
 
 afterEach(() => { delete (globalThis as { __TEST_RUN_ID__?: string }).__TEST_RUN_ID__; vi.unstubAllGlobals(); });
 
+it("keeps the playback flag and event ID if an older API rejects voice availability", async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, {status: 422}))
+    .mockResolvedValueOnce(new Response(null, {status: 202}));
+  vi.stubGlobal("fetch", fetcher);
+  reportTiming("speech.complete", 2000, {outcome: "error", playback_started: false, voice_availability: "empty_list"});
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  const [first, second] = fetcher.mock.calls.map(([, init]) => JSON.parse(init.body));
+  expect(first.voice_availability).toBe("empty_list");
+  expect(second).not.toHaveProperty("voice_availability");
+  expect(second).toMatchObject({playback_started: false, event_id: first.event_id});
+});
+
+it("preserves the previous playback fields when a collector rejects the discovery details", async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, {status: 422}))
+    .mockResolvedValueOnce(new Response(null, {status: 202}));
+  vi.stubGlobal("fetch", fetcher);
+  reportTiming("speech.complete", 2000, {outcome: "error", playback_started: false, voice_availability: "empty_list",
+    speechDiagnostics: {voice_initial_state: "empty_list", voice_discovery_trigger: "deadline", voice_discovery_ms: 1999}});
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  const [first, second] = fetcher.mock.calls.map(([, init]) => JSON.parse(init.body));
+  expect(first).toMatchObject({voice_discovery_trigger: "deadline", voice_discovery_ms: 1999});
+  expect(second).not.toHaveProperty("voice_discovery_trigger");
+  expect(second).toMatchObject({voice_availability: "empty_list", playback_started: false, event_id: first.event_id});
+});
+
+it("keeps the existing diagnosis and event ID when an older collector rejects fallback detail", async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, {status: 422}))
+    .mockResolvedValueOnce(new Response(null, {status: 202}));
+  vi.stubGlobal("fetch", fetcher);
+  reportTiming("speech.complete", 3000, {engine: "browser", outcome: "error", playback_started: false,
+    reason: "startup_timeout", speechDiagnostics: {speech_fallback: "attempted", speech_failure_stage: "native_start",
+      speech_fallback_failure: "speech_error", speech_fallback_error_code: "synthesis-failed"}});
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  const [first, second] = fetcher.mock.calls.map(([, init]) => JSON.parse(init.body));
+  expect(first.speech_fallback_error_code).toBe("synthesis-failed");
+  expect(second).not.toHaveProperty("speech_fallback_failure");
+  expect(second).toMatchObject({event_id: first.event_id, reason: "startup_timeout", speech_fallback: "attempted", speech_failure_stage: "native_start"});
+});
+
 it("submits only bounded numeric timing and declared metadata, never business content", async () => {
   const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
   vi.stubGlobal("fetch", fetcher);

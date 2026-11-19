@@ -132,10 +132,31 @@ describe("cloud ASR routing", () => {
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/api/asr"))).toHaveLength(0);
   });
 
-  it("does not retry an explicit empty direct final over HTTP", async () => {
+  it("does not retry a silent clip with an empty direct final over HTTP", async () => {
     direct.transcribe.mockResolvedValue("");
     expect(await postAsr(new ArrayBuffer(1280))).toBe("");
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/api/asr"))).toHaveLength(0);
+  });
+
+  it("tries the buffered route once when a complete audible clip has an empty direct final", async () => {
+    direct.transcribe.mockResolvedValue("");
+    vi.mocked(fetch).mockImplementation(async url => String(url).endsWith("/api/asr")
+      ? Response.json({text: "Yes, please."}) : new Response(null, {status: 202}));
+    const pcm = Int16Array.from({length: 3200}, (_, i) => 2000 * Math.sin(i * 0.1)).buffer;
+    const route = vi.fn();
+    await expect(postAsr(pcm, undefined, route)).resolves.toBe("Yes, please.");
+    expect(route.mock.calls).toEqual([["direct"], ["buffered"]]);
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/api/asr"))).toHaveLength(1);
+  });
+
+  it("uploads the full recording once after an empty live result", async () => {
+    vi.mocked(fetch).mockImplementation(async url => String(url).endsWith("/api/asr")
+      ? Response.json({text: ""}) : new Response(null, {status: 202}));
+    const route = vi.fn();
+    await expect(postAsr(new ArrayBuffer(1280), undefined, route, "empty")).resolves.toBe("");
+    expect(route.mock.calls).toEqual([["buffered"]]);
+    expect(direct.transcribe).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/api/asr"))).toHaveLength(1);
   });
 
   it("rejects oversized audio before any direct or backend request", async () => {

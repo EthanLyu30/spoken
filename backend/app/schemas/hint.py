@@ -15,4 +15,4 @@ class HintRequest(BaseModel):
 
 
 class HintResponse(BaseModel):
-    suggestions: list[str]
+    suggestions: list[str] = Field(min_length=1, max_length=3)

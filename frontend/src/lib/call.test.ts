@@ -53,10 +53,10 @@ class FakeAudioContext {
   }
 }
 
-function pushFrame(value: number, samples = 4_096): void {
+function pushFrame(value: number | Float32Array, samples = 4_096): void {
   const processor = latestProcessor;
   if (!processor?.onaudioprocess) throw new Error("audio graph not ready");
-  const pcm = new Float32Array(samples).fill(value);
+  const pcm = typeof value === "number" ? new Float32Array(samples).fill(value) : value;
   processor.onaudioprocess({
     inputBuffer: {
       getChannelData: () => pcm,
@@ -259,7 +259,7 @@ describe("voice call ASR engine boundaries", () => {
     const onError = vi.fn();
     const call = await startVoiceCall({
       onPhase: vi.fn(), onError, reply,
-      transcribe: (pcm, _engine, signal) => transcribeSpeech(pcm, signal, "cloud"),
+      transcribe: (pcm, _engine, signal, liveFailure) => transcribeSpeech(pcm, signal, "cloud", undefined, liveFailure),
     });
     try {
       pushMs(500, 0.1);
@@ -323,6 +323,7 @@ describe("voice call ASR engine boundaries", () => {
         expect.any(ArrayBuffer),
         "local",
         expect.any(AbortSignal),
+        undefined,
       ),
     );
     expect(mocks.openAsrStream).not.toHaveBeenCalled();
@@ -393,6 +394,7 @@ describe("voice call ASR engine boundaries", () => {
         expect.any(ArrayBuffer),
         "local",
         expect.any(AbortSignal),
+        undefined,
       ),
     );
     call.end();
@@ -490,12 +492,13 @@ describe("voice call ASR engine boundaries", () => {
     await vi.waitFor(() => expect(late.stop).toHaveBeenCalledOnce());
   });
 
-  it("does not retry an explicit empty stream final as a buffered utterance", async () => {
+  it("prompts for another turn without reuploading constant mic offset after an empty final", async () => {
     const opened = { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn(async () => "") };
     mocks.openAsrStream.mockResolvedValue(opened);
     const transcribe = vi.fn();
     const reply = vi.fn();
-    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => false, transcribe, reply, onError: vi.fn() });
+    const onError = vi.fn();
+    const call = await startVoiceCall({ onPhase: vi.fn(), preferLocalAsr: () => false, transcribe, reply, onError });
     try {
       pushFrame(0.1); pushFrame(0.1);
       await Promise.resolve();
@@ -506,6 +509,26 @@ describe("voice call ASR engine boundaries", () => {
       await new Promise(resolve => setTimeout(resolve, 0));
       expect(reply).not.toHaveBeenCalled();
       expect(transcribe).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledWith(expect.stringContaining("再说一次"));
+    } finally { call.end(); }
+  });
+
+  it("recovers an empty live final with sustained audio and replies exactly once", async () => {
+    const stream = { send: vi.fn(), close: vi.fn(), finishUtterance: vi.fn().mockResolvedValue("") };
+    mocks.openAsrStream.mockResolvedValue(stream);
+    const transcribe = vi.fn().mockResolvedValue("Yes, please.");
+    const reply = vi.fn();
+    const call = await startVoiceCall({ onPhase: vi.fn(), transcribe, reply, onError: vi.fn() });
+    try {
+      const audio = Float32Array.from({ length: 4096 }, (_, i) => 0.05 * Math.sin(i * 0.1));
+      pushFrame(audio);
+      await Promise.resolve();
+      pushFrame(audio);
+      for (let i = 0; i < 4; i++) pushFrame(0);
+      await vi.waitFor(() => expect(reply).toHaveBeenCalledOnce());
+      expect(stream.finishUtterance).toHaveBeenCalledOnce();
+      expect(transcribe).toHaveBeenCalledOnce();
+      expect(reply.mock.calls[0][0]).toBe("Yes, please.");
     } finally { call.end(); }
   });
 

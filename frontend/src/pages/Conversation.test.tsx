@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { TurnCorrectionCardProps } from "../components/TurnCorrectionCard";
-const mocks = vi.hoisted(() => ({ postChat: vi.fn(), postAsr: vi.fn(), streamChat: vi.fn(), speakText: vi.fn(), prepareSpeech: vi.fn(), createSpeechQueue: vi.fn(), postFeedback: vi.fn(), postSession: vi.fn(), startVoiceCall: vi.fn(), startRecording: vi.fn(), openAsrStream: vi.fn(), postTurnCorrection: vi.fn(), showCorrectionCards: false }));
+const mocks = vi.hoisted(() => ({ postChat: vi.fn(), postAsr: vi.fn(), streamChat: vi.fn(), speakText: vi.fn(), prepareSpeech: vi.fn(), createSpeechQueue: vi.fn(), postFeedback: vi.fn(), postSession: vi.fn(), startVoiceCall: vi.fn(), startRecording: vi.fn(), openAsrStream: vi.fn(), postTurnCorrection: vi.fn(), postHint: vi.fn(), request: vi.fn(), showCorrectionCards: false }));
 vi.mock("../lib/api", () => ({ ...mocks }));
 vi.mock("../lib/call", () => ({ startVoiceCall: mocks.startVoiceCall }));
 vi.mock("../lib/recorder", () => ({ startRecording: mocks.startRecording }));
@@ -16,7 +16,6 @@ vi.mock("../components/ChatBubble", async () => {
   }) => <div>{text}{onSpeak && <button onClick={onSpeak}>Replay {text}</button>}{mocks.showCorrectionCards && correction && <TurnCorrectionCard {...correction} />}</div> };
 });
 vi.mock("../components/Buddy", () => ({ Buddy: () => null }));
-vi.mock("../components/PlayfulBackground", () => ({ PlayfulBackground: () => null }));
 import Conversation from "./Conversation";
 import { bindInteraction, getInteraction } from "../lib/telemetry";
 import type { CallCallbacks } from "../lib/call";
@@ -34,8 +33,55 @@ beforeEach(() => {
   mocks.speakText.mockReturnValue({ done: Promise.resolve(), stop: vi.fn() });
   mocks.postFeedback.mockResolvedValue({ overall: 80, scores: [] });
   mocks.postSession.mockResolvedValue({});
+  mocks.request.mockResolvedValue({revision: 0, cues: null});
   mocks.startVoiceCall.mockResolvedValue({ end: vi.fn() });
   mocks.openAsrStream.mockRejectedValue(new Error("live ASR unavailable in test"));
+});
+
+it("offers AI help for the current turn separately from prep and lets the learner save and use a suggestion", async () => {
+  const line = "Could I have some more time?";
+  mocks.postHint.mockResolvedValueOnce([line]);
+  mocks.request.mockImplementation(async (_path: string, init?: RequestInit) => {
+    if (init?.method !== "PATCH") return {revision: 0, cues: null};
+    const edit = JSON.parse(String(init.body));
+    expect(edit).toMatchObject({action: "add_hint", sentence: line});
+    return {revision: 1, cues: [...edit.defaults, {id: "hint-1", kind: "pattern", keyword: line, meaning: "", sentence: line}]};
+  });
+  const user = userEvent.setup();
+  render(<MemoryRouter initialEntries={["/practice/doctor"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", {name: "查看预习句型"}));
+  expect(screen.getByText("It gets worse at night.")).toBeVisible();
+  expect(mocks.postHint).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", {name: "AI 提示"}));
+  expect(await screen.findByText(line)).toBeVisible();
+  expect(mocks.postHint).toHaveBeenCalledWith("doctor", [{role: "assistant", content: "Hello"}], expect.any(AbortSignal), undefined);
+  await user.click(screen.getByRole("button", {name: `收藏到预习 ${line}`}));
+  expect(await screen.findByRole("button", {name: `已在预习中 ${line}`})).toBeDisabled();
+  await user.click(screen.getByRole("button", {name: `使用这句 ${line}`}));
+  expect(screen.getByRole("textbox", {name: "英文回复"})).toHaveValue(line);
+  expect(mocks.streamChat).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", {name: "查看预习句型"}));
+  expect(screen.getByRole("button", {name: `使用这句 ${line}`})).toBeVisible();
+  await user.click(screen.getByRole("button", {name: "AI 提示"}));
+  expect(mocks.postHint).toHaveBeenCalledTimes(1);
+});
+
+it("drops an old AI hint request once the learner moves on to a new turn", async () => {
+  let finish!: (hints: string[]) => void;
+  mocks.postHint.mockReturnValueOnce(new Promise<string[]>(resolve => { finish = resolve; }));
+  mocks.streamChat.mockImplementationOnce(async (_id, _history, onText) => { onText("What size?"); return "What size?"; });
+  const user = userEvent.setup();
+  render(<MemoryRouter initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", {name: "AI 提示"}));
+  await user.click(screen.getByRole("button", {name: "文字练习"}));
+  await user.type(screen.getByRole("textbox", {name: "英文回复"}), "A coffee, please.");
+  await user.click(screen.getByRole("button", {name: "发送"}));
+  await screen.findByText("What size?");
+  await act(async () => finish(["I would like a coffee."]));
+  expect(screen.queryByText("I would like a coffee.")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "AI 提示"})).toHaveAttribute("aria-expanded", "false");
 });
 
 it("reports buffered cloud recognition when the conversation falls back from streaming ASR", async () => {
@@ -91,7 +137,7 @@ it("recovers an interrupted stream through the plain endpoint and speaks only th
   expect(screen.queryByRole("button", { name: "重试回复" })).not.toBeInTheDocument();
 });
 
-it("takes a marked article correction from the learner's turn to the report", async () => {
+it("saves a whole sentence before any AI check and keeps its article fix in the report", async () => {
   const user = userEvent.setup();
   mocks.showCorrectionCards = true;
   mocks.streamChat.mockImplementationOnce(async (_id, _history, onText) => {
@@ -119,6 +165,9 @@ it("takes a marked article correction from the learner's turn to the report", as
   await user.type(screen.getByRole("textbox", { name: "英文回复" }), "I'd like latte.");
   await user.click(screen.getByRole("button", { name: /^发送$/ }));
   await screen.findByText("Would you like milk?");
+  await user.click(screen.getByRole("button", { name: "收藏这句" }));
+  expect(screen.getByRole("button", { name: "已收藏这句" })).toHaveAttribute("aria-pressed", "true");
+  expect(mocks.postTurnCorrection).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "即时纠错" }));
   const mark = await screen.findByRole("button", { name: "标记复练" });
   await user.click(mark);
@@ -126,9 +175,44 @@ it("takes a marked article correction from the learner's turn to the report", as
   await user.click(screen.getByRole("button", { name: "看小结" }));
   expect(await screen.findByRole("heading", { name: "练习小结" })).toBeInTheDocument();
   expect(useSession.getState().markedCorrections).toEqual([{
+    turn_index: 1, original: "I'd like latte.", suggestion: "", note: "", marked: true, self_marked: true,
+  }, {
     turn_index: 1, category: "articles", marked: true,
     original: "like latte", suggestion: "like a latte", note: "单数可数名词前加 a。",
   }]);
+});
+
+it("saves the transcript and self-marked sentence when scoring times out after leaving", async () => {
+  mocks.showCorrectionCards = true;
+  mocks.postFeedback.mockRejectedValueOnce(new DOMException("Timed out", "TimeoutError"));
+  mocks.streamChat.mockImplementationOnce(async (_id, _history, onText) => {
+    onText("Would you like milk?");
+    return "Would you like milk?";
+  });
+  const user = userEvent.setup();
+  const { unmount } = render(
+    <MemoryRouter initialEntries={["/practice/cafe"]}>
+      <DictionaryProvider>
+        <Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes>
+      </DictionaryProvider>
+    </MemoryRouter>,
+  );
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", { name: "文字练习" }));
+  await user.type(screen.getByRole("textbox", { name: "英文回复" }), "I'd like latte.");
+  await user.click(screen.getByRole("button", { name: /^发送$/ }));
+  await screen.findByText("Would you like milk?");
+  await user.click(screen.getByRole("button", { name: "收藏这句" }));
+  unmount();
+  await waitFor(() => expect(mocks.postSession).toHaveBeenCalledWith(expect.objectContaining({
+    overall: null,
+    messages: [
+      expect.objectContaining({role: "assistant", content: "Hello"}),
+      expect.objectContaining({role: "user", content: "I'd like latte."}),
+      expect.objectContaining({role: "assistant", content: "Would you like milk?"}),
+    ],
+    corrections: [expect.objectContaining({turn_index: 1, original: "I'd like latte.", marked: true, self_marked: true})],
+  })));
 });
 
 it("does not send a previous identity's unmount feedback result as a new account's session", async () => {
@@ -446,7 +530,7 @@ it("releases call fallback discovery immediately when muted during the pending p
   const pending=callbacks.reply("Coffee.",new ArrayBuffer(2),()=>{},controller.signal);
   try {
     await waitFor(()=>expect(mocks.postChat).toHaveBeenCalledTimes(2));
-    const discoveryTimer=timer.mock.results[timer.mock.calls.findIndex(([,delay])=>delay===500)].value;
+    const discoveryTimer=timer.mock.results[timer.mock.calls.findIndex(([,delay])=>delay===2_000)].value;
     expect(addEventListener).toHaveBeenCalledWith("voiceschanged",expect.any(Function));
     expect(removeEventListener).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button",{name:"关闭朗读"}));

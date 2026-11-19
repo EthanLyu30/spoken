@@ -1,15 +1,18 @@
 /**
- * Persist a finished practice session exactly once. Both the report page (after
- * showing the debrief) and the conversation page (when you leave without opening
- * the debrief) call this; an in-memory signature set dedupes so a session is
- * saved a single time.
+ * Save one practice per owner and practice ID. A score can arrive after the
+ * transcript and marks have already been saved.
  */
-import { postSession, type ChatMessage, type FeedbackResponse } from "./api";
+import { postSession, type ChatMessage, type Correction, type CustomScene, type FeedbackResponse, type SaveSessionPayload } from "./api";
 import { getToken, getAuthGeneration } from "./authToken";
 import { getClientId } from "./clientId";
 
-const saved = new Set<string>();
-const pending = new Map<string, Promise<void>>();
+type Assessment = Pick<SaveSessionPayload, "overall" | "summary" | "tip" | "scores" | "corrections">;
+const saved = new Map<string, { scored: boolean; assessment?: Assessment }>();
+const pending = new Map<string, { scored: boolean; request: Promise<Assessment | undefined> }>();
+
+export function unscoredSession(corrections: Correction[]): Assessment {
+  return { overall: null, summary: "", tip: "", scores: [], corrections };
+}
 
 export function createPracticeId(): string {
   return typeof crypto.randomUUID === "function"
@@ -20,17 +23,25 @@ export function createPracticeId(): string {
 export async function persistSessionOnce(
   scenarioId: string,
   messages: ChatMessage[],
-  feedback: FeedbackResponse,
+  feedback: Assessment | FeedbackResponse,
   practiceId: string,
   generation: number = getAuthGeneration(),
-): Promise<void> {
+  custom?: CustomScene | null,
+): Promise<Assessment | undefined> {
   if (generation !== getAuthGeneration()) return;
   const sig = `${getToken() ?? getClientId()}|${practiceId}`;
   // getClientId can discover an external clear before its storage event arrives.
   if (generation !== getAuthGeneration()) return;
-  if (saved.has(sig)) return;
+  const scored = feedback.overall !== null;
+  const retained = saved.get(sig);
+  if (retained && (retained.scored || !scored)) return retained.assessment;
   const existing = pending.get(sig);
-  if (existing) return existing;
+  if (existing) {
+    if (!scored || existing.scored) return existing.request;
+    // A score still carries the full conversation if the first write failed.
+    await existing.request.catch(() => undefined);
+    return persistSessionOnce(scenarioId, messages, feedback, practiceId, generation, custom);
+  }
   const request = postSession({
       client_session_id: practiceId,
       scenario_id: scenarioId,
@@ -40,10 +51,19 @@ export async function persistSessionOnce(
       tip: feedback.tip,
       scores: feedback.scores,
       ...(feedback.corrections?.length ? { corrections: feedback.corrections } : {}),
-    }).then(() => {
-      saved.add(sig);
-      if (saved.size > 200) saved.delete(saved.values().next().value as string);
+      ...(scenarioId === "custom" && custom ? { custom } : {}),
+    }).then((result) => {
+      const assessment = result?.overall !== undefined ? {
+        overall: result.overall, summary: result.summary, tip: result.tip,
+        scores: result.scores, corrections: result.corrections,
+      } : undefined;
+      saved.set(sig, {scored: assessment ? assessment.overall !== null : scored, assessment});
+      if (saved.size > 200) {
+        const oldest = saved.keys().next().value;
+        if (oldest !== undefined) saved.delete(oldest);
+      }
+      return assessment;
     }).finally(() => { pending.delete(sig); });
-  pending.set(sig, request);
+  pending.set(sig, { scored, request });
   return request;
 }

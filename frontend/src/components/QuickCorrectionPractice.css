@@ -1,0 +1,27 @@
+.review-fix .quick-practice-summary > p, .quick-practice-scope {
+  margin-top: 3px; color: var(--muted); font-size: .8125rem;
+}
+.quick-practice-tools, .quick-practice-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.quick-practice-tools button, .quick-practice-close {
+  display: inline-flex; min-height: 44px; align-items: center; gap: 6px;
+  color: var(--coral-deep); font-size: .8125rem; font-weight: 700;
+}
+.quick-practice-tools button[aria-expanded="true"] { text-decoration: underline; text-underline-offset: 4px; }
+.quick-practice-panel { position: relative; margin: 2px 0 10px; padding: 12px 14px; background: var(--surface-2); border-radius: 12px; }
+.quick-practice-close { float: right; min-width: 36px; justify-content: center; min-height: 36px; margin: -6px -6px 0 4px; }
+.quick-practice-prompt { color: var(--ink); font-weight: 750; line-height: 1.6; overflow-wrap: anywhere; }
+.quick-practice-panel form { clear: both; }
+.quick-practice-panel label { display: block; margin-top: 8px; color: var(--muted); font-size: .8125rem; font-weight: 700; }
+.quick-practice-panel input {
+  display: block; width: 100%; min-height: 44px; margin: 4px 0 8px; padding: 6px 10px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit;
+}
+.quick-practice-panel input:focus-visible { outline: 2px solid var(--coral-deep); outline-offset: 1px; }
+.review-turn:has(.quick-practice-panel) .review-full-line,
+.review-turn:has(.quick-practice-panel) .quick-practice-summary { display: none; }
+@media print {
+  .quick-practice-tools, .quick-practice-panel { display: none; }
+  .quick-practice-summary[hidden],
+  .review-turn:has(.quick-practice-panel) .quick-practice-summary,
+  .review-turn:has(.quick-practice-panel) .review-full-line { display: block; }
+}

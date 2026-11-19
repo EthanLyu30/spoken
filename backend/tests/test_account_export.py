@@ -151,7 +151,7 @@ def test_export_contains_only_the_authenticated_account(seeded):
     assert payload["version"] == 1
     assert set(payload) == {
         "version", "profile", "sessions", "practice", "words",
-        "learning_events", "badges", "product_feedback",
+        "learning_events", "badges", "product_feedback", "scene_cues",
     }
     assert payload["profile"] == {
         "email": "alice@example.com",

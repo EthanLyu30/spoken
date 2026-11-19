@@ -23,7 +23,7 @@ EMAIL_RESEND_AFTER = timedelta(seconds=90)
 CATEGORIES = {"ui": "界面与易用性", "feature": "功能建议", "bug": "故障",
               "learning": "练习与评分", "other": "其他"}
 SOURCES = {"home": "首页", "profile": "我的", "scene_report": "课后小结",
-           "interview_result": "面试结果", "direct": "反馈信箱"}
+           "interview_result": "面试结果", "coaching": "专项复练", "direct": "反馈信箱"}
 AI_RESULTS = {
     "reproducible": "提供了可核对的问题线索",
     "proposal": "提供了可讨论的改进方案",
@@ -107,7 +107,15 @@ def pilot_status(db: Session, pilot: Pilot | None, now: datetime | None = None, 
     return {**data, "remaining": BUDGET - (db.scalar(select(committed)) or 0)}
 
 
-def store_feedback(db: Session, payload: SubmitFeedback, owner_id: int | None) -> tuple[ProductFeedback, bool]:
+def guest_owner_digest(client_id: str | None) -> str | None:
+    value = (client_id or "").strip()
+    if not value or len(value) > 64 or value.lower() == "anon" or value.lower().startswith("u:"):
+        return None
+    return feedback_key("guest-owner", value)
+
+
+def store_feedback(db: Session, payload: SubmitFeedback, owner_id: int | None,
+                   guest_digest: str | None = None) -> tuple[ProductFeedback, bool]:
     now = utcnow()
     pilot = configured_pilot()
     pilot_id = pilot.id if pilot and pilot.start <= now < pilot.end else None
@@ -115,13 +123,14 @@ def store_feedback(db: Session, payload: SubmitFeedback, owner_id: int | None) -
     body = json.dumps([owner_id, payload.model_dump(exclude_none=True)], ensure_ascii=False, sort_keys=True)
     digest = feedback_key("submission", body)
     created = db.scalar(_insert(db, ProductFeedback).values(
-        id=ticket_id, request_digest=digest, owner_id=owner_id, pilot_id=pilot_id,
+        id=ticket_id, request_digest=digest, owner_id=owner_id, guest_owner_digest=guest_digest, pilot_id=pilot_id,
         category=payload.category, description=payload.description, source=payload.source, created_at=now,
         ai_status="pending" if payload.allow_ai else "skipped", email=payload.email,
         verify_sent_at=now if payload.email else None,
     ).on_conflict_do_nothing().returning(ProductFeedback.id))
     record = db.get(ProductFeedback, ticket_id)
-    if record is None or record.removed_at is not None or not hmac.compare_digest(record.request_digest, digest):
+    if (record is None or record.removed_at is not None or not hmac.compare_digest(record.request_digest, digest)
+            or record.guest_owner_digest is not None and record.guest_owner_digest != guest_digest):
         raise HTTPException(409, "这次提交已被使用，请重新提交。")
     db.commit()
     return record, created is not None
@@ -137,12 +146,22 @@ def email_confirmation_token(ticket_id: str, email: str, issued_at: datetime) ->
 
 def verify_access(db: Session, ticket_id: str, secret: str | None, owner_id: int | None) -> ProductFeedback:
     record = db.get(ProductFeedback, ticket_id)
+    # Account feedback uses its owner credential. A signed-out visitor can
+    # still read a guest receipt from an explicitly saved private link.
     if record is None or record.removed_at is not None or not (
-        (secret is not None and hmac.compare_digest(secret, receipt_key(ticket_id)))
-        or (owner_id is not None and owner_id == record.owner_id)
+        (owner_id is not None and owner_id == record.owner_id)
+        or (owner_id is None and record.owner_id is None
+            and secret is not None and hmac.compare_digest(secret, receipt_key(ticket_id)))
     ):
-        raise HTTPException(404, "未找到回执，请打开完整的私密回执链接。")
+        raise HTTPException(404, "未找到回执。请使用提交时的账号，或退出登录后打开游客的私密回执链接。")
     return record
+
+
+def can_manage_receipt(record: ProductFeedback, guest_digest: str | None) -> bool:
+    # Legacy guest receipts have no original device on record. Continue to
+    # honour their private links for visitors; never attach them to an account.
+    return (record.owner_id is not None or record.guest_owner_digest is None
+            or (guest_digest is not None and hmac.compare_digest(record.guest_owner_digest, guest_digest)))
 
 
 def lock_ticket(db: Session, record: ProductFeedback, *, reward: bool = False) -> ProductFeedback:

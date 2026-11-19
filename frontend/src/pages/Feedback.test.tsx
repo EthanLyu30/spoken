@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -6,7 +6,10 @@ import Feedback from "./Feedback";
 import FeedbackReceiptPage from "./FeedbackReceipt";
 import FeedbackEmailConfirm from "./FeedbackEmailConfirm";
 import { AdminFeedbackInbox } from "../components/AdminFeedbackInbox";
-import { privateReceiptPath, type AdminFeedback, type FeedbackReceipt } from "../lib/productFeedbackApi";
+import { localFeedbackReceipts, privateReceiptPath, rememberGuestReceipt, type AdminFeedback, type FeedbackReceipt } from "../lib/productFeedbackApi";
+import { clearToken, setToken } from "../lib/authToken";
+import { rotateClientId } from "../lib/clientId";
+import { useAuth } from "../store/auth";
 
 const id = "e".repeat(24);
 const key = "a".repeat(64);
@@ -23,8 +26,8 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-function feedbackRoute() {
-  render(<MemoryRouter initialEntries={["/feedback"]}>
+function feedbackRoute(entry: string | { pathname: string; search: string; state: unknown } = "/feedback") {
+  render(<MemoryRouter initialEntries={[entry]}>
     <Routes>
       <Route path="/feedback" element={<Feedback />} />
       <Route path="/feedback/receipt/:ticketId" element={<h1>已打开私密回执</h1>} />
@@ -34,8 +37,147 @@ function feedbackRoute() {
 
 afterEach(() => {
   cleanup();
+  clearToken();
+  useAuth.setState({user: null});
   localStorage.clear();
   vi.unstubAllGlobals();
+});
+
+function switchToAccount(account: number) {
+  setToken(`feedback-account-${account}`);
+  useAuth.setState({user: {id: account, email: "", display_name: "", avatar_url: "", created_at: ""}});
+}
+
+it("appends older registered feedback without losing entries already on screen", async () => {
+  useAuth.setState({user: {id: 18, email: "learner@example.test", display_name: "Learner", avatar_url: "", created_at: "2026-11-10"}});
+  const oldest = "d".repeat(24);
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url.endsWith("/pilot")) return json({ status: "unconfigured", budget: 200, remaining: 200 });
+    if (url.endsWith("/mine/page")) return json({items: [receipt], next_cursor: id});
+    if (url.endsWith(`/mine/page?before=${id}`)) return json({items: [{...receipt, id: oldest, category: "feature"}], next_cursor: null});
+    throw new Error("Unexpected request");
+  }));
+  feedbackRoute();
+  await userEvent.click(await screen.findByRole("button", {name: "查看更早"}));
+  expect(await screen.findByRole("link", {name: /功能建议/})).toHaveAttribute("href", privateReceiptPath(oldest));
+  expect(screen.getByRole("link", {name: /问题反馈|故障/})).toHaveAttribute("href", privateReceiptPath(id));
+  expect(screen.queryByRole("button", {name: "查看更早"})).not.toBeInTheDocument();
+});
+
+it("retains and reveals guest receipts older than the newest twenty", async () => {
+  const receiptIds = Array.from({length: 21}, (_, index) => index.toString(16).padStart(24, "a"));
+  for (const receiptId of receiptIds) rememberGuestReceipt(receiptId, key);
+  vi.stubGlobal("fetch", vi.fn(async () => json({status: "unconfigured", budget: 200, remaining: 200})));
+  feedbackRoute();
+  expect(screen.getAllByRole("link", {name: /本机游客回执/})).toHaveLength(20);
+  await userEvent.click(screen.getByRole("button", {name: "查看更早的游客回执"}));
+  expect(screen.getAllByRole("link", {name: /本机游客回执/})).toHaveLength(21);
+  expect(screen.getByRole("link", {name: /AAAAA0/})).toHaveAttribute("href", privateReceiptPath(receiptIds[0], key));
+});
+
+it("orders guest receipts by creation time even when they are remembered out of order", () => {
+  const recentId = "b".repeat(24);
+  rememberGuestReceipt(recentId, key, "2026-11-18T11:00:00Z");
+  rememberGuestReceipt(id, key, "2026-11-10T11:00:00Z");
+  expect(Object.keys(localFeedbackReceipts())).toEqual([recentId, id]);
+});
+
+it("does not expose guest history under an account or under a rotated guest identity", async () => {
+  rememberGuestReceipt(id, key);
+  expect(localFeedbackReceipts()).toEqual({ [id]: key });
+  switchToAccount(29);
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/mine/page")
+    ? json({ items: [], next_cursor: null }) : json({ status: "unconfigured" })));
+  feedbackRoute();
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole("link", { name: /本机游客回执/ })).not.toBeInTheDocument();
+  expect(localFeedbackReceipts()).toEqual({});
+  act(() => { clearToken(); rotateClientId(); });
+  expect(localFeedbackReceipts()).toEqual({});
+});
+
+it("restarts from the first page when the saved feedback cursor has been removed", async () => {
+  const freshId = "b".repeat(24);
+  let firstPages = 0;
+  const read = vi.fn(async (url: string) => {
+    if (url.endsWith("/mine/page")) return ++firstPages === 1
+      ? json({ items: [receipt], next_cursor: id })
+      : json({ items: [{ ...receipt, id: freshId, category: "feature" }], next_cursor: null });
+    if (url.endsWith(`/mine/page?before=${id}`)) return json({ detail: "分页位置已失效" }, 404);
+    return json({ status: "unconfigured" });
+  });
+  vi.stubGlobal("fetch", read);
+  switchToAccount(30);
+  feedbackRoute();
+  await userEvent.click(await screen.findByRole("button", { name: "查看更早" }));
+  expect(await screen.findByRole("link", { name: /功能建议/ })).toHaveAttribute("href", privateReceiptPath(freshId));
+  expect(screen.queryByRole("link", { name: /故障/ })).not.toBeInTheDocument();
+  expect(read.mock.calls.filter(([url]) => url.includes("?before="))).toHaveLength(1);
+  expect(firstPages).toBe(2);
+});
+
+it("discards a pending earlier page when a different account opens the feedback list", async () => {
+  let resolveOlder!: (response: Response) => void;
+  let olderSignal: AbortSignal | null | undefined;
+  const older = new Promise<Response>(resolve => { resolveOlder = resolve; });
+  const otherId = "b".repeat(24);
+  vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
+    const auth = new Headers(options?.headers).get("Authorization");
+    if (url.endsWith(`/mine/page?before=${id}`)) {
+      olderSignal = options?.signal;
+      return older;
+    }
+    if (url.endsWith("/mine/page")) return auth === "Bearer feedback-account-31"
+      ? json({ items: [receipt], next_cursor: id })
+      : json({ items: [{ ...receipt, id: otherId, category: "feature" }], next_cursor: null });
+    return json({ status: "unconfigured" });
+  }));
+  switchToAccount(31);
+  feedbackRoute();
+  await userEvent.click(await screen.findByRole("button", { name: "查看更早" }));
+  await waitFor(() => expect(olderSignal).toBeDefined());
+  act(() => switchToAccount(32));
+  expect(await screen.findByRole("link", { name: /功能建议/ })).toHaveAttribute("href", privateReceiptPath(otherId));
+  expect(olderSignal?.aborted).toBe(true);
+  await act(async () => resolveOlder(json({ items: [receipt], next_cursor: null })));
+  expect(screen.queryByRole("link", { name: /故障/ })).not.toBeInTheDocument();
+});
+
+it("keeps the logged-in credential when opening an explicit guest receipt link", async () => {
+  const read = vi.fn(async (_url: string, options?: RequestInit) => {
+    expect(new Headers(options?.headers).get("Authorization")).toBe("Bearer feedback-account-33");
+    return json({ detail: "未找到回执。" }, 404);
+  });
+  vi.stubGlobal("fetch", read);
+  switchToAccount(33);
+  render(<MemoryRouter initialEntries={[privateReceiptPath(id, key)]}>
+    <Routes><Route path="/feedback/receipt/:ticketId" element={<FeedbackReceiptPage />} /></Routes>
+  </MemoryRouter>);
+  expect(await screen.findByRole("alert")).toHaveTextContent("未找到回执");
+  expect(read).toHaveBeenCalledOnce();
+  expect(screen.queryByText("查看我的意见")).not.toBeInTheDocument();
+});
+
+it("opens an editable coaching report and submits it only after the learner sends it", async () => {
+  const submissions: Record<string, string>[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
+    if (url.endsWith("/pilot")) return json({ status: "unconfigured", budget: 200, remaining: 200 });
+    if (options?.method === "POST") {
+      submissions.push(JSON.parse(String(options.body)));
+      return json({ ...receipt, receipt_key: key }, 201);
+    }
+    throw new Error("Unexpected request");
+  }));
+  feedbackRoute({ pathname: "/feedback", search: "?from=coaching",
+    state: { coaching: { title: "酒店前台", tasks: ["报告昨天完成的一件事。", "告诉同事上周做了什么。"] } } });
+  const field = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "具体发生了什么？" });
+  expect(field.value).toContain("酒店前台");
+  expect(field.value).toContain("报告昨天完成的一件事。");
+  expect(screen.getByRole("radio", { name: "练习与评分" })).toBeChecked();
+  expect(submissions).toHaveLength(0);
+  await userEvent.setup().click(screen.getByRole("button", { name: "发送这封信" }));
+  expect(await screen.findByRole("heading", { name: "已打开私密回执" })).toBeVisible();
+  expect(submissions).toEqual([expect.objectContaining({ source: "coaching", category: "learning", allow_ai: false })]);
 });
 
 it("announces an invalid optional email and keeps the draft and request id for retries", async () => {

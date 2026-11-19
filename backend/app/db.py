@@ -117,6 +117,7 @@ def init_db() -> None:
 def _migrate_feedback_payouts() -> None:
     """Keep earlier feedback records and make removed claims reviewable."""
     columns = {
+        "guest_owner_digest": "VARCHAR(64)",
         "ai_attempt_at": "TIMESTAMP",
         "verification_mail_attempt_at": "TIMESTAMP",
         "payout_recorded_at": "TIMESTAMP",
@@ -162,7 +163,7 @@ def _migrate_telemetry_errors() -> None:
 
 
 def _migrate_session_identity() -> None:
-    """Keep legacy sessions readable, with empty corrections on old rows."""
+    """Keep legacy sessions readable as optional practice details are added."""
     with engine.begin() as conn:
         if _url.startswith("sqlite"):
             existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sessions)")}
@@ -170,9 +171,15 @@ def _migrate_session_identity() -> None:
                 conn.exec_driver_sql("ALTER TABLE sessions ADD COLUMN client_session_id VARCHAR(64)")
             if "corrections" not in existing:
                 conn.exec_driver_sql("ALTER TABLE sessions ADD COLUMN corrections JSON NOT NULL DEFAULT '[]'")
+            if "custom" not in existing:
+                conn.exec_driver_sql("ALTER TABLE sessions ADD COLUMN custom JSON")
+            if "scored" not in existing:
+                conn.exec_driver_sql("ALTER TABLE sessions ADD COLUMN scored BOOLEAN NOT NULL DEFAULT TRUE")
         else:
             conn.exec_driver_sql("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS client_session_id VARCHAR(64)")
             conn.exec_driver_sql("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS corrections JSON NOT NULL DEFAULT '[]'")
+            conn.exec_driver_sql("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS custom JSON")
+            conn.exec_driver_sql("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS scored BOOLEAN NOT NULL DEFAULT TRUE")
         conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS uq_sessions_owner_practice ON sessions (client_id, client_session_id)")
 
 

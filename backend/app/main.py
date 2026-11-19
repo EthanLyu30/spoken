@@ -23,6 +23,7 @@ from app.api import (
     asr,
     auth,
     chat,
+    correction_practice,
     custom,
     daily,
     dictionary,
@@ -32,6 +33,7 @@ from app.api import (
     interview,
     practice,
     pronunciation,
+    scene_cues,
     scenarios,
     sessions,
     tts,
@@ -190,9 +192,11 @@ app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(account.router, prefix="/api")
 app.include_router(scenarios.router, prefix="/api")
+app.include_router(scene_cues.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(feedback.router, prefix="/api")
 app.include_router(turn_correction.router, prefix="/api")
+app.include_router(correction_practice.router, prefix="/api")
 app.include_router(dictionary.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(tts.router, prefix="/api")
