@@ -167,7 +167,7 @@ it("opens an AI coaching scene based on the learner's evidence", async () => {
   const focus = { kind: "article_missing", category: "articles", sessions: 1, sentences: 1, occurrences: 2 } as const;
   const practice_exercises = [{ partner_line: "What will you need?", task: "用 a/an 说你需要一张日票。",
     hint: "I'd like ___, please.", example: "I'd like a day ticket, please." }];
-  vi.mocked(api.getCoaching).mockResolvedValue({ revision: "rail-pass", examples: [example], patterns: [focus] });
+  vi.mocked(api.getCoaching).mockResolvedValue({ revision: "rail-pass", examples: [example], patterns: [focus], can_generate_plan: true });
   vi.spyOn(api, "postCoachingPlan").mockResolvedValue({ revision: "rail-pass", focus, summary: "你在 boarding pass 前漏了 a。",
     evidence: [example], scene: { title: "Rail pass", title_zh: "车站买票", goal: "Buy a pass", persona: "Work at the ticket counter",
       opening_line: "How can I help?", partner_role: "Clerk", practice_exercises },
@@ -189,13 +189,32 @@ it("opens an AI coaching scene based on the learner's evidence", async () => {
   useCustomScene.getState().clear();
 });
 
+it("keeps sentence replay available when the saved edit cannot support a coaching plan", async () => {
+  mock.sessions = [{ id: 10, scenario_id: "cafe", overall: 75, created_at: "2026-11-20T04:00:00Z" }];
+  const example = { session_id: 10, turn_index: 1, scenario_id: "cafe", original: "I every morning drink coffee.",
+    previous_partner_message: "What do you do in the morning?", corrections: [] };
+  const focus = { kind: "word_order", category: "word_order", sessions: 1, sentences: 1, occurrences: 1 } as const;
+  const snapshot = { revision: "unsupported", examples: [example], patterns: [focus], can_generate_plan: false };
+  vi.mocked(api.getCoaching).mockResolvedValue(snapshot);
+  const generate = vi.spyOn(api, "postCoachingPlan");
+
+  show();
+
+  const panel = await screen.findByRole("region", { name: "个人复练" });
+  expect(panel).toHaveTextContent("语序");
+  expect(within(panel).queryByRole("button", { name: "让 Pip 排训练计划" })).not.toBeInTheDocument();
+  expect(panel).toHaveTextContent("这类错句适合先重说原句");
+  expect(within(panel).getByRole("link", { name: "重练原句" })).toHaveAttribute("href", "/prepare/cafe?review=10:1");
+  expect(generate).not.toHaveBeenCalled();
+});
+
 it("cancels a coaching plan when progress changes and ignores a late response", async () => {
   mock.sessions = [{ id: 12, scenario_id: "airport", overall: 71, created_at: "2026-11-18T03:00:00Z" }];
   const example = { session_id: 12, turn_index: 1, scenario_id: "airport", original: "I need boarding pass.",
     previous_partner_message: "How can I help?", corrections: [] };
   const focus = { kind: "article_missing", category: "articles", sessions: 1, sentences: 1, occurrences: 1 } as const;
-  vi.mocked(api.getCoaching).mockResolvedValueOnce({ revision: "first", examples: [example], patterns: [focus] })
-    .mockResolvedValue({ revision: "second", examples: [example], patterns: [{ ...focus, sessions: 2, sentences: 2, occurrences: 2 }] });
+  vi.mocked(api.getCoaching).mockResolvedValueOnce({ revision: "first", examples: [example], patterns: [focus], can_generate_plan: true })
+    .mockResolvedValue({ revision: "second", examples: [example], patterns: [{ ...focus, sessions: 2, sentences: 2, occurrences: 2 }], can_generate_plan: true });
   let resolve!: (plan: api.CoachingPlan) => void;
   const generate = vi.spyOn(api, "postCoachingPlan").mockImplementation(() => new Promise((done) => { resolve = done; }));
   show();

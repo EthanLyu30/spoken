@@ -163,7 +163,7 @@ def coaching_snapshot(db: Session, owner: str, scene_id: str | None = None) -> C
         focus_fixes = [fix for fix, counts in _distinct_errors(fixes) if patterns[0].kind in counts][:4]
         plan_examples.append(sample.model_copy(update={"corrections": focus_fixes}))
     snapshot = CoachingSnapshot(revision="", examples=examples, patterns=patterns[:5], plan_examples=plan_examples)
-    evidence = snapshot.model_dump_json(exclude={"revision"}) + "\n" + "\n".join(sample.model_dump_json() for sample in plan_examples)
+    evidence = snapshot.model_dump_json(exclude={"revision", "can_generate_plan"}) + "\n" + "\n".join(sample.model_dump_json() for sample in plan_examples)
     snapshot.revision = sha256(evidence.encode("utf-8")).hexdigest()
     return snapshot
 
@@ -357,11 +357,17 @@ async def _checked_plan(draft: CoachingPlanDraft, snapshot: CoachingSnapshot, ex
     return CoachingPlan(revision=snapshot.revision, focus=focus, summary=summary, scene=scene, evidence=supporting_examples)
 
 
+def select_plan_targets(snapshot: CoachingSnapshot) -> tuple[list[CoachingExample], list[PracticeTarget]]:
+    if not snapshot.patterns:
+        return [], []
+    return select_targets(snapshot.patterns[0].category, snapshot.plan_examples)
+
+
 async def generate_plan(snapshot: CoachingSnapshot, client: DeepSeekClient) -> CoachingPlan:
-    focus = snapshot.patterns[0]
-    examples, targets = select_targets(focus.category, snapshot.plan_examples)
+    examples, targets = select_plan_targets(snapshot)
     if not targets:
         raise UnsupportedPracticeTarget()
+    focus = snapshot.patterns[0]
     evidence = [{"id": number, "practice": sample.session_id, "scene": sample.scenario_id,
         "sentence": sample.original[:600], "previous_partner_line": sample.previous_partner_message[:300], "fixes": [
             {"before": fix.original[:300], "after": fix.suggestion[:300], "note": fix.note[:200], "patterns": dict(counts)}

@@ -985,6 +985,7 @@ export interface CoachingSnapshot {
   revision: string;
   examples: CoachingExample[];
   patterns: CoachingPattern[];
+  can_generate_plan?: boolean;
 }
 
 export type GrammarKind = CoachingPattern["kind"] | "past_simple" | "present_perfect"

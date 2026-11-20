@@ -1,6 +1,7 @@
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app import db as database
 from app.api.chat import get_client
+from app.core.config import get_settings
 from app.main import app
 from app.models.progress import LearningEvent
 from app.models.session import PracticeSession
@@ -262,10 +264,42 @@ def test_self_mark_and_distinct_article_errors_are_available_as_private_examples
     assert coaching["examples"][0]["previous_partner_message"] == payload["messages"][0]["content"]
     assert coaching["patterns"] == [{"kind": "article_missing", "category": "articles", "sessions": 1,
                                       "sentences": 1, "occurrences": 2}]
+    assert coaching["can_generate_plan"] is True
     assert owner.get("/api/progress/coaching", params={"scene": "cafe"}).json()["examples"] == []
     assert owner.get("/api/progress/coaching", params={"scene": "airport"}).json()["examples"] == coaching["examples"]
     empty = other.get("/api/progress/coaching").json()
     assert empty["examples"] == empty["patterns"] == []
+    assert empty["can_generate_plan"] is False
+
+
+def test_coaching_discloses_unsupported_target_and_classifies_direct_attempt(monkeypatch):
+    owner = TestClient(app, headers={"X-Client-Id": "coaching-unsupported-target"})
+    payload = _payload()
+    sentence = "I every morning drink coffee."
+    payload["messages"][1]["content"] = sentence
+    payload["corrections"] = [{"original": sentence, "suggestion": "I drink coffee every morning.",
+                               "note": "调整时间状语的位置", "category": "word_order", "turn_index": 1}]
+    assert owner.post("/api/sessions", json=payload).status_code == 201
+
+    snapshot = owner.get("/api/progress/coaching").json()
+    assert snapshot["patterns"][0]["kind"] == "word_order"
+    assert snapshot["examples"][0]["original"] == sentence
+    assert snapshot["can_generate_plan"] is False
+
+    class NoModelCalls:
+        async def chat(self, *_args, **_kwargs):
+            pytest.fail("Unsupported coaching targets must be rejected before model calls")
+
+    records = []
+    monkeypatch.setattr(get_settings(), "telemetry_enabled", True)
+    monkeypatch.setattr(app.state, "telemetry_sink", SimpleNamespace(submit=records.append), raising=False)
+    monkeypatch.setitem(app.dependency_overrides, get_client, NoModelCalls)
+    result = owner.post("/api/progress/coaching/plan", params={"revision": snapshot["revision"]})
+    assert result.status_code == 422
+    assert result.json()["detail"]["code"] == "coaching_target_unsupported"
+    record, = records
+    assert record["error_type"] == "UnsupportedPracticeTarget"
+    assert record["error_cause_type"] == "unverifiable_target"
 
 
 @pytest.mark.parametrize(("sentence", "rewrite", "occurrences"), [

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.api.chat import get_client
 from app.core.deps import get_client_id, get_timezone
+from app.core.observability import trace_classify
 from app.db import get_db
 from app.models.session import PracticeSession
 from app.schemas.chat import ChatMessage
@@ -14,7 +15,7 @@ from app.schemas.coaching import CoachingPlan, CoachingSnapshot, GrammarStatisti
 from app.schemas.feedback import SkillScore
 from app.schemas.session import ExpiredSessionReceipt, ProgressSessions, SaveSessionRequest, SessionDetail, SessionSummary
 from app.services import sessions as repo
-from app.services.coaching import UnsupportedPracticeTarget, coaching_snapshot, generate_plan
+from app.services.coaching import UnsupportedPracticeTarget, coaching_snapshot, generate_plan, select_plan_targets
 from app.services.corrections import read_corrections
 from app.services.deepseek import DeepSeekClient, DeepSeekError
 from app.services.grammar_statistics import grammar_statistics
@@ -81,7 +82,10 @@ def progress_sessions(
 def get_coaching(response: Response, scene: str | None = Query(default=None, max_length=64),
                  db: Session = Depends(get_db), client_id: str = Depends(get_client_id)) -> CoachingSnapshot:
     response.headers["Cache-Control"] = "no-store"
-    return coaching_snapshot(db, client_id, scene)
+    snapshot = coaching_snapshot(db, client_id, scene)
+    _, targets = select_plan_targets(snapshot)
+    snapshot.can_generate_plan = bool(targets)
+    return snapshot
 
 
 @router.get("/progress/grammar", response_model=GrammarStatistics)
@@ -107,7 +111,11 @@ async def create_coaching_plan(response: Response, db: Session = Depends(get_db)
         async with asyncio.timeout(25):
             plan = await generate_plan(snapshot, client)
     except UnsupportedPracticeTarget as exc:
-        raise HTTPException(status_code=422, detail="这条错句暂时无法生成专项题，可以先重说原句。") from exc
+        trace_classify(type(exc).__name__, "unverifiable_target")
+        raise HTTPException(status_code=422, detail={
+            "code": "coaching_target_unsupported",
+            "message": "这条错句暂时无法生成专项题，可以先重说原句。",
+        }) from exc
     except TimeoutError as exc:
         raise HTTPException(status_code=504, detail="训练计划生成超时，请重试。") from exc
     except DeepSeekError as exc:

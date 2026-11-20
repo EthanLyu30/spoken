@@ -65,7 +65,7 @@ function CoachingForRevision({ snapshot, refresh }: { snapshot: CoachingSnapshot
   useEffect(() => { if (plan) lesson.current?.focus(); }, [plan]);
 
   async function generate() {
-    if (active.current || generation !== getAuthGeneration()) return;
+    if (!snapshot.can_generate_plan || active.current || generation !== getAuthGeneration()) return;
     const controller = new AbortController();
     const progress = progressGeneration();
     const current = () => active.current === controller && !controller.signal.aborted
@@ -82,7 +82,7 @@ function CoachingForRevision({ snapshot, refresh }: { snapshot: CoachingSnapshot
     } catch (error) {
       if (!current()) return;
       if (error instanceof ApiError && error.status === 409) refresh();
-      else if (error instanceof ApiError && error.status === 422) {
+      else if (error instanceof ApiError && error.status === 422 && error.code === "coaching_target_unsupported") {
         setPlanError("Pip 暂时无法从这些错句确认可以单独练的用法。可以先重说原句。");
       } else if ((error instanceof ApiError && error.status === 504) || (error instanceof Error && error.name === "TimeoutError")) {
         setPlanError("训练计划生成超时，请重试。现在也可以先重练原句。");
@@ -140,9 +140,10 @@ function CoachingForRevision({ snapshot, refresh }: { snapshot: CoachingSnapshot
               <span>{pattern.sessions >= 2 ? "反复出现 · " : "单次练习发现 · "}{pattern.sessions} 次练习 · {pattern.occurrences} 处</span>
             </li>)}
           </ul> : <p>先重说一条收藏的原句。完成带纠错的练习后，Pip 可以帮你找规律。</p>}
-          {patterns.length > 0 && !plan && <button type="button" className="coaching-primary" onClick={() => void generate()} disabled={planning}>
+          {snapshot.can_generate_plan && !plan && <button type="button" className="coaching-primary" onClick={() => void generate()} disabled={planning}>
             <Sparkles size={16} /> {planning ? "正在分析你的错句…" : "让 Pip 排训练计划"}
           </button>}
+          {patterns.length > 0 && snapshot.can_generate_plan === false && <p>这类错句适合先重说原句。</p>}
           {planning && <p className="sr-only" role="status">正在生成个人训练计划</p>}
           {planError && <p role="alert" className="replay-error">{planError}</p>}
         </section>

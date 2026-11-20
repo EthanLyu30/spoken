@@ -27,6 +27,7 @@ class CoachingSnapshot(BaseModel):
     revision: str
     examples: list[CoachingExample]
     patterns: list[CoachingPattern]
+    can_generate_plan: bool = False
     plan_examples: list[CoachingExample] = Field(default_factory=list, exclude=True)
 
 
