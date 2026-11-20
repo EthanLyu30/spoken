@@ -36,11 +36,11 @@
   color: var(--ink); margin: 11px 0 4px; font-size: clamp(2.35rem, 4.4vw, 3.75rem);
   font-weight: 800; letter-spacing: -.045em; line-height: 1.16; text-wrap: balance; overflow-wrap: anywhere;
 }
-.guided-english, .prep-english {
+.guided-english {
   color: var(--muted); font: italic clamp(1.15rem, 2.1vw, 1.65rem)/1.4 Georgia, serif; overflow-wrap: anywhere;
 }
 .prep-goal { margin: 12px 0 17px; max-width: 46ch; line-height: 1.65; color: var(--muted); }
-.prep-masthead-art, .prep-scene-art {
+.prep-masthead-art {
   position: relative; z-index: -1; justify-self: end; align-self: stretch; width: 100%;
   display: grid; align-items: center; justify-items: end; pointer-events: none;
 }
@@ -50,11 +50,6 @@
   mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent), linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
   mask-composite: intersect;
 }
-.prep-scene-art { min-height: 200px; }
-.prep-scene-mascot { grid-template-columns: minmax(0, 1fr); justify-items: center; }
-.prep-scene-mascot .buddy-art { max-width: 75%; align-self: end; }
-.prep-scene-mascot img { width: 100%; height: 100%; object-fit: contain; }
-.prep-art-icon { position: absolute; right: 3%; top: 8%; width: 38%; height: 68%; color: var(--coral); opacity: .18; transform: rotate(8deg); }
 .coaching-primary, .coaching-secondary {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px;
   font-weight: 750; line-height: 1.4; font-size: .875rem;
@@ -68,8 +63,6 @@
 .coaching-primary svg, .guided-navigation button svg { transition: transform .18s ease; }
 .coaching-primary:hover:not(:disabled) svg, .guided-next:hover:not(:disabled) svg { transform: translateX(3px); }
 
-.prep-body { margin-top: 26px; border-top: 1px solid var(--border); padding-top: 22px; }
-.prep-body-personal { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, .85fr); gap: clamp(28px, 5vw, 72px); }
 .coaching-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--ink); }
 .coaching-heading h2, .coaching-heading h3 { margin: 0; font-size: 1.23rem; line-height: 1.4; font-weight: 800; }
 .coaching-heading svg { flex-shrink: 0; color: var(--coral-deep); }
@@ -90,7 +83,6 @@
 .prep-focus { margin-top: 20px; padding-block: 18px; border-top: 1px solid var(--border); scroll-margin-top: 86px; }
 .prep-focus > p { margin: 7px 0; color: var(--muted); }
 .prep-focus .prep-cloze { color: var(--ink); font-size: 1.2rem; font-weight: 750; }
-.prep-personal .coaching-heading { margin-bottom: 9px; }
 
 .coaching-panel, .coaching-review { padding-block: clamp(14px, 2.5vw, 24px); color: var(--ink); }
 .coaching-panel { margin-bottom: 22px; border-block: 1px solid var(--border); }
@@ -195,8 +187,7 @@
 @keyframes coaching-spin { to { transform: rotate(1turn); } }
 
 @media (max-width: 760px) {
-  .prep-body-personal, .coaching-plan-practice, .coaching-panel-grid { grid-template-columns: 1fr; }
-  .prep-personal { grid-row: 1; }
+  .coaching-plan-practice, .coaching-panel-grid { grid-template-columns: 1fr; }
   .sentence-replay { gap: 30px; }
 }
 @media (max-width: 640px) {
@@ -204,13 +195,9 @@
   .prep-masthead { grid-template-columns: minmax(0, 1fr) minmax(96px, 30%); }
   .prep-hero-copy { padding-block: 10px; }
   .prep-shell .prep-masthead h1 { font-size: clamp(1.8rem, 7.5vw, 2.45rem); margin-block: 7px 3px; }
-  .guided-english, .prep-english { font-size: 1.05rem; }
+  .guided-english { font-size: 1.05rem; }
   .guided-progress { margin-top: 8px; }
-  .prep-scene-art { min-height: 110px; }
-  .prep-scene-mascot .buddy-art { max-width: 96%; max-height: 116px; align-self: center; }
-  .prep-art-icon { height: 76px; top: 22%; right: -8%; }
   .prep-goal { font-size: .875rem; margin-block: 9px 14px; }
-  .prep-body { margin-top: 18px; padding-top: 17px; }
   .prep-phrases > ul > li { grid-template-columns: minmax(0, 1fr) 44px; grid-template-areas: "keyword listen" "meaning listen" "example example"; row-gap: 2px; padding-block: 14px; }
   .prep-example { margin-top: 3px; font-size: .94rem; }
   .guided-workspace { margin-top: 1px; }

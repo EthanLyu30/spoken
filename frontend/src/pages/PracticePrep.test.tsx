@@ -8,6 +8,8 @@ import SessionView from "./SessionView";
 import { useCustomScene } from "../store/custom";
 import { speakText } from "../lib/speech";
 import { beginSpeechPlayback } from "../store/speechPlayback";
+import { scenarios } from "../data/scenarios";
+import { practiceCues } from "../data/practiceCues";
 
 vi.mock("../components/dictionary/InteractiveEnglishText", () => ({ InteractiveEnglishText: ({ text }: { text: string }) => <span>{text}</span> }));
 vi.mock("../lib/api", () => ({ getCoaching: vi.fn(), getSession: vi.fn(), postTurnCorrection: vi.fn(), request: vi.fn() }));
@@ -121,10 +123,47 @@ it("lets a learner review fixed airport phrases and bring the article focus into
   const focus = screen.getByRole("region", { name: "专项复练 · 冠词" });
   expect(within(focus).getByText(/check ___ bag/)).toBeVisible();
   expect(screen.getByRole("region", { name: "关键词与句型" })).toHaveTextContent("check a bag");
+  const gate = screen.getByRole("button", { name: "听确认登机口的例句" });
+  await user.click(gate);
+  expect(gate).toHaveAttribute("aria-pressed", "true");
+  expect(speakText).toHaveBeenLastCalledWith("Could you tell me which gate my flight leaves from?", "airport");
+  await user.click(screen.getByRole("button", { name: "暂停动效" }));
+  expect(screen.getByRole("button", { name: "开启动效" })).toBeVisible();
   await user.click(within(focus).getByText("查看参考说法"));
   expect(within(focus).getByText("I need to check a bag.")).toBeVisible();
   await user.click(screen.getByRole("link", { name: "开始场景练习" }));
   expect(screen.getByText("/practice/airport?focus=articles")).toBeVisible();
+});
+
+it.each(scenarios.filter(scenario => scenario.id !== "cafe").map(scenario => [scenario.id, scenario.titleZh]))(
+  "rehearses each built-in scene with its own expression hotspots (%s)", (scenarioId, title) => {
+    render(<MemoryRouter initialEntries={[`/prepare/${scenarioId}`]}><Routes>
+      <Route path="/prepare/:scenarioId" element={<PracticePrep />} />
+    </Routes></MemoryRouter>);
+
+    expect(screen.getByRole("heading", { name: title, level: 1 })).toBeVisible();
+    expect(screen.getByRole("link", { name: "开始场景练习" })).toHaveAttribute("href", `/practice/${scenarioId}`);
+    for (const [keyword, meaning] of practiceCues(scenarioId)) {
+      expect(screen.getByRole("button", { name: `听${meaning}的例句` })).toBeVisible();
+      expect(screen.getByRole("region", { name: "关键词与句型" })).toHaveTextContent(keyword);
+    }
+    expect(screen.queryByRole("button", { name: "听燕麦奶的例句" })).not.toBeInTheDocument();
+  },
+);
+
+it("uses the custom scene's own cue and practice route in the shared rehearsal", () => {
+  useCustomScene.getState().setScene({ title: "At the ferry terminal", title_zh: "渡轮码头",
+    goal: "向工作人员确认渡轮时间。", persona: "Work at the terminal", partner_role: "Attendant",
+    opening_line: "Where are you headed?", practice_cues: [{ keyword: "the next ferry", meaning: "确认下一班船",
+      sentence: "What time does the next ferry leave?" }] });
+  render(<MemoryRouter initialEntries={["/prepare/custom"]}><Routes>
+    <Route path="/prepare/:scenarioId" element={<PracticePrep />} />
+  </Routes></MemoryRouter>);
+
+  expect(screen.getByRole("heading", { name: "渡轮码头", level: 1 })).toBeVisible();
+  expect(screen.getByRole("button", { name: "听确认下一班船的例句" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "自定义场景" })).toHaveAttribute("href", "/custom");
+  expect(screen.getByRole("link", { name: "开始场景练习" })).toHaveAttribute("href", "/practice/custom");
 });
 
 it("uses the learner's own airport sentence and correction for a personal warm-up", async () => {

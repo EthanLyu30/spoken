@@ -6,7 +6,9 @@ import { AppHeader } from "./components/AppHeader";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { SiteVisitTracker } from "./components/SiteVisitTracker";
 import { SpeechPlaybackError } from "./components/SpeechPlaybackStatus";
+import { getScenario } from "./data/scenarios";
 import { useAuth } from "./store/auth";
+import { useCustomScene } from "./store/custom";
 import Home from "./pages/Home";
 
 // Route-level code splitting keeps deep pages out of the first request. Home is
@@ -37,7 +39,11 @@ export default function App() {
   const resolving = useAuth((s) => s.resolving);
   const resolutionError = useAuth((s) => s.resolutionError);
   const focused = location.pathname.startsWith("/practice/");
-  const cafeCounter = matchPath("/prepare/cafe", location.pathname) && !new URLSearchParams(location.search).has("review");
+  const prepId = matchPath("/prepare/:scenarioId", location.pathname)?.params.scenarioId;
+  const customRehearsal = useCustomScene(s => prepId === "custom" && !!s.scene && !s.scene.practice_exercises?.length);
+  const search = new URLSearchParams(location.search);
+  const hasRehearsalHeader = !search.has("review") && (prepId === "custom"
+    ? customRehearsal && !search.has("lesson") : Boolean(prepId && getScenario(prepId)));
   const section = location.pathname.split("/")[1] || "home";
   const hasSkipTarget = focused || section === "prepare" || section === "feedback" || ["/", "/scenes", "/custom", "/interview"].includes(location.pathname);
   // Account resolution must never hide the routes: Home, Scenes and practice
@@ -79,7 +85,7 @@ export default function App() {
             )}
           </div>
         )}
-        {!focused && !cafeCounter && <AppHeader />}
+        {!focused && !hasRehearsalHeader && <AppHeader />}
         <RouteErrorBoundary key={location.pathname}>
         <Suspense
           fallback={

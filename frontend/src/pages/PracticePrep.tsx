@@ -1,11 +1,9 @@
-import { ArrowLeft, ArrowRight, BookOpen, Check, ChevronDown, Clock3, MessageCircle, Square, Target, Volume2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Check, ChevronDown, MessageCircle, Square, Target, Volume2 } from "lucide-react";
 import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import practiceArt from "../assets/pip-speaking-practice.webp";
-import { Buddy } from "../components/Buddy";
-import { CafeRehearsal } from "../components/CafeRehearsal";
+import { SceneRehearsal } from "../components/SceneRehearsal";
 import { InteractiveEnglishText } from "../components/dictionary/InteractiveEnglishText";
-import { CoachingExamples } from "../components/PersonalCoaching";
 import { SentenceReplay } from "../components/SentenceReplay";
 import { SceneCueEditor } from "../components/SceneCueEditor";
 import { getScenario } from "../data/scenarios";
@@ -192,15 +190,13 @@ function GuidedPrep({ scene, exercises }: { scene: CustomScene; exercises: Pract
   </div>;
 }
 
-function PrepPhrases({ heading, library, scenarioId }: {
-  heading?: string;
+function PrepPhrases({ library, scenarioId }: {
   library: ReturnType<typeof useSceneCues>;
   scenarioId: string;
 }) {
-  const headingId = useId();
   const audio = usePracticePlayback(scenarioId);
-  return <section className="prep-phrases" aria-labelledby={heading ? headingId : undefined}>
-    <SceneCueEditor library={library} heading={heading && <h2 id={headingId}>{heading}</h2>} />
+  return <section className="prep-phrases">
+    <SceneCueEditor library={library} />
     {library.ready && !library.cues.length && <p className="text-sm text-muted">这里还没有表达。点「编辑预习」可以添加。</p>}
     <ul>{library.cues.map(({id, keyword, meaning, sentence}, index) => {
       const active = audio.activeKey === id;
@@ -219,7 +215,6 @@ function Prep({ scenarioId, focusId }: { scenarioId: string; focusId: string | n
   const scenario = getScenario(scenarioId);
   const custom = useCustomScene((state) => scenarioId === "custom" ? state.scene : null);
   const { snapshot } = useCoachingSnapshot(scenarioId);
-  const personal = snapshot?.examples.slice(0, 2) ?? [];
   const focus = isCorrectionCategory(focusId) ? correctionDrills[focusId] : null;
   const library = useSceneCues(scenarioId, custom);
   const SceneIcon = scenario ? scenarioIcons[scenario.icon] : MessageCircle;
@@ -228,9 +223,10 @@ function Prep({ scenarioId, focusId }: { scenarioId: string; focusId: string | n
     ? library.cues.map(cue => cue.sentence).find(sentence => /\b(?:a|an|the)\b/i.test(sentence))
     : undefined;
   const drillPrompt = articleExample?.replace(/\b(?:a|an|the)\b/i, "___");
-  const title = scenario?.titleZh ?? (custom?.title_zh || custom?.title);
-  const englishTitle = scenario?.title ?? custom?.title;
+  const title = scenario?.titleZh ?? (custom?.title_zh || custom?.title || "自定义场景");
+  const goal = scenarioId === "cafe" ? "点一杯拿铁，试着换燕麦奶，最后问能否刷卡。" : scenario?.subtitle ?? custom?.goal ?? "";
   const practiceUrl = `/practice/${scenarioId}${focus ? `?focus=${focusId}` : ""}`;
+  const cueHeading = scenarioId === "cafe" ? "预习菜单" : custom && !custom.practice_cues?.length ? "开口句型" : "关键词与句型";
 
   const focusSection = focus && (
     <section className="prep-focus" aria-label={`专项复练 · ${focus.label}`}>
@@ -243,40 +239,8 @@ function Prep({ scenarioId, focusId }: { scenarioId: string; focusId: string | n
       </details>
     </section>
   );
-  if (scenarioId === "cafe" && scenario) return <CafeRehearsal title={scenario.titleZh} library={library} examples={snapshot?.examples ?? []} practiceUrl={practiceUrl}>
+  return <SceneRehearsal scenarioId={scenarioId} title={title} goal={goal} icon={SceneIcon} minutes={scenario?.minutes}
+    cueHeading={cueHeading} library={library} examples={snapshot?.examples ?? []} practiceUrl={practiceUrl}>
     {focusSection}
-  </CafeRehearsal>;
-
-  return (
-    <div className="prep-page">
-      <main id="spoken-main" tabIndex={-1} className="prep-shell">
-        <Link to={custom ? "/custom" : "/scenes"} className="prep-back">
-          <ArrowLeft size={17} /> 全部场景
-        </Link>
-        <header className="prep-hero prep-masthead">
-          <div className="prep-hero-copy">
-            <p className="coaching-kicker"><SceneIcon size={18} /> 场景预习{scenario?.minutes && <span><Clock3 size={14} /> 约 {scenario.minutes} 分钟</span>}</p>
-            <h1>{title}</h1>
-            {englishTitle !== title && <p className="prep-english" lang="en">{englishTitle}</p>}
-            <p className="prep-goal">{scenario?.subtitle ?? custom?.goal}</p>
-            <Link to={practiceUrl} className="coaching-primary">
-              开始场景练习 <ArrowRight size={18} />
-            </Link>
-          </div>
-          <div className="prep-scene-art prep-scene-mascot" aria-hidden="true">
-            <SceneIcon className="prep-art-icon" strokeWidth={1.2} />
-            <Buddy size={204} />
-          </div>
-        </header>
-        {focusSection}
-        <div className={`prep-body${personal.length ? " prep-body-personal" : ""}`}>
-          <PrepPhrases heading={custom && !custom.practice_cues?.length ? "开口句型" : "关键词与句型"} library={library} scenarioId={scenarioId} />
-          {personal.length > 0 && <aside className="prep-personal" aria-labelledby="prep-personal">
-            <div className="coaching-heading"><h2 id="prep-personal">你的易错表达</h2><Target size={21} aria-hidden="true" /></div>
-            <CoachingExamples examples={personal} showReference />
-          </aside>}
-        </div>
-      </main>
-    </div>
-  );
+  </SceneRehearsal>;
 }
