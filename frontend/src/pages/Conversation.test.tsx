@@ -40,12 +40,13 @@ beforeEach(() => {
 
 it("offers AI help for the current turn separately from prep and lets the learner save and use a suggestion", async () => {
   const line = "Could I have some more time?";
-  mocks.postHint.mockResolvedValueOnce([line]);
+  const meaning = "能再给我一点时间吗？";
+  mocks.postHint.mockResolvedValueOnce([{ sentence: line, meaning }]);
   mocks.request.mockImplementation(async (_path: string, init?: RequestInit) => {
     if (init?.method !== "PATCH") return {revision: 0, cues: null};
     const edit = JSON.parse(String(init.body));
-    expect(edit).toMatchObject({action: "add_hint", sentence: line});
-    return {revision: 1, cues: [...edit.defaults, {id: "hint-1", kind: "pattern", keyword: line, meaning: "", sentence: line}]};
+    expect(edit).toMatchObject({action: "add_hint", sentence: line, meaning});
+    return {revision: 1, cues: [...edit.defaults, {id: "hint-1", kind: "pattern", keyword: line, meaning, sentence: line}]};
   });
   const user = userEvent.setup();
   render(<MemoryRouter initialEntries={["/practice/doctor"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
@@ -55,6 +56,7 @@ it("offers AI help for the current turn separately from prep and lets the learne
   expect(mocks.postHint).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", {name: "AI 提示"}));
   expect(await screen.findByText(line)).toBeVisible();
+  expect(screen.getByText(meaning)).toBeVisible();
   expect(mocks.postHint).toHaveBeenCalledWith("doctor", [{role: "assistant", content: "Hello"}], expect.any(AbortSignal), undefined);
   await user.click(screen.getByRole("button", {name: `收藏到预习 ${line}`}));
   expect(await screen.findByRole("button", {name: `已在预习中 ${line}`})).toBeDisabled();
@@ -63,13 +65,14 @@ it("offers AI help for the current turn separately from prep and lets the learne
   expect(mocks.streamChat).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", {name: "查看预习句型"}));
   expect(screen.getByRole("button", {name: `使用这句 ${line}`})).toBeVisible();
+  expect(screen.queryAllByText(meaning).some(text => text.closest("[hidden]") === null)).toBe(true);
   await user.click(screen.getByRole("button", {name: "AI 提示"}));
   expect(mocks.postHint).toHaveBeenCalledTimes(1);
 });
 
 it("drops an old AI hint request once the learner moves on to a new turn", async () => {
-  let finish!: (hints: string[]) => void;
-  mocks.postHint.mockReturnValueOnce(new Promise<string[]>(resolve => { finish = resolve; }));
+  let finish!: (hints: {sentence: string; meaning?: string}[]) => void;
+  mocks.postHint.mockReturnValueOnce(new Promise<{sentence: string; meaning?: string}[]>(resolve => { finish = resolve; }));
   mocks.streamChat.mockImplementationOnce(async (_id, _history, onText) => { onText("What size?"); return "What size?"; });
   const user = userEvent.setup();
   render(<MemoryRouter initialEntries={["/practice/cafe"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
@@ -79,9 +82,30 @@ it("drops an old AI hint request once the learner moves on to a new turn", async
   await user.type(screen.getByRole("textbox", {name: "英文回复"}), "A coffee, please.");
   await user.click(screen.getByRole("button", {name: "发送"}));
   await screen.findByText("What size?");
-  await act(async () => finish(["I would like a coffee."]));
+  await act(async () => finish([{sentence: "I would like a coffee."}]));
   expect(screen.queryByText("I would like a coffee.")).not.toBeInTheDocument();
   expect(screen.getByRole("button", {name: "AI 提示"})).toHaveAttribute("aria-expanded", "false");
+});
+
+it("lets the learner add a new meaning to a previously saved English hint", async () => {
+  const line = "Could I have some more time?";
+  const meaning = "能再给我一点时间吗？";
+  const legacy = {id: "hint-1", kind: "pattern", keyword: line, meaning: "", sentence: line};
+  mocks.postHint.mockResolvedValueOnce([{sentence: line, meaning}]);
+  mocks.request.mockImplementation(async (_path: string, init?: RequestInit) => {
+    if (init?.method !== "PATCH") return {revision: 1, cues: [legacy]};
+    expect(JSON.parse(String(init.body))).toMatchObject({action: "add_hint", sentence: line, meaning});
+    return {revision: 2, cues: [{...legacy, meaning}]};
+  });
+  const user = userEvent.setup();
+  render(<MemoryRouter initialEntries={["/practice/doctor"]}><Routes><Route path="/practice/:scenarioId" element={<Conversation />} /></Routes></MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", {name: "AI 提示"}));
+  await user.click(await screen.findByRole("button", {name: `补充释义 ${line}`}));
+  expect(await screen.findByRole("button", {name: `已在预习中 ${line}`})).toBeDisabled();
+  await user.click(screen.getByRole("button", {name: "查看预习句型"}));
+  const saved = screen.getByRole("button", {name: `使用这句 ${line}`});
+  expect(saved).toHaveTextContent(meaning);
 });
 
 it("reports buffered cloud recognition when the conversation falls back from streaming ASR", async () => {

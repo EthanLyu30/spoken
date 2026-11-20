@@ -8,12 +8,13 @@ carries it back inline on chat / feedback requests (see ``ChatRequest.custom``).
 import asyncio
 import json
 from datetime import datetime, timezone
+from typing import get_args
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import ValidationError
 
 from app.api.chat import get_client
-from app.schemas.custom import CustomScene, CustomSceneRequest, PracticeCue
+from app.schemas.custom import CustomScene, CustomSceneRequest, PracticeCue, RehearsalTheme
 from app.services.deepseek import DeepSeekClient, DeepSeekError
 from app.services.speaking_scope import SPEAKING_SCOPE_POLICY, is_unrelated_task
 
@@ -21,6 +22,10 @@ router = APIRouter(tags=["custom"])
 
 _CUES = """
 - "practice_cues": exactly three short scene-specific objects {"keyword","meaning","sentence"}. keyword is an English phrase, meaning explains in Chinese when to use it, and sentence is a complete English line the learner can say to accomplish the goal. Select distinct, reusable phrases."""
+
+_THEMES = get_args(RehearsalTheme)
+_THEME = ('\n- "rehearsal_theme": select the closest visual setting for where the conversation actually takes place '
+          'rather than a place only mentioned in passing. Use one of: ' + ', '.join(_THEMES) + '. Use null when none fit.')
 
 _SYSTEM = SPEAKING_SCOPE_POLICY + """
 You design short English speaking-practice role-plays for Chinese learners.
@@ -37,7 +42,7 @@ Return ONLY a JSON object with exactly these keys:
 - "goal": one English sentence describing what the learner should accomplish.
 - "persona": 2-3 sentences of scene and character detail so the partner stays in character and keeps the conversation flowing with natural follow-up questions.
 - "opening_line": the partner's natural first spoken line in English — short, in character, and ending in a way that invites the learner to respond.
-- "source": a SHORT Chinese theme tag for the scene (4-8 characters, e.g. "日常生活·点单" or "职场沟通"). This is just a category label, NOT a citation of any real news, article, or person.""" + _CUES
+- "source": a SHORT Chinese theme tag for the scene (4-8 characters, e.g. "日常生活·点单" or "职场沟通"). This is just a category label, NOT a citation of any real news, article, or person.""" + _CUES + _THEME
 
 
 _SUGGEST = """You suggest fresh English speaking-practice role-plays for Chinese learners.
@@ -51,7 +56,7 @@ Return ONLY a JSON object with exactly these keys:
 - "goal": one English sentence describing what the learner should accomplish.
 - "persona": 2-3 sentences of scene and character detail so the partner stays in character with natural follow-up questions.
 - "opening_line": the partner's natural first spoken line in English — short, in character, inviting the learner to respond.
-- "source": a SHORT Chinese theme tag for the scene (4-8 characters, e.g. "生活灵感·邻里" or "旅行见闻"). This is a category label only, NOT a citation of any real news, article, or person.""" + _CUES
+- "source": a SHORT Chinese theme tag for the scene (4-8 characters, e.g. "生活灵感·邻里" or "旅行见闻"). This is a category label only, NOT a citation of any real news, article, or person.""" + _CUES + _THEME
 
 
 async def _generate(client: DeepSeekClient, messages: list[dict], temperature: float) -> CustomScene:
@@ -67,6 +72,8 @@ async def _generate(client: DeepSeekClient, messages: list[dict], temperature: f
     try:
         data = json.loads(raw)
         if isinstance(data, dict):
+            if data.get("rehearsal_theme") not in _THEMES:
+                data.pop("rehearsal_theme", None)
             cues = data.get("practice_cues")
             valid = {}
             if isinstance(cues, list):

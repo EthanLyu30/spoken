@@ -44,6 +44,17 @@ def test_hint_unknown_scenario_404():
     assert resp.status_code == 404
 
 
+def test_hint_keeps_meanings_paired_with_the_deduplicated_english_choices(monkeypatch):
+    line = "I'd like a latte."
+    second = "Could I have it iced?"
+    payload = {"suggestions": [line, {"sentence": line, "meaning": "我想要一杯拿铁。"},
+                              {"sentence": second, "meaning": "make it cold"}]}
+    monkeypatch.setitem(app.dependency_overrides, get_client, lambda: _Stub(json.dumps(payload)))
+    response = client.post("/api/hint", json=_body())
+    assert response.status_code == 200
+    assert response.json() == {"suggestions": [line, second], "meanings": {line: "我想要一杯拿铁。"}}
+
+
 @pytest.mark.parametrize("response", [[], {"suggestions": "Hello"}, {"suggestions": [None, " "]}])
 def test_hint_rejects_invalid_or_empty_provider_choices(response):
     app.dependency_overrides[get_client] = lambda: _Stub(json.dumps(response))

@@ -16,6 +16,7 @@ from app.schemas.coaching import (
     PracticeTarget,
 )
 from app.schemas.feedback import Correction
+from app.schemas.session import SessionScene
 from app.services.coaching_dialogue import booking_follow_up_problem, dialogue_problem
 from app.services.coaching_drills import linked_draft
 from app.services.coaching_targets import select_targets, target_hint, target_summary, uses_target, words as target_words
@@ -108,10 +109,25 @@ def _distinct_errors(fixes: list[Correction]):
             yield fix, counts
 
 
-def coaching_snapshot(db: Session, owner: str, scene_id: str | None = None) -> CoachingSnapshot:
-    rows = db.execute(select(PracticeSession.id, PracticeSession.scenario_id, PracticeSession.corrections)
+def _matches_scene(snapshot: dict | None, identity: str) -> bool:
+    try:
+        return snapshot is not None and SessionScene.model_validate(snapshot).identity() == identity
+    except ValidationError:
+        return False
+
+
+def coaching_snapshot(db: Session, owner: str, scene_id: str | None = None, *,
+                      custom: SessionScene | None = None) -> CoachingSnapshot:
+    query = (select(PracticeSession.id, PracticeSession.scenario_id, PracticeSession.corrections)
         .where(PracticeSession.client_id == owner)
         .order_by(PracticeSession.created_at.desc(), PracticeSession.id.desc()).limit(50))
+    if custom is None:
+        rows = db.execute(query).all()
+    else:
+        identity = custom.identity()
+        saved_custom = db.execute(query.add_columns(PracticeSession.custom).where(PracticeSession.scenario_id == "custom"))
+        rows = [(session_id, scenario, corrections) for session_id, scenario, corrections, snapshot in saved_custom
+                if _matches_scene(snapshot, identity)]
     candidates = []
     by_pattern = defaultdict(Counter)
     for session_id, scenario_id, stored in rows:

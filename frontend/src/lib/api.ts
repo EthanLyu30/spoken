@@ -823,6 +823,7 @@ export interface CustomScene {
   persona: string;
   opening_line: string;
   practice_cues?: { keyword: string; meaning: string; sentence: string }[];
+  rehearsal_theme?: string | null;
   practice_exercises?: PracticeExercise[];
   /** Short Chinese theme tag (display-only), e.g. "日常生活·邻里". */
   source?: string;
@@ -1004,6 +1005,7 @@ export interface GrammarStatistics {
   session_limit: number;
   example_limit: number;
   groups: GrammarGroup[];
+  unattributed_corrections?: number;
 }
 
 export function getGrammarStatistics(signal?: AbortSignal): Promise<GrammarStatistics> {
@@ -1018,7 +1020,10 @@ export interface CoachingPlan {
   scene: CustomScene & { practice_exercises: PracticeExercise[] };
 }
 
-export function getCoaching(signal?: AbortSignal, scene?: string): Promise<CoachingSnapshot> {
+export function getCoaching(signal?: AbortSignal, scene?: string, custom?: CustomScene | null): Promise<CoachingSnapshot> {
+  if (scene === "custom" && custom) {
+    return request("/api/progress/coaching/custom/lookup", { method: "POST", body: JSON.stringify({ custom }), signal });
+  }
   return request(`/api/progress/coaching${scene ? `?scene=${encodeURIComponent(scene)}` : ""}`, { signal });
 }
 
@@ -1258,19 +1263,24 @@ export async function postPronunciation(
   return result;
 }
 
+export interface ConversationHint {
+  sentence: string;
+  meaning?: string;
+}
+
 /** Suggest a few natural things the learner could say next. */
 export async function postHint(
   scenarioId: string,
   messages: ChatMessage[],
   signal?: AbortSignal,
   custom?: CustomScene,
-): Promise<string[]> {
-  const data = await request<{ suggestions: string[] }>("/api/hint", {
+): Promise<ConversationHint[]> {
+  const data = await request<{ suggestions: string[]; meanings?: Record<string, string> }>("/api/hint", {
     method: "POST",
     body: JSON.stringify({ scenario_id: scenarioId, messages: messages.slice(-40), custom }),
     signal,
   }, 15_000);
-  return data.suggestions;
+  return data.suggestions.map(sentence => ({ sentence, meaning: data.meanings?.[sentence] }));
 }
 
 export interface DailyLine {

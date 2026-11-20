@@ -5,7 +5,16 @@ description, then carried back inline on chat / feedback requests so the same
 role-play and assessment code paths can run without a catalogue entry.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+
+RehearsalTheme = Literal[
+    "airport", "hotel", "doctor", "restaurant", "shopping", "directions", "interview", "party", "friend",
+    "standup", "presentation", "networking", "phone", "negotiation", "videocall", "oneonone", "pitch",
+    "ferry", "rail", "bank", "pharmacy", "apartment", "library", "market", "museum", "gym",
+]
 
 
 class PracticeCue(BaseModel):
@@ -24,6 +33,7 @@ class CustomScene(BaseModel):
     # A short Chinese theme / inspiration tag (NOT a real news citation),
     # e.g. "日常生活·邻里" or "职场沟通". Display-only.
     source: str = Field(default="", max_length=60)
+    rehearsal_theme: RehearsalTheme | None = None
     practice_cues: list[PracticeCue] = Field(default_factory=list, max_length=3)
 
 

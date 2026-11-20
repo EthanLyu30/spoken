@@ -1,6 +1,7 @@
 """Hint endpoint: when the learner is stuck, suggest a few things to say next."""
 
 import json
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -15,10 +16,12 @@ _SYSTEM = """A Chinese learner is practising spoken English in a role-play and n
 - Each suggestion is one short spoken sentence in simple, natural English (max ~12 words).
 - They must fit the learner's side of THIS scene and respond to the partner's last line.
 - Vary them a little so the learner has real choices.
-- Return ONLY a JSON object: {"suggestions": ["...", "..."]}."""
+- Give each sentence a faithful, short Simplified Chinese meaning that the learner can keep when saving it for later.
+- Return ONLY a JSON object: {"suggestions": [{"sentence": "...", "meaning": "..."}]}.
+"""
 
 
-@router.post("/hint", response_model=HintResponse)
+@router.post("/hint", response_model=HintResponse, response_model_exclude_defaults=True)
 async def hint(
     req: HintRequest, client: DeepSeekClient = Depends(get_client)
 ) -> HintResponse:
@@ -42,7 +45,7 @@ async def hint(
         raw = await client.chat(
             messages,
             temperature=0.6,
-            max_tokens=200,
+            max_tokens=420,
             response_format={"type": "json_object"},
         )
     except DeepSeekError as exc:
@@ -52,7 +55,18 @@ async def hint(
         choices = data.get("suggestions") if isinstance(data, dict) else None
         if not isinstance(choices, list):
             raise ValueError("Expected a list of suggestions")
-        items = [s.strip() for s in choices if isinstance(s, str) and 0 < len(s.strip()) <= 600]
-        return HintResponse(suggestions=list(dict.fromkeys(items))[:3])
+        items: dict[str, str] = {}
+        for choice in choices:
+            sentence = choice.get("sentence") if isinstance(choice, dict) else choice
+            if not isinstance(sentence, str) or not 0 < len(sentence.strip()) <= 600:
+                continue
+            sentence = sentence.strip()
+            if sentence not in items and len(items) == 3:
+                continue
+            items.setdefault(sentence, "")
+            meaning = choice.get("meaning") if isinstance(choice, dict) else None
+            if not items[sentence] and isinstance(meaning, str) and len(meaning.strip()) <= 400 and re.search(r"[\u3400-\u9fff]", meaning):
+                items[sentence] = meaning.strip()
+        return HintResponse(suggestions=list(items), meanings={sentence: meaning for sentence, meaning in items.items() if meaning})
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=502, detail="Could not parse hints") from exc

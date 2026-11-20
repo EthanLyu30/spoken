@@ -10,7 +10,7 @@ import { practiceCues } from "../data/practiceCues";
 import { rehearsalScene } from "../data/rehearsalScenes";
 import { usePracticePlayback } from "../hooks/usePracticePlayback";
 import type { useSceneCues } from "../hooks/useSceneCues";
-import type { CoachingExample } from "../lib/api";
+import type { CoachingExample, CustomScene } from "../lib/api";
 import { replayHref, replayReference } from "../lib/practiceCorrections";
 import { InteractiveEnglishText } from "./dictionary/InteractiveEnglishText";
 import { CoachingExamples } from "./PersonalCoaching";
@@ -62,8 +62,8 @@ function Recall({ example, matches }: { example: CoachingExample; matches: (text
   </div>;
 }
 
-export function SceneRehearsal({ scenarioId, title, goal, icon: Icon, minutes, library, examples, practiceUrl, children, cueHeading }: {
-  scenarioId: string; title: string; goal: string; icon: LucideIcon; minutes?: number;
+export function SceneRehearsal({ scenarioId, customScene, title, goal, icon: Icon, minutes, library, examples, practiceUrl, children, cueHeading }: {
+  scenarioId: string; customScene?: CustomScene | null; title: string; goal: string; icon: LucideIcon; minutes?: number;
   library: ReturnType<typeof useSceneCues>; examples: CoachingExample[]; practiceUrl: string;
   children?: ReactNode; cueHeading: string;
 }) {
@@ -72,9 +72,10 @@ export function SceneRehearsal({ scenarioId, title, goal, icon: Icon, minutes, l
   const reduced = useSyncExternalStore(subscribeMotion, prefersStill);
   const still = reduced || paused;
   const audio = usePracticePlayback(scenarioId);
-  const theme = rehearsalScene(scenarioId);
+  const theme = rehearsalScene(scenarioId, customScene);
   const isCafe = scenarioId === "cafe";
   const custom = scenarioId === "custom";
+  const usesDefaultBackdrop = custom && theme === rehearsalScene("custom");
   const defaults = practiceCues(scenarioId);
   const cues = library.cues.map(cue => ({
     ...cue, prop: isCafe ? Object.values(propsByKeyword).find(prop => prop.expression.test(cue.keyword) || prop.expression.test(cue.sentence)) : undefined,
@@ -84,7 +85,7 @@ export function SceneRehearsal({ scenarioId, title, goal, icon: Icon, minutes, l
   const selected = cues[selectedIndex];
   const marks = cues.slice(0, 3).map((cue, index) => ({
     cue, index, x: [23, 53, 81][index],
-    Icon: theme.icons[defaults.findIndex(([keyword]) => words(keyword) === words(cue.keyword))]
+    Icon: (!custom ? theme.icons[defaults.findIndex(([keyword]) => words(keyword) === words(cue.keyword))] : undefined)
       ?? (cue.kind === "pattern" ? MessageCircle : BookOpen),
   }));
   const pipX = isCafe ? selected?.prop?.pipX ?? 17 : (marks[selectedIndex]?.x ?? 23) - 6;
@@ -92,7 +93,7 @@ export function SceneRehearsal({ scenarioId, title, goal, icon: Icon, minutes, l
   const matchesCue = (cue: typeof selected, text: string) => cue.prop ? cue.prop.expression.test(text) : cue.matches(text);
   const notes = new Map<number, CoachingExample>();
   const remaining = examples.filter(example => {
-    if (custom || example.scenario_id !== scenarioId) return true;
+    if (example.scenario_id !== scenarioId) return true;
     const index = cues.findIndex(cue => example.corrections.some(fix =>
       matchesCue(cue, fix.original) || matchesCue(cue, fix.suggestion)));
     if (index < 0 || notes.has(index)) return true;
@@ -165,6 +166,7 @@ export function SceneRehearsal({ scenarioId, title, goal, icon: Icon, minutes, l
             <RehearsalAtmosphere still={still} effect={isCafe ? "cafe" : theme.air} />
           </div>
           <figcaption className="rehearsal-caption">
+            {usesDefaultBackdrop && <span>通用背景</span>}
             {hasHotspots && <span className="rehearsal-instruction" data-chosen={choice.takes > 0}><Hand size={16} />
               {isCafe ? "点柜台上的物品，听对应的例句。" : "点场景里的图标，听对应的例句。"}</span>}
             {choice.takes > 0 && selected?.id === choice.id && <span className="rehearsal-mobile-line" lang="en"><Volume2 size={16} />{selected.sentence}</span>}

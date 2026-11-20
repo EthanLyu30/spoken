@@ -31,6 +31,26 @@ def report(client):
     return response.json()
 
 
+def test_reports_unattributed_corrections_separately_and_keeps_ranking_unchanged():
+    client = learner("unattributed-count")
+    session_id = save(client, [
+        ("I go home.", [("tense", "go", "went")]),
+        ("I go there often.", []),
+    ])
+    previous = report(client)["groups"]
+    with Session(database.engine) as db:
+        session = db.get(PracticeSession, session_id)
+        missing = {"turn_index": 1, "category": "articles", "original": "missing quote", "suggestion": "the missing quote", "note": ""}
+        ambiguous = {"category": "tense", "original": "go", "suggestion": "went", "note": ""}
+        session.corrections = [*session.corrections, missing, {**missing, "note": "同一条重复批改"}, ambiguous,
+                               {**missing, "original": "manual mark", "self_marked": True}]
+        db.commit()
+    stats = report(client)
+    assert stats["unattributed_corrections"] == 2
+    assert stats["groups"] == previous
+    assert report(learner("unattributed-other"))["unattributed_corrections"] == 0
+
+
 def test_ranks_all_observed_types_by_distinct_occurrences_and_returns_the_learners_own_examples():
     client = learner("ranked")
     sentence = "I need ticket and map."

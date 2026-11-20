@@ -101,6 +101,16 @@ it("provides a retry for unavailable grammar statistics and an empty state for a
   expect(screen.queryByRole("list", { name: "按出现次数排列的错误类型" })).not.toBeInTheDocument();
 });
 
+it("explains retained corrections that could not be matched to a learner sentence", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({
+    sessions_analyzed: 3, session_limit: 50, example_limit: 5, unattributed_corrections: 2, groups: [],
+  }));
+  show();
+  fireEvent.click(screen.getByRole("button", { name: /语法错误统计/ }));
+  expect(await screen.findByText(/有 2 条已分类的纠错无法对应到原句，未计入统计/)).toBeVisible();
+  expect(screen.getByText("当前没有能计入排名的纠错。")).toBeVisible();
+});
+
 it("blanks the selected article subtype when the recorded sentence has multiple article edits", async () => {
   const line = "I like the cats and I need a umbrella.";
   const full = { original: line, suggestion: "I like cats and I need an umbrella.", note: "", category: "articles" };

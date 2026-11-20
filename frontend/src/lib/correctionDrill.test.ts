@@ -136,6 +136,22 @@ describe("grounded correction drills", () => {
     expect(drill?.answer).toBe("usually drink");
   });
 
+  it("holds back the reordered phrase even when the relocated adverb also changes spelling", () => {
+    const fix = saved("if you shiftly pay it", "if you pay it sooner", "word_order");
+    const drill = buildCorrectionDrill({ original: "We can ship it if you shiftly pay it.",
+      previous_partner_message: "What would let us ship this week?", corrections: [fix] }, fix);
+    expect(drill?.prompt).toBe("We can ship it if you ____.");
+    expect(drill?.answer).toBe("pay it sooner");
+    expect(drill?.exercise.focus).toEqual({ original: "shiftly pay it", suggestion: "pay it sooner", category: "word_order" });
+  });
+
+  it("targets the moved words when an earlier agreement error is corrected in the same quote", () => {
+    const fix = saved("They was ready and never had seen this before.", "They were ready and had never seen this before.", "word_order");
+    const drill = buildCorrectionDrill({ original: fix.original, previous_partner_message: "", corrections: [fix] }, fix);
+    expect(drill).toMatchObject({ prompt: "They were ready and ____ seen this before.", answer: "had never",
+      exercise: { focus: { original: "never had", suggestion: "had never", category: "word_order" } } });
+  });
+
   it("identifies a stand-alone deletion without changing punctuation or neighborhood words", () => {
     const fix = saved("the", "", "articles");
     const drill = buildCorrectionDrill({ original: "Today, the rice is cheap.", previous_partner_message: "", corrections: [fix] }, fix);

@@ -214,7 +214,7 @@ function PrepPhrases({ library, scenarioId }: {
 function Prep({ scenarioId, focusId }: { scenarioId: string; focusId: string | null }) {
   const scenario = getScenario(scenarioId);
   const custom = useCustomScene((state) => scenarioId === "custom" ? state.scene : null);
-  const { snapshot } = useCoachingSnapshot(scenarioId);
+  const { snapshot } = useCoachingSnapshot(scenarioId, custom);
   const focus = isCorrectionCategory(focusId) ? correctionDrills[focusId] : null;
   const library = useSceneCues(scenarioId, custom);
   const SceneIcon = scenario ? scenarioIcons[scenario.icon] : MessageCircle;
@@ -239,7 +239,7 @@ function Prep({ scenarioId, focusId }: { scenarioId: string; focusId: string | n
       </details>
     </section>
   );
-  return <SceneRehearsal scenarioId={scenarioId} title={title} goal={goal} icon={SceneIcon} minutes={scenario?.minutes}
+  return <SceneRehearsal scenarioId={scenarioId} customScene={custom} title={title} goal={goal} icon={SceneIcon} minutes={scenario?.minutes}
     cueHeading={cueHeading} library={library} examples={snapshot?.examples ?? []} practiceUrl={practiceUrl}>
     {focusSection}
   </SceneRehearsal>;

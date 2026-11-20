@@ -173,21 +173,26 @@ it("keeps the learner's translation after a temporary grading failure", async ()
   expect(await screen.findByText("动作和时间都说对了。")).toBeVisible();
 });
 
-it("offers cloze without retry when Chinese cannot distinguish the selected correction", async () => {
+it("switches a word-order translation with an ambiguous prompt to whole-phrase practice in one click", async () => {
   const user = userEvent.setup();
   const fetcher = vi.fn(async () => Response.json({
     detail: { code: "translation_prompt_ambiguous", message: "这条纠错无法仅凭中文题面区分，请改用填空练习。" },
   }, { status: 422 }));
   vi.stubGlobal("fetch", fetcher);
-  review("I go home.", [tense]);
+  review("We can ship it if you shiftly pay it.", [{ original: "if you shiftly pay it", suggestion: "if you pay it sooner",
+    note: "把时间副词放在后面", category: "word_order", turn_index: 1 }]);
   await user.click(screen.getByRole("button", { name: "中译英" }));
-  const panel = screen.getByRole("region", { name: "中译英练习" });
-  expect(await within(panel).findByRole("alert")).toHaveTextContent("无法仅凭中文题面区分");
-  expect(within(panel).queryByRole("button", { name: "重新加载题目" })).not.toBeInTheDocument();
-  await user.click(within(panel).getByRole("button", { name: "改用填空" }));
-  expect(screen.getByRole("region", { name: "填空练习" })).toHaveTextContent("I ____ home.");
-  await user.click(screen.getByRole("button", { name: "中译英" }));
-  expect(screen.getByRole("alert")).toHaveTextContent("无法仅凭中文题面区分");
+  const panel = await screen.findByRole("region", { name: "填空练习" });
+  expect(panel).toHaveTextContent("We can ship it if you ____.");
+  expect(panel).toHaveTextContent("已切换为填空");
+  expect(panel).toHaveTextContent("it / sooner / pay");
+  expect(screen.queryByRole("button", { name: "中译英" })).not.toBeInTheDocument();
+  const answer = within(panel).getByRole("textbox", { name: "填入英文" });
+  await user.type(answer, "sooner pay it{Enter}");
+  expect(within(panel).getByText("再试一次")).toBeVisible();
+  await user.clear(answer);
+  await user.type(answer, "pay it sooner{Enter}");
+  expect(within(panel).getByText("答对了")).toBeVisible();
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 

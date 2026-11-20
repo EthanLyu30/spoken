@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -162,8 +162,44 @@ it("uses the custom scene's own cue and practice route in the shared rehearsal",
 
   expect(screen.getByRole("heading", { name: "渡轮码头", level: 1 })).toBeVisible();
   expect(screen.getByRole("button", { name: "听确认下一班船的例句" })).toBeVisible();
+  expect(screen.getByRole("figure").querySelector("canvas")).toHaveAttribute("data-effect", "water");
   expect(screen.getByRole("link", { name: "自定义场景" })).toHaveAttribute("href", "/custom");
   expect(screen.getByRole("link", { name: "开始场景练习" })).toHaveAttribute("href", "/practice/custom");
+});
+
+it("requests history for the exact custom scene and ignores a response after switching scenes", async () => {
+  const ferry = { title: "Ferry terminal", title_zh: "渡轮码头", goal: "Change a booking", persona: "At the ticket counter",
+    partner_role: "Clerk", opening_line: "How can I help?" };
+  const bank = { ...ferry, title: "Bank branch", title_zh: "银行开户", goal: "Open an account" };
+  const example = { session_id: 93, turn_index: 1, scenario_id: "custom", original: "I need ferry ticket.",
+    previous_partner_message: "How can I help?", corrections: [] };
+  let finishFerry!: (value: Awaited<ReturnType<typeof getCoaching>>) => void;
+  vi.mocked(getCoaching).mockImplementation((_signal, _scene, custom) => custom?.title === ferry.title
+    ? new Promise(resolve => { finishFerry = resolve; }) : Promise.resolve({ revision: "bank", patterns: [], examples: [] }));
+  useCustomScene.getState().setScene(ferry);
+  render(<MemoryRouter initialEntries={["/prepare/custom"]}><Routes>
+    <Route path="/prepare/:scenarioId" element={<PracticePrep />} />
+  </Routes></MemoryRouter>);
+  expect(getCoaching).toHaveBeenLastCalledWith(expect.any(AbortSignal), "custom", ferry);
+  const signal = vi.mocked(getCoaching).mock.lastCall?.[0];
+  await act(async () => { useCustomScene.getState().setScene(bank); });
+  expect(signal?.aborted).toBe(true);
+  expect(getCoaching).toHaveBeenLastCalledWith(expect.any(AbortSignal), "custom", bank);
+  expect(screen.getByRole("figure").querySelector("canvas")).toHaveAttribute("data-effect", "lamplight");
+  await act(async () => { finishFerry({ revision: "ferry", patterns: [], examples: [example] }); });
+  expect(screen.queryByText(example.original)).not.toBeInTheDocument();
+});
+
+it.each(["structured", "legacy", "fallback"])("chooses the right theme for a generic custom title (%s)", kind => {
+  useCustomScene.getState().setScene({ title: "Can I change this?", title_zh: "改签",
+    goal: "Ask about a change", persona: "You work at the service desk", partner_role: "Clerk",
+    opening_line: kind === "legacy" ? "Which ferry are you taking?" : "What would you like to change?",
+    rehearsal_theme: kind === "structured" ? "ferry" : undefined });
+  render(<MemoryRouter initialEntries={["/prepare/custom"]}><Routes>
+    <Route path="/prepare/:scenarioId" element={<PracticePrep />} />
+  </Routes></MemoryRouter>);
+  expect(screen.getByRole("figure").querySelector("canvas")).toHaveAttribute("data-effect", kind === "fallback" ? "daylight" : "water");
+  expect(Boolean(screen.queryByText("通用背景"))).toBe(kind === "fallback");
 });
 
 it("uses the learner's own airport sentence and correction for a personal warm-up", async () => {

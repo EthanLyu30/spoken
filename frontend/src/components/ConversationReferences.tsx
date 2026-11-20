@@ -1,7 +1,7 @@
 import { Bookmark, Check, Lightbulb, RotateCcw, Sparkles } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { useSceneCues } from "../hooks/useSceneCues";
-import { postHint, type ChatMessage, type CustomScene } from "../lib/api";
+import { postHint, type ChatMessage, type ConversationHint, type CustomScene } from "../lib/api";
 import { getAuthGeneration } from "../lib/authToken";
 import "../scene-cues.css";
 
@@ -59,7 +59,7 @@ export function ConversationReferences({scenarioId, custom, messages, waiting, c
 
 function AiSuggestions({scenarioId, custom, messages, library, canInsert, insert}:
   Omit<ReferenceProps, "waiting"> & {library: ReturnType<typeof useSceneCues>}) {
-  const [lines, setLines] = useState<string[] | null>(null);
+  const [lines, setLines] = useState<ConversationHint[] | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [loadError, setLoadError] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -88,13 +88,13 @@ function AiSuggestions({scenarioId, custom, messages, library, canInsert, insert
     setSaveError("");
     setAttempt(value => value + 1);
   }
-  async function collect(line: string) {
+  async function collect(line: string, meaning?: string) {
     const active = scope.current;
     const current = () => active && !active.signal.aborted && generation === getAuthGeneration();
     if (saving || !current()) return;
     setSaving(line);
     setSaveError("");
-    try { await library.addHint(line); }
+    try { await library.addHint(line, meaning); }
     catch { if (current()) setSaveError("收藏暂未保存，请再试一次。"); }
     finally { if (current()) setSaving(""); }
   }
@@ -102,15 +102,18 @@ function AiSuggestions({scenarioId, custom, messages, library, canInsert, insert
     <button type="button" className="cue-text-action" onClick={refresh}>重试</button></p>;
   if (!lines) return <p role="status" className="cue-status">正在根据 Pip 刚才的话准备提示…</p>;
   return <>
-    <ul className="cue-reference-list">{lines.map(line => {
-      const saved = library.ready && library.cues.some(cue => normalizeLine(cue.sentence) === normalizeLine(line));
+    <ul className="cue-reference-list">{lines.map(({ sentence: line, meaning }) => {
+      const existing = library.ready ? library.cues.find(cue => normalizeLine(cue.sentence) === normalizeLine(line)) : undefined;
+      const addMeaning = existing && !existing.meaning && Boolean(meaning);
+      const saved = Boolean(existing && !addMeaning);
+      const action = addMeaning ? "补充释义" : "收藏到预习";
       return <li key={line}>
-        <button type="button" className="cue-insert" disabled={!canInsert} lang="en" aria-label={`使用这句 ${line}`}
-          onClick={() => insert(line)}>{line}</button>
+        <button type="button" className="cue-insert" disabled={!canInsert} aria-label={`使用这句 ${line}`}
+          onClick={() => insert(line)}><span lang="en">{line}</span>{meaning && <small lang="zh-CN">{meaning}</small>}</button>
         <button type="button" className="cue-bookmark" disabled={saved || !library.ready || Boolean(saving)}
-          aria-label={`${saved ? "已在预习中" : "收藏到预习"} ${line}`} onClick={() => void collect(line)}>
+          aria-label={`${saved ? "已在预习中" : action} ${line}`} onClick={() => void collect(line, meaning)}>
           {saved ? <Check size={15} /> : <Bookmark size={15} />}
-          {saved ? "已收藏" : saving === line ? "收藏中" : "收藏到预习"}
+          {saved ? "已收藏" : saving === line ? "收藏中" : action}
         </button>
       </li>;
     })}</ul>

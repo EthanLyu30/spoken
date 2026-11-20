@@ -302,6 +302,37 @@ def test_coaching_discloses_unsupported_target_and_classifies_direct_attempt(mon
     assert record["error_cause_type"] == "unverifiable_target"
 
 
+def test_custom_coaching_lookup_uses_the_full_scene_and_only_the_callers_saved_turns():
+    owner = TestClient(app, headers={"X-Client-Id": uuid4().hex})
+    other = TestClient(app, headers={"X-Client-Id": uuid4().hex})
+    ferry = {"title": "Changing a booking", "title_zh": "改签", "goal": "Change a ferry ticket.",
+             "partner_role": "Clerk", "persona": "You work at a ferry terminal.", "opening_line": "How can I help?"}
+    hotel = {**ferry, "goal": "Change a hotel booking.", "persona": "You work at a hotel reception desk."}
+    payload = {**_payload(), "scenario_id": "custom"}
+    payload["messages"][1]["content"] = "I need ticket."
+    payload["corrections"] = [{"original": "ticket", "suggestion": "a ticket", "note": "加冠词",
+                               "category": "articles", "turn_index": 1}]
+    ferry_session = owner.post("/api/sessions", json={**payload, "custom": ferry}).json()["id"]
+    hotel_session = owner.post("/api/sessions", json={**payload, "custom": hotel}).json()["id"]
+    legacy_session = owner.post("/api/sessions", json=payload).json()["id"]
+    assert other.post("/api/sessions", json={**payload, "custom": ferry}).status_code == 201
+
+    url = "/api/progress/coaching/custom/lookup"
+    def request(client, scene):
+        response = client.post(url, json={"custom": scene})
+        assert response.status_code == 200
+        assert "no-store" in response.headers["cache-control"]
+        return response.json()
+
+    matched = request(owner, {**ferry, "source": "历史回看", "practice_cues": [], "practice_exercises": None})
+    assert [example["session_id"] for example in matched["examples"]] == [ferry_session]
+    assert matched["patterns"][0]["sessions"] == 1
+    assert [example["session_id"] for example in request(owner, hotel)["examples"]] == [hotel_session]
+    assert request(owner, {**ferry, "opening_line": "What happened?"})["examples"] == []
+    assert request(TestClient(app, headers={"X-Client-Id": uuid4().hex}), ferry)["examples"] == []
+    assert legacy_session in {example["session_id"] for example in owner.get("/api/progress/coaching").json()["examples"]}
+
+
 @pytest.mark.parametrize(("sentence", "rewrite", "occurrences"), [
     ("我想买ticket，另外 I need a map.", "I'd like a ticket, and I need a map.", 1),
     ("I need ticket. Can I get ticket here?", "I need a ticket. Can I get a ticket here?", 2),

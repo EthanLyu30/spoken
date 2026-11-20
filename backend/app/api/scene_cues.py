@@ -1,7 +1,5 @@
 """Private scene preparation. Each edit is applied to the current list under the owner lock."""
 
-import hashlib
-import json
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -11,10 +9,8 @@ from app.core.deps import get_client_id, get_optional_client_id
 from app.data.scenarios import get_scenario
 from app.db import get_db
 from app.models.scene_cues import ScenePreparation
-from app.schemas.scene_cues import (
-    AddHint, CustomCueLookup, RemoveCue, SceneCue, SceneCueChange, SceneCueSnapshot,
-)
-from app.schemas.session import SessionScene
+from app.schemas.scene_cues import AddHint, RemoveCue, SceneCue, SceneCueChange, SceneCueSnapshot
+from app.schemas.session import CustomSceneLookup, SessionScene
 
 router = APIRouter(prefix="/scene-cues", tags=["scene preparation"])
 
@@ -23,12 +19,7 @@ def _scene(scenario_id: str, custom: SessionScene | None = None) -> tuple[str, s
     if scenario_id == "custom":
         if custom is None:
             raise HTTPException(422, "Missing custom scene")
-        # Include generated exercises and their targets. SessionScene restores optional defaults
-        # when an older stored lesson is reopened. The source label is purely presentational.
-        identity = custom.model_dump(exclude={"source"})
-        canonical = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        key = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        return f"custom-{key}", custom.title_zh or custom.title
+        return f"custom-{custom.identity()}", custom.title_zh or custom.title
     scene = get_scenario(scenario_id)
     if scene is None:
         raise HTTPException(404, "Unknown scene")
@@ -55,7 +46,7 @@ def read(scenario_id: str, response: Response, owner: str = Depends(_reader),
 
 
 @router.post("/custom/lookup")
-def read_custom(body: CustomCueLookup, response: Response, owner: str = Depends(_reader),
+def read_custom(body: CustomSceneLookup, response: Response, owner: str = Depends(_reader),
                 db: Session = Depends(get_db)) -> SceneCueSnapshot:
     key, _ = _scene("custom", body.custom)
     return _snapshot(db.get(ScenePreparation, (owner, key)), response)
@@ -70,9 +61,13 @@ def _edit(items: list[SceneCue], change: SceneCueChange) -> list[SceneCue]:
         return [item for item in items if item.id != change.id]
     if isinstance(change, AddHint):
         line = _sentence_key(change.sentence)
-        if any(_sentence_key(item.sentence) == line for item in items):
-            return items
-        return [*items, SceneCue(id=uuid4().hex, kind="pattern", keyword=change.sentence, sentence=change.sentence)]
+        for index, item in enumerate(items):
+            if _sentence_key(item.sentence) == line:
+                if change.meaning and not item.meaning:
+                    return [*items[:index], item.model_copy(update={"meaning": change.meaning}), *items[index + 1:]]
+                return items
+        return [*items, SceneCue(id=uuid4().hex, kind="pattern", keyword=change.sentence,
+                                sentence=change.sentence, meaning=change.meaning)]
 
     draft = change.cue
     fields = draft.model_dump(exclude={"id"})

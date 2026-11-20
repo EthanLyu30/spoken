@@ -81,13 +81,26 @@ def test_custom_scene_contents_distinguish_lessons_and_round_trip_with_optional_
         hint = patch(client, owner, "add_hint", url="/api/scene-cues/custom", custom=lesson, sentence="I will arrive Friday.")
         assert hint.status_code == 200
         # Reading a saved lesson adds defaulted nulls and a display-only source.
-        restored = {**lesson, "source": "我的练习", "practice_cues": [],
+        restored = {**lesson, "source": "我的练习", "rehearsal_theme": "hotel", "practice_cues": [],
                     "practice_exercises": [{**item, "target": None} for item in EXERCISES]}
         assert client.post(lookup, headers=owner, json={"custom": restored}).json() == hint.json()
         for other_scene in (ROOM, {**ROOM, "persona": "You rent small boats."},
                             {**lesson, "practice_exercises": [EXERCISES[0], {**EXERCISES[1], "example": "How much?"}]}):
             assert client.post(lookup, headers=owner, json={"custom": other_scene}).json() == FRESH
         assert client.get("/api/scene-cues/custom", headers=owner).status_code == 422
+
+
+def test_saving_a_hint_keeps_its_meaning_and_never_overwrites_an_edited_meaning():
+    owner = guest()
+    with TestClient(app) as client:
+        sentence = "Could I have it iced?"
+        old = patch(client, owner, "add_hint", sentence=sentence).json()["cues"][-1]
+        bilingual = patch(client, owner, "add_hint", sentence=sentence, meaning="可以做成冰的吗？").json()["cues"]
+        assert len(bilingual) == len(DEFAULTS) + 1
+        assert bilingual[-1] == {**old, "meaning": "可以做成冰的吗？"}
+        patch(client, owner, "save", cue={**bilingual[-1], "meaning": "询问能否换冰饮。"})
+        got = patch(client, owner, "add_hint", sentence=sentence, meaning="旧翻译").json()["cues"][-1]
+        assert got["meaning"] == "询问能否换冰饮。"
 
 
 def test_sign_up_claim_account_devices_export_and_deletion_keep_owner_boundaries(monkeypatch):

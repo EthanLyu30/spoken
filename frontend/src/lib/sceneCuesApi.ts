@@ -10,7 +10,7 @@ export interface SceneCue {
 
 export type CueDraft = Omit<SceneCue, "id"> & { id?: string };
 export type CueChange = { action: "save"; cue: CueDraft } | { action: "remove"; id: string }
-  | { action: "add_hint"; sentence: string };
+  | { action: "add_hint"; sentence: string; meaning?: string };
 export interface CueScene { scenarioId: string; custom?: CustomScene }
 export interface CueSnapshot { revision: number; cues: SceneCue[] | null }
 

@@ -16,3 +16,4 @@ class HintRequest(BaseModel):
 
 class HintResponse(BaseModel):
     suggestions: list[str] = Field(min_length=1, max_length=3)
+    meanings: dict[str, str] = Field(default_factory=dict)

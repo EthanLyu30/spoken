@@ -50,6 +50,7 @@ class GrammarStatistics(BaseModel):
     session_limit: int
     example_limit: int
     groups: list[GrammarGroup]
+    unattributed_corrections: int = 0
 
 
 class PracticeTarget(BaseModel):

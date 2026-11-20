@@ -216,6 +216,7 @@ def _distinct_edits(line: str, fixes: list[Correction]):
     source = _LearnerLine(line)
     evidence = []
     saved = []
+    unmatched = []
     for fix in fixes:
         if fix.self_marked or not fix.category:
             continue
@@ -228,6 +229,7 @@ def _distinct_edits(line: str, fixes: list[Correction]):
             continue
         offsets = source.offsets(quote, before)
         if not offsets:
+            unmatched.append(fix)
             continue
         if fix not in saved:
             saved.append(fix)
@@ -254,7 +256,7 @@ def _distinct_edits(line: str, fixes: list[Correction]):
             continue
         covered.update(span for spans in alternatives for span in spans)
         distinct.append((kind, focus, sentences))
-    return distinct, saved
+    return distinct, saved, unmatched
 
 
 def _recover_unindexed(db, turns_query, unindexed, by_session):
@@ -266,11 +268,24 @@ def _recover_unindexed(db, turns_query, unindexed, by_session):
             matched = matches[turn.session_id, index]
             if len(matched) < 2 and line.offsets(quote, original):
                 matched.add(turn.idx)
-    for (session, entry), indexes in matches.items():
-        if len(indexes) == 1:
+    for session_id, entries in unindexed.items():
+        for entry, (fix, _, _) in enumerate(entries):
+            indexes = matches.get((session_id, entry), ())
+            if len(indexes) != 1:
+                yield session_id, fix
+                continue
             index, = indexes
-            fix = unindexed[session][entry][0]
-            by_session[session][index].append(fix.model_copy(update={"turn_index": index}))
+            by_session[session_id][index].append(fix.model_copy(update={"turn_index": index}))
+
+
+def _unattributed_count(unknown: list[tuple[int, Correction]]) -> int:
+    distinct = set()
+    for session_id, fix in unknown:
+        before = tuple(_TOKENS.findall(fix.original.strip().casefold().replace("’", "'")))
+        after = tuple(_TOKENS.findall(fix.suggestion.strip()[:2000].casefold().replace("’", "'")))
+        if before and before != after and (after or fix.suggestion == ""):
+            distinct.add((session_id, fix.turn_index, fix.category, before, after))
+    return len(distinct)
 
 
 def grammar_statistics(db: Session, owner: str) -> GrammarStatistics:
@@ -279,6 +294,7 @@ def grammar_statistics(db: Session, owner: str) -> GrammarStatistics:
         .order_by(PracticeSession.created_at.desc(), PracticeSession.id.desc()).limit(_SESSION_LIMIT)).all()
     by_session = {session_id: defaultdict(list) for session_id, _, _ in sessions}
     unindexed = defaultdict(list)
+    unattributed = []
     for session_id, _, stored in sessions:
         for fix in read_corrections(stored, session_id):
             if not fix.category or fix.self_marked:
@@ -291,10 +307,12 @@ def grammar_statistics(db: Session, owner: str) -> GrammarStatistics:
                     unindexed[session_id].append((fix, quote, original))
             elif fix.turn_index < 2**31:
                 by_session[session_id][fix.turn_index].append(fix)
+            else:
+                unattributed.append((session_id, fix))
     turns_query = (select(Turn.session_id, Turn.idx, Turn.role, Turn.content)
                    .join(PracticeSession, PracticeSession.id == Turn.session_id).where(PracticeSession.client_id == owner))
     if unindexed:
-        _recover_unindexed(db, turns_query, unindexed, by_session)
+        unattributed.extend(_recover_unindexed(db, turns_query, unindexed, by_session))
     candidates = [(session_id, scene, index, by_session[session_id][index]) for session_id, scene, _ in sessions
                   for index in sorted(by_session[session_id], reverse=True)]
     refs = list({(session_id, i) for session_id, _, index, _ in candidates for i in (index, index - 1) if i >= 0})
@@ -308,8 +326,10 @@ def grammar_statistics(db: Session, owner: str) -> GrammarStatistics:
     for session_id, scene, index, fixes in candidates:
         turn = turns.get((session_id, index))
         if turn is None or turn.role != "user":
+            unattributed.extend((session_id, fix) for fix in fixes)
             continue
-        findings, saved = _distinct_edits(turn.content, fixes)
+        findings, saved, unmatched = _distinct_edits(turn.content, fixes)
+        unattributed.extend((session_id, fix) for fix in unmatched)
         seen = defaultdict(set)
         for kind, focus, sentences in sorted(findings, key=lambda finding: len(finding[2])):
             if kind not in groups:
@@ -329,4 +349,5 @@ def grammar_statistics(db: Session, owner: str) -> GrammarStatistics:
                     corrections=[focus, *(other for other in saved if other != focus)]))
     ranked = sorted(groups.values(), key=lambda group: (-group.occurrences, -group.sentences, group.kind))
     return GrammarStatistics(sessions_analyzed=len(sessions), session_limit=_SESSION_LIMIT,
-                             example_limit=_EXAMPLE_LIMIT, groups=ranked)
+                             example_limit=_EXAMPLE_LIMIT, groups=ranked,
+                             unattributed_corrections=_unattributed_count(unattributed))

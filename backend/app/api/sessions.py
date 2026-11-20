@@ -13,7 +13,7 @@ from app.models.session import PracticeSession
 from app.schemas.chat import ChatMessage
 from app.schemas.coaching import CoachingPlan, CoachingSnapshot, GrammarStatistics
 from app.schemas.feedback import SkillScore
-from app.schemas.session import ExpiredSessionReceipt, ProgressSessions, SaveSessionRequest, SessionDetail, SessionSummary
+from app.schemas.session import CustomSceneLookup, ExpiredSessionReceipt, ProgressSessions, SaveSessionRequest, SessionDetail, SessionSummary
 from app.services import sessions as repo
 from app.services.coaching import UnsupportedPracticeTarget, coaching_snapshot, generate_plan, select_plan_targets
 from app.services.corrections import read_corrections
@@ -86,6 +86,13 @@ def get_coaching(response: Response, scene: str | None = Query(default=None, max
     _, targets = select_plan_targets(snapshot)
     snapshot.can_generate_plan = bool(targets)
     return snapshot
+
+
+@router.post("/progress/coaching/custom/lookup", response_model=CoachingSnapshot)
+def get_custom_coaching(body: CustomSceneLookup, response: Response, db: Session = Depends(get_db),
+                        client_id: str = Depends(get_client_id)) -> CoachingSnapshot:
+    response.headers["Cache-Control"] = "private, no-store"
+    return coaching_snapshot(db, client_id, custom=body.custom)
 
 
 @router.get("/progress/grammar", response_model=GrammarStatistics)

@@ -36,7 +36,7 @@ function Practice({ drill, children, selected, fragment, onOpen }: {
   const id = useId();
   const [mode, setMode] = useState<Mode | null>(null);
   const [chinese, setChinese] = useState("");
-  const [translationUnavailable, setTranslationUnavailable] = useState("");
+  const [translationUnavailable, setTranslationUnavailable] = useState(false);
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<PracticeResult | null>(null);
@@ -48,7 +48,7 @@ function Practice({ drill, children, selected, fragment, onOpen }: {
   const opener = useRef<HTMLButtonElement | null>(null);
   const clozeButton = useRef<HTMLButtonElement>(null);
   const articleFocus = drill.exercise.focus.category === "articles";
-  const articleCloze = articleFocus && !!translationUnavailable;
+  const reorder = mode === "cloze" && drill.wordChoices.length > 0;
 
   useEffect(() => {
     const unsubscribe = subscribeAuthGeneration(() => { active.current?.abort(); setOwnerChanged(true); });
@@ -90,11 +90,9 @@ function Practice({ drill, children, selected, fragment, onOpen }: {
   function loadChinese() {
     void request(signal => translateCorrection(drill.exercise, signal), data => setChinese(data.chinese), cause => {
       if (cause instanceof ApiError && cause.status === 422 && cause.code === "translation_prompt_ambiguous") {
-        setTranslationUnavailable(cause.message);
-        if (articleFocus) {
-          opener.current = clozeButton.current;
-          setMode("cloze");
-        }
+        setTranslationUnavailable(true);
+        opener.current = clozeButton.current;
+        setMode("cloze");
       } else {
         setError("中文题面暂时没能生成。");
       }
@@ -136,7 +134,7 @@ function Practice({ drill, children, selected, fragment, onOpen }: {
   }}>
     {children && <div className="quick-practice-summary" hidden={mode !== null}>{children}</div>}
     <div className="quick-practice-tools print:hidden">
-      {!fragment && !articleCloze && drill.exercise.reference.trim() && <button type="button" aria-expanded={mode === "translate"} aria-controls={id}
+      {!fragment && !translationUnavailable && drill.exercise.reference.trim() && <button type="button" aria-expanded={mode === "translate"} aria-controls={id}
         onClick={event => open("translate", event.currentTarget)}><Languages size={15} aria-hidden="true" />中译英</button>}
       <button ref={clozeButton} type="button" aria-expanded={mode === "cloze"} aria-controls={id}
         onClick={event => open("cloze", event.currentTarget)}><PencilLine size={15} aria-hidden="true" />填空</button>
@@ -144,20 +142,23 @@ function Practice({ drill, children, selected, fragment, onOpen }: {
     {mode && <section className="quick-practice-panel print:hidden" id={id} aria-label={mode === "translate" ? "中译英练习" : "填空练习"}>
       <button className="quick-practice-close" type="button" onClick={close} aria-label="收起练习"><X size={17} /></button>
       {fragment && <p className="quick-practice-scope">练习保存的纠错片段</p>}
-      {mode === "cloze" && articleCloze && <p className="quick-practice-scope" role="status">中文题面缺少区分冠词的线索，已切换为填空。</p>}
+      {mode === "cloze" && translationUnavailable && <p className="quick-practice-scope" role="status">
+        {articleFocus ? "中文题面缺少区分冠词的线索，已切换为填空。" : "中文题面无法区分这处改动，已切换为填空。"}
+      </p>}
       {mode === "translate" && !chinese ? <>
         {busy && <p role="status">正在准备中文题面…</p>}
-        {translationUnavailable && <p role="alert">{translationUnavailable} <button type="button" className="coaching-secondary"
-          onClick={() => { if (clozeButton.current) open("cloze", clozeButton.current); }}>改用填空</button></p>}
         {error && <p role="alert">{error} <button type="button" className="coaching-secondary" onClick={loadChinese}>重新加载题目</button></p>}
       </> : <>
         <p className="quick-practice-prompt" id={id + "-prompt"} lang={mode === "cloze" ? "en" : "zh-CN"}>
           {mode === "cloze" ? drill.prompt : chinese}
         </p>
+        {reorder && <p className="quick-practice-scope" id={id + "-order"}>
+          把这些词按正确顺序填入空格 <span lang="en">{drill.wordChoices.join(" / ")}</span>
+        </p>}
         <form aria-busy={busy} onSubmit={event => { event.preventDefault(); if (answer.trim()) check(answer); }}>
           <label htmlFor={id + "-answer"}>{mode === "cloze" ? "填入英文" : "你的英文译文"}</label>
           <input ref={input} id={id + "-answer"} lang="en" value={answer} readOnly={busy}
-            aria-describedby={id + "-prompt"} autoComplete="off" maxLength={4000}
+            aria-describedby={reorder ? `${id}-prompt ${id}-order` : id + "-prompt"} autoComplete="off" maxLength={4000}
             onKeyDown={event => { if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault(); }}
             onChange={event => { setAnswer(event.target.value); setResult(null); setError(""); }} />
           <div className="quick-practice-actions">

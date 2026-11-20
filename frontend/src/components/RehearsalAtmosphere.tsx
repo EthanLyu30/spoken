@@ -3,7 +3,7 @@ import type { RehearsalAir } from "../data/rehearsalScenes";
 
 const particleLight: Record<RehearsalAir, string> = {
   cafe: "255,244,198", daylight: "255,245,213", sky: "241,251,255", leaves: "211,184,93",
-  lamplight: "255,218,142", screen: "249,247,235",
+  lamplight: "255,218,142", screen: "249,247,235", water: "218,243,255",
 };
 
 export function RehearsalAtmosphere({ still, effect }: { still: boolean; effect: RehearsalAir }) {
@@ -17,6 +17,7 @@ export function RehearsalAtmosphere({ still, effect }: { still: boolean; effect:
 
     let width = 0, height = 0, time = 0, last = 0, frame = 0;
     let onScreen = true;
+    const backdrop = effect === "water" ? stageElement.querySelector(".rehearsal-atlas") : null;
     function drawSteam() {
       const cup = stageElement?.querySelector('[data-object="a latte"] img');
       if (!ctx || !cup || !stageElement) return;
@@ -47,6 +48,25 @@ export function RehearsalAtmosphere({ still, effect }: { still: boolean; effect:
       ctx.clearRect(0, 0, width, height);
       if (effect === "cafe") drawSteam();
       if (still) return;
+      if (effect === "water" && backdrop && stageElement) {
+        // Keep the glints on the water even when the atlas is cropped or panned.
+        const art = backdrop.getBoundingClientRect(), stage = stageElement.getBoundingClientRect();
+        ctx.lineCap = "round";
+        ctx.lineWidth = Math.max(.65, width * .002);
+        for (let i = 0; i < 13; i++) {
+          const seed = (i * .618) % 1;
+          const phase = (seed + time * .27) % 1;
+          const start = art.left - stage.left + art.width * (.04 + .36 * seed + .016 * Math.sin(time + i));
+          const y = art.top - stage.top + art.height * (.55 + (i % 4) * .015);
+          const length = art.width * (.017 + .045 * Math.sin(Math.PI * phase));
+          ctx.strokeStyle = `rgba(${particleLight.water},${.68 * Math.sin(Math.PI * phase)})`;
+          ctx.beginPath();
+          ctx.moveTo(start, y);
+          ctx.quadraticCurveTo(start + length * .58, y - 1.8, start + length, y + 1.2);
+          ctx.stroke();
+        }
+        return;
+      }
 
       // A slow reflection on windows and screens adds depth behind the cues.
       if (effect === "screen" || effect === "sky") {
@@ -111,5 +131,5 @@ export function RehearsalAtmosphere({ still, effect }: { still: boolean; effect:
       document.removeEventListener("visibilitychange", sync);
     };
   }, [effect, still]);
-  return <canvas ref={ref} className="rehearsal-air" aria-hidden="true" />;
+  return <canvas ref={ref} className="rehearsal-air" data-effect={effect} aria-hidden="true" />;
 }

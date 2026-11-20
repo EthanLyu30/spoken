@@ -1,6 +1,8 @@
 """Schemas for saving and reading practice sessions."""
 
 from datetime import datetime
+from hashlib import sha256
+import json
 from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
@@ -14,6 +16,16 @@ from app.schemas.practice import Insights
 
 class SessionScene(CustomScene):
     practice_exercises: list[PracticeExercise] | None = Field(default=None, min_length=2, max_length=2)
+
+    def identity(self) -> str:
+        """Match scene cues and saved turns across display labels and default fields."""
+        content = self.model_dump(exclude={"source", "rehearsal_theme"})
+        canonical = json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return sha256(canonical.encode("utf-8")).hexdigest()
+
+
+class CustomSceneLookup(BaseModel):
+    custom: SessionScene
 
 
 class SaveSessionRequest(BaseModel):

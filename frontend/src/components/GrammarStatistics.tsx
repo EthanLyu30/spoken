@@ -53,9 +53,12 @@ function Report() {
     }}>重新加载统计</button>
   </div>;
   if (!stats) return <p className="grammar-status" role="status">正在整理你的纠错记录…</p>;
+  const unattributed = stats.unattributed_corrections ?? 0;
   return <>
     <p className="grammar-window">统计最近 {stats.sessions_analyzed} 次已保存的场景对话，最多 {stats.session_limit} 次。</p>
-    {!stats.groups.length ? <p className="grammar-status">还没有可统计的语法纠错。练习中有分类的纠错会出现在这里。</p> : <>
+    {unattributed > 0 && <p className="grammar-window">有 {unattributed} 条已分类的纠错无法对应到原句，未计入统计。</p>}
+    {!stats.groups.length ? <p className="grammar-status">{unattributed > 0 ? "当前没有能计入排名的纠错。"
+      : "还没有可统计的语法纠错。练习中有分类的纠错会出现在这里。"}</p> : <>
       <p className="grammar-instructions">按原句中出现的处数排序。选一类，练习自己的错句。</p>
       <ol className="grammar-groups" aria-label="按出现次数排列的错误类型">
         {stats.groups.map((group) => {

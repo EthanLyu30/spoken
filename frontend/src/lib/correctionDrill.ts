@@ -87,17 +87,22 @@ function editsAt(line: string, words: Token[], index: number, fix: Correction) {
   const suggestion = fix.suggestion.trim();
   const edits = changes(line, words.slice(index, index + tokens(fix.original).length), suggestion);
   if (fix.category === "word_order") {
-    // A move looks like a deletion plus an insertion to the word diff. Ask for
-    // the reordered phrase so the learner has to place both pieces correctly.
-    for (const removal of edits.filter(edit => !edit.replacement.trim())) {
-      const added = edits.find(edit => !edit.old.trim()
-        && edit.replacement.trim().toLowerCase() === removal.old.trim().toLowerCase());
-      if (!added) continue;
-      const start = Math.min(removal.start, added.start), end = Math.max(removal.end, added.end);
-      const newStart = Math.min(removal.newStart, added.newStart);
-      const newEnd = Math.max(removal.newStart + removal.replacement.length, added.newStart + added.replacement.length);
-      return [...edits.filter(edit => edit.end < start || edit.start > end),
-        { start, end, old: line.slice(start, end), newStart, replacement: suggestion.slice(newStart, newEnd) }];
+    // A moved word appears as a deletion and an insertion, including when
+    // the correction also replaces it (e.g. shiftly moves and becomes sooner).
+    const removals = edits.filter(edit => word.test(edit.old) && !edit.replacement.trim());
+    const insertions = edits.filter(edit => word.test(edit.replacement) && !edit.old.trim());
+    const exactMove = removals.flatMap(removal => insertions
+      .filter(insertion => insertion.replacement.trim().toLowerCase() === removal.old.trim().toLowerCase())
+      .map(insertion => [removal, insertion] as const))[0];
+    const move = exactMove ?? (edits.length === 2 && removals.length === 1 && insertions.length === 1
+      ? [removals[0], insertions[0]] : null);
+    if (move) {
+      const [removal, insertion] = move;
+      const start = Math.min(removal.start, insertion.start), end = Math.max(removal.end, insertion.end);
+      const newStart = Math.min(removal.newStart, insertion.newStart);
+      const newEnd = Math.max(removal.newStart + removal.replacement.length, insertion.newStart + insertion.replacement.length);
+      const reordered = { start, end, old: line.slice(start, end), newStart, replacement: suggestion.slice(newStart, newEnd) };
+      return [reordered, ...edits.filter(edit => edit !== removal && edit !== insertion && (edit.end <= start || edit.start >= end))];
     }
   }
   return edits;
@@ -273,7 +278,11 @@ export function buildCorrectionDrill(example: ReplaySentence, fix: Correction) {
     original: line, reference, previous_partner_message: example.previous_partner_message,
     focus: translationFocus(reference, blankStart, blank.before, answer, fix),
   };
-  return { prompt, answer, exercise, fragment, caseSensitive };
+  // Provide the words for ordering practice without revealing their order.
+  const answerWords = fix.category === "word_order" ? answer.split(/\s+/).filter(Boolean) : [];
+  const rotated = [...answerWords.slice(1), ...answerWords.slice(0, 1)];
+  const wordChoices = answerWords.join(" ") === rotated.join(" ") ? [] : rotated;
+  return { prompt, answer, exercise, fragment, caseSensitive, wordChoices };
 }
 
 export function matchesBlank(attempt: string, expected: string, caseSensitive = false): boolean {

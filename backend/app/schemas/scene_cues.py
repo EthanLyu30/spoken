@@ -29,10 +29,6 @@ class SceneCueSnapshot(BaseModel):
     cues: list[SceneCue] | None = None
 
 
-class CustomCueLookup(BaseModel):
-    custom: SessionScene
-
-
 class CueChange(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -60,6 +56,7 @@ class RemoveCue(CueChange):
 class AddHint(CueChange):
     action: Literal["add_hint"]
     sentence: English
+    meaning: str = Field(default="", max_length=400)
 
 
 SceneCueChange = Annotated[SaveCue | RemoveCue | AddHint, Field(discriminator="action")]

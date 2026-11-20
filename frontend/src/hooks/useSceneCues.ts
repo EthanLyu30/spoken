@@ -96,6 +96,6 @@ export function useSceneCues(scenarioId: string, custom?: CustomScene | null) {
     retry,
     save: (cue: CueDraft) => mutate({ action: "save", cue }),
     remove: (id: string) => mutate({ action: "remove", id }),
-    addHint: (sentence: string) => mutate({ action: "add_hint", sentence }),
+    addHint: (sentence: string, meaning?: string) => mutate({ action: "add_hint", sentence, meaning }),
   };
 }

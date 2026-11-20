@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.chat import get_client
@@ -53,6 +54,16 @@ def test_custom_scene_keeps_usable_preview_cues_in_the_generated_scene():
         assert response.json()["practice_cues"] == [cue]
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize(("theme", "expected"), [("bank", "bank"), ("imaginary-room", None), ([], None)])
+def test_custom_scenario_accepts_only_supported_display_themes(monkeypatch, theme, expected):
+    stub = _Stub(json.dumps({**_SCENE, "rehearsal_theme": theme}))
+    monkeypatch.setitem(app.dependency_overrides, get_client, lambda: stub)
+    response = client.post("/api/custom-scenario", json={"description": "去银行开户"})
+    assert response.status_code == 200
+    assert response.json()["rehearsal_theme"] == expected
+    assert "rehearsal_theme" in stub.calls[0][0]["content"]
 
 
 def test_scenario_suggestion_returns_scene():
