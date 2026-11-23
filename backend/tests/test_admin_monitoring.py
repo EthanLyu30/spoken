@@ -123,6 +123,49 @@ def test_out_of_order_visit_updates_preserve_first_and_last_seen(client):
         assert row.first_seen_at == now - timedelta(seconds=5)
 
 
+def test_translation_fallback_is_visible_without_counting_as_a_failure(client):
+    from app.models.telemetry import TelemetryRecord
+
+    owner = account(client, admin=True)
+    release = uuid.uuid4().hex
+    route = "POST /api/correction-practice/translation"
+    fallback_id = uuid.uuid4().hex
+    validation_id = uuid.uuid4().hex
+    with SessionLocal() as db:
+        for trace_id, operation, outcome, status, error_type in [
+            (fallback_id, route, "error", 422, "AmbiguousTranslationPrompt"),
+            (validation_id, route, "error", 422, None),
+            (uuid.uuid4().hex, route, "error", 503, "DeepSeekError"),
+            (uuid.uuid4().hex, route, "timeout", 503, "TimeoutError"),
+            (uuid.uuid4().hex, route, "ok", 200, None),
+            (uuid.uuid4().hex, "POST /api/feedback", "error", 422, "AmbiguousTranslationPrompt"),
+        ]:
+            db.add(TelemetryRecord(trace_id=trace_id, started_at=utcnow(), release=release, source="server",
+                operation=operation, outcome=outcome, duration_ms=100, http_status=status, error_type=error_type,
+                error_cause_type="model_review" if trace_id == fallback_id else None,
+                spans_json='[{"name":"performance","outcome":"error"}]' if trace_id == fallback_id else "[]"))
+        db.commit()
+
+    try:
+        filters = {"release": release}
+        stats = client.get("/api/admin/overview", headers=owner, params=filters).json()
+        assert (stats["count"], stats["errors"], stats["timeouts"], stats.get("fallbacks")) == (6, 3, 1, 1)
+        assert stats["success_rate"] == pytest.approx(1 / 5)
+
+        errors = client.get("/api/admin/traces", headers=owner, params=filters | {"outcome": "error"}).json()
+        error_ids = {row["trace_id"] for row in errors["items"]}
+        assert errors["total"] == 3 and validation_id in error_ids and fallback_id not in error_ids
+        fallbacks = client.get("/api/admin/traces", headers=owner, params=filters | {"outcome": "fallback"}).json()
+        assert [(row["trace_id"], row["outcome"]) for row in fallbacks["items"]] == [(fallback_id, "fallback")]
+        detail = client.get(f"/api/admin/traces/{fallback_id}", headers=owner).json()
+        assert (detail["outcome"], detail["http_status"], detail["error_cause_type"]) == ("fallback", 422, "model_review")
+        assert detail["spans"][0]["outcome"] == "fallback"
+    finally:
+        with SessionLocal() as db:
+            db.execute(delete(TelemetryRecord).where(TelemetryRecord.release == release))
+            db.commit()
+
+
 def test_admin_user_list_returns_accounts_but_not_admin_identity(client):
     owner = account(client, admin=True)
     ordinary = account(client)

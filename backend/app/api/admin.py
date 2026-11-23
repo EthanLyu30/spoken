@@ -27,7 +27,7 @@ def get_admin_user(response: Response, user: User = Depends(get_current_user), d
 
 def filters(hours: int = Query(24, ge=1, le=336), source: Literal["server", "browser"] = "server",
             operation: str | None = Query(None, max_length=120), model: str | None = Query(None, max_length=100),
-            release: str | None = Query(None, max_length=80), outcome: Literal["ok", "error", "timeout", "cancelled"] | None = None,
+            release: str | None = Query(None, max_length=80), outcome: Literal["ok", "error", "timeout", "cancelled", "fallback"] | None = None,
             traffic: Literal["all", "unmarked", "test"] = "all", test_run_id: str | None = Query(None, min_length=1, max_length=64),
             delivery: Literal["all", "replay"] = "all"):
     return dict(hours=hours, source=source, operation=operation, model=model, release=release, outcome=outcome,

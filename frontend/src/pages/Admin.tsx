@@ -21,8 +21,13 @@ const views = [
   { id: "users", label: "用户运营", icon: Users },
   { id: "feedback", label: "意见审核", icon: Mail },
 ] as const;
-const labels: Record<string, string> = { ok: "成功", error: "失败", timeout: "超时", cancelled: "已取消" };
+const labels: Record<string, string> = { ok: "成功", error: "失败", timeout: "超时", cancelled: "已取消", fallback: "切填空" };
 const spanLabels: Record<string, string> = { ...labels, incomplete: "未完成" };
+const clozeReasons: Record<string, string> = {
+  local_referent: "原文缺少明确指代",
+  model_draft: "未生成可用的中文题面",
+  model_review: "中文题面复核未通过",
+};
 const asrReasonLabels: Record<string, string> = {
   empty: "识别未返回文字。单凭空转写无法判断麦克风输入或供应商的状态。",
   incomplete: "识别只取得部分转写，需确认或重录。",
@@ -461,7 +466,9 @@ export default function Admin() {
       {!diagnostics && data.collection.sources?.browser?.at_capacity && <p className="admin-notice">浏览器体验已达到 {number(data.collection.sources.browser.source_budget)} 条保留上限，语音体验的时间窗可能不完整。</p>}
       <section className="admin-metrics" aria-label="运行指标">
         <article><span><Activity size={16} />{filters.source === "server" ? "保留请求数" : "上报样本"}</span><strong>{number(data.count)}</strong><small>保留 {data.collection.retention_days} 天 · {data.collection.cleanup?.active ? '自动清理' : '写入时清理'}</small></article>
-        <article><span><ShieldCheck size={16} />{filters.source === "server" ? "请求成功率" : "正常上报样本"}</span><strong>{filters.source === "browser" ? number(data.count - data.errors - data.timeouts - data.cancelled) : data.success_rate == null ? "—" : `${(data.success_rate * 100).toFixed(1)}%`}</strong><small>{filters.source === "server" ? `取消 ${data.cancelled} 次排除` : "端侧自报，独立于后端成功数"}</small></article>
+        <article><span><ShieldCheck size={16} />{filters.source === "server" ? "请求成功率" : "正常上报样本"}</span><strong>{filters.source === "browser" ? number(data.count - data.errors - data.timeouts - data.cancelled) : data.success_rate == null ? "—" : `${(data.success_rate * 100).toFixed(1)}%`}</strong><small>{filters.source === "server"
+          ? `取消 ${data.cancelled} 次${data.fallbacks ? `、切填空 ${data.fallbacks} 次` : ""}排除`
+          : "端侧自报，独立于后端成功数"}</small></article>
         <article><span><Clock3 size={16} />P95 总耗时</span><strong>{ms(data.latency.p95)}</strong><small>P50 {ms(data.latency.p50)} · P99 {ms(data.latency.p99)}</small></article>
         <article className={data.errors + data.timeouts ? "admin-metric-alert" : undefined}>
           <span><TriangleAlert size={16} />{filters.source === "server" ? "失败 / 超时" : "异常样本"}</span>
@@ -529,7 +536,9 @@ export default function Admin() {
         void inspect(id);
       }}><label htmlFor="admin-trace-id"><Search size={15} />Trace ID</label><input id="admin-trace-id" value={traceLookup} onChange={event => setTraceLookup(event.target.value)} maxLength={64} autoComplete="off" spellCheck={false} placeholder="粘贴调用编号，直达详情" title="输入响应头 X-Trace-Id 中的 32 位调用编号" /><button disabled={detailLoading} type="submit">{detailLoading ? "查找中…" : "查找调用"}</button></form><div className="admin-table-controls">
         <label><input type="checkbox" checked={slow} onChange={e => { setOffset(0); setSlow(e.target.checked); }} />优先查看慢请求</label>
-        <select aria-label="调用状态" value={filters.outcome} onChange={e => update({ outcome: e.target.value })}><option value="">全部状态</option>{Object.entries(labels).map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select>
+        <select aria-label="调用状态" value={filters.outcome} onChange={e => update({ outcome: e.target.value })}><option value="">全部状态</option>{Object.entries(labels)
+          .filter(([value]) => value !== "fallback" || (filters.source === "server" && data?.fallbacks !== undefined))
+          .map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select>
       </div></div>
       {listError && !checkingBrowserRelease && <p className="admin-notice admin-error-notice" role="alert"><TriangleAlert size={16} /><span>{listError}</span><button onClick={refresh}>重试</button></p>}
       <div className="admin-table-wrap" role="region" aria-label="调用记录表格" tabIndex={0} aria-busy={listLoading}><table><thead><tr><th scope="col">时间 · 北京</th><th scope="col">业务操作</th><th scope="col">状态</th><th scope="col">耗时</th>{filters.source === "server" && <><th scope="col">模型 / 类型</th><th scope="col">费用参考</th></>}<th scope="col">Trace</th></tr></thead><tbody>
@@ -673,6 +682,8 @@ function TraceDetail({ detail, onInspect, onClose }: { detail: AdminTrace; onIns
       </>}
       <div><dt>响应</dt><dd>{detail.source === "browser" ? "不适用 HTTP 状态" : detail.http_status == null ? "HTTP 状态未采集" : `HTTP ${detail.http_status}`}</dd></div><div><dt>发布版本</dt><dd>{releaseLabel(detail.release)}{isTestRelease(detail.release) && "（测试样本）"}</dd></div>{detail.test_run_id && <div><dt>测试批次</dt><dd>{detail.test_run_id}</dd></div>}{detail.source === "server" && <div><dt>模型首文本</dt><dd>{ms(detail.ttft_ms)}</dd></div>}</dl>
     {detail.audience === "guest" && <p className="admin-detail-cost">游客练习请求<small>近 7 天的保留样本按发生时间计入用户运营。</small></p>}
+    {detail.outcome === "fallback" && <p className="admin-notice">
+      {clozeReasons[detail.error_cause_type ?? ""] ?? "中文题面无法提示这处改动"}，练习会切换为填空。</p>}
     {(failed || cancelled) && <section className="admin-failure-context"><h3><TriangleAlert size={16} />{cancelled ? "取消线索" : "失败线索"}</h3>
       {detail.source === "browser" ? <p>{browserDiagnosis}</p>
         : detail.error_type ? <><div className="admin-error-types"><code>{detail.error_type}</code>{detail.error_cause_type && <><ArrowRight size={13} /><code>{detail.error_cause_type}</code></>}</div><p>已采集异常类名；可按调用时间和编号核对服务端日志。</p></>

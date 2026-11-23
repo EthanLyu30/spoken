@@ -21,6 +21,9 @@ export { withTimeout } from "./requestTimeout";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const DEFAULT_TIMEOUT = 60_000; // generous: DeepSeek replies can be slow
+// These endpoints return public content independent of the learner. Ordinary
+// cross-origin GETs can reach them without a CORS preflight.
+const PUBLIC_READS = new Set(["/api/health", "/api/scenario-suggestion", "/api/interview/sets", "/api/interview/questions"]);
 const metadata = new ReadResource();
 subscribeAuthGeneration(() => metadata.clear());
 subscribeProgress(() => metadata.clear());
@@ -710,14 +713,19 @@ export async function request<T>(path: string, init?: RequestInit, timeoutMs = D
   const priorOutcome = guestWrite ? latestTransitionOutcome() : null;
   const generation = getAuthGeneration();
   const checkGeneration = () => { if (generation !== getAuthGeneration()) throw new DOMException("Account changed", "AbortError"); };
+  const publicRead = (init?.method ?? "GET").toUpperCase() === "GET" && PUBLIC_READS.has(path.split("?", 1)[0]);
+  const ownerHeaders: Record<string, string> = publicRead ? {} : {
+    "Content-Type": "application/json",
+    "X-Client-Id": requestGuestId,
+    "X-Timezone": deviceTimezone(),
+    ...(guestWrite ? { "X-Claim-Protocol": "1" } : {}),
+    ...authHeader(),
+  };
   const requestInit: RequestInit = {
     ...init,
+    credentials: publicRead ? "omit" : init?.credentials,
     headers: {
-      "Content-Type": "application/json",
-      "X-Client-Id": requestGuestId,
-      "X-Timezone": deviceTimezone(),
-      ...(guestWrite ? { "X-Claim-Protocol": "1" } : {}),
-      ...authHeader(),
+      ...ownerHeaders,
       ...traceHeaders(init?.signal),
       ...(init?.headers as Record<string, string> | undefined),
     },
@@ -790,7 +798,7 @@ export async function request<T>(path: string, init?: RequestInit, timeoutMs = D
 
 /** Liveness check used to surface backend connectivity in the UI. */
 export function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
-  return request<HealthResponse>("/api/health", { signal });
+  return request<HealthResponse>("/api/health", { signal, cache: "no-store" });
 }
 
 export type ChatRole = "user" | "assistant";
@@ -843,7 +851,7 @@ export function createCustomScene(
 
 /** The day's featured scene (cached server-side per day); `fresh` regenerates. */
 export function getScenarioSuggestion(fresh = false, signal?: AbortSignal): Promise<CustomScene> {
-  return request<CustomScene>(`/api/scenario-suggestion${fresh ? "?fresh=1" : ""}`, { signal });
+  return request<CustomScene>(`/api/scenario-suggestion${fresh ? "?fresh=1" : ""}`, { signal, cache: fresh ? "no-store" : "default" });
 }
 
 export type CorrectionIssueKind = "grammar" | "expression";
@@ -1358,12 +1366,12 @@ export function getInterviewSet(
 ): Promise<InterviewDeck> {
   const params = new URLSearchParams({ n: "4", ai: "false", source });
   if (setId) params.set("set_id", setId);
-  return request<InterviewDeck>("/api/interview/questions?" + params.toString(), { signal });
+  return request<InterviewDeck>("/api/interview/questions?" + params.toString(), { signal, cache: setId ? "default" : "no-store" });
 }
 
 /** Take an Interview questions for the timed four-question drill. */
 export function getInterviewQuestions(n = 4, signal?: AbortSignal): Promise<string[]> {
-  return request<{ questions: string[] }>(`/api/interview/questions?n=${n}`, { signal }).then(
+  return request<{ questions: string[] }>(`/api/interview/questions?n=${n}`, { signal, cache: "no-store" }).then(
     (r) => r.questions,
   );
 }

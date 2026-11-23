@@ -1,10 +1,14 @@
 """Private, content-free operational records; separate from learning data."""
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, and_, case
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
+
+_CLOZE_TRANSLATION = "POST /api/correction-practice/translation"
+_AMBIGUOUS_PROMPT = "AmbiguousTranslationPrompt"
 
 
 class AdminAccount(Base):
@@ -43,3 +47,16 @@ class TelemetryRecord(Base):
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     release: Mapped[str] = mapped_column(String(80), default="unknown")
     spans_json: Mapped[str] = mapped_column(Text, default="[]")
+
+    @hybrid_property
+    def diagnostic_outcome(self):
+        # The HTTP failure is retained, but this response routes the learner to fill-in-the-blank practice.
+        if (self.source == "server" and self.operation == _CLOZE_TRANSLATION and self.outcome == "error"
+                and self.http_status == 422 and self.error_type == _AMBIGUOUS_PROMPT):
+            return "fallback"
+        return self.outcome
+
+    @diagnostic_outcome.expression
+    def diagnostic_outcome(cls):
+        return case((and_(cls.source == "server", cls.operation == _CLOZE_TRANSLATION, cls.outcome == "error",
+                          cls.http_status == 422, cls.error_type == _AMBIGUOUS_PROMPT), "fallback"), else_=cls.outcome)

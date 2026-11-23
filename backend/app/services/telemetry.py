@@ -272,9 +272,12 @@ def conditions(hours=24, source="server", operation=None, model=None, release=No
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
     filters = [TelemetryRecord.started_at >= cutoff, TelemetryRecord.source == source]
     for column, value in [(TelemetryRecord.operation, operation), (TelemetryRecord.model, model),
-                          (TelemetryRecord.release, release), (TelemetryRecord.outcome, outcome)]:
+                          (TelemetryRecord.release, release)]:
         if value:
             filters.append(column == value)
+    if outcome:
+        column = TelemetryRecord.diagnostic_outcome if source == "server" and outcome in ("error", "fallback") else TelemetryRecord.outcome
+        filters.append(column == outcome)
     if source == "browser" and delivery == "replay":
         filters.append(TelemetryRecord.is_replay.is_(True))
     if test_run_id:
@@ -346,9 +349,10 @@ def experience_summary(db, *, hours, release=None, server_release=None, browser_
 
 def serialize(record, *, detail=False):
     from app.services.model_pricing import record_reference_cost
-    out = {key: getattr(record, key) for key in ("trace_id", "interaction_id", "operation", "source", "outcome", "duration_ms",
+    out = {key: getattr(record, key) for key in ("trace_id", "interaction_id", "operation", "source", "duration_ms",
         "http_status", "ttft_ms", "model", "input_tokens", "output_tokens", "release",
         "error_type", "error_cause_type", "test_run_id")}
+    out["outcome"] = record.diagnostic_outcome
     if record.guest_subject_hash and not record.test_run_id:
         out["audience"] = "guest"
     out["started_at"] = record.started_at.isoformat(timespec="milliseconds") + "Z"
@@ -369,6 +373,10 @@ def serialize(record, *, detail=False):
     out['cost_min_cny'] = cost[0] if cost is not None else None
     out['cost_max_cny'] = cost[1] if cost is not None else None
     if detail:
+        if out["outcome"] == "fallback":
+            for span in spans:
+                if isinstance(span, dict) and span.get("name") == "performance" and span.get("outcome") == "error":
+                    span["outcome"] = "fallback"
         out["spans"] = spans
         if record.source == "browser":
             out["occurred_at"] = out["started_at"] if record.received_at is not None else None
@@ -407,9 +415,10 @@ def overview(db, **filters):
     from app.services.model_pricing import pricing_summary
     source = filters.get("source", "server")
     rows = db.execute(select(TelemetryRecord.duration_ms, TelemetryRecord.ttft_ms,
-        TelemetryRecord.outcome, TelemetryRecord.input_tokens, TelemetryRecord.output_tokens,
+        TelemetryRecord.diagnostic_outcome.label("outcome"), TelemetryRecord.input_tokens, TelemetryRecord.output_tokens,
         TelemetryRecord.started_at, TelemetryRecord.operation, TelemetryRecord.model).where(*conditions(**filters))).all()
     completed = [r for r in rows if r.outcome != "cancelled"]
+    evaluated = [r for r in completed if r.outcome != "fallback"]
     known = [r for r in rows if r.input_tokens is not None and r.output_tokens is not None]
     buckets = {}
     for row in rows:
@@ -428,9 +437,10 @@ def overview(db, **filters):
             max((row.started_at for row in rows), default=None),
         ),
         "pricing": pricing_summary(rows, source=source),
-        "success_rate": sum(r.outcome == "ok" for r in completed) / len(completed) if completed else None,
+        "success_rate": sum(r.outcome == "ok" for r in evaluated) / len(evaluated) if evaluated else None,
         "errors": sum(r.outcome == "error" for r in rows), "timeouts": sum(r.outcome == "timeout" for r in rows),
         "cancelled": sum(r.outcome == "cancelled" for r in rows),
+        "fallbacks": sum(r.outcome == "fallback" for r in rows),
         "latency": percentiles(r.duration_ms for r in completed), "ttft": percentiles(r.ttft_ms for r in rows),
         "ttft_known": sum(r.ttft_ms is not None for r in rows),
         "input_tokens": sum(r.input_tokens for r in known) if known else None,

@@ -67,6 +67,24 @@ it("labels non-model operations by type instead of claiming a missing model", ()
   expect(modelLabel({ ...trace, operation: "POST /api/chat/stream", model: "deepseek-flash" })).toBe("deepseek-flash");
 });
 
+it("shows an expected translation fallback separately and can inspect its reason", async () => {
+  const fallback = { ...trace, operation: "POST /api/correction-practice/translation", outcome: "fallback",
+    http_status: 422, error_type: "AmbiguousTranslationPrompt", error_cause_type: "model_review" };
+  fetcher.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes("/overview")
+    ? { ...overview, count: 2, errors: 1, fallbacks: 1, success_rate: 0 }
+    : url.includes(`/traces/${trace.trace_id}`) ? fallback : { items: [fallback], total: 1 })));
+  show();
+  expect(await screen.findByText(/切填空 1 次排除/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "失败 1" })).toBeVisible();
+  fireEvent.change(screen.getByLabelText("调用状态"), { target: { value: "fallback" } });
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).includes("outcome=fallback"))).toBe(true));
+  fireEvent.click(await screen.findByRole("button", { name: `查看调用 ${trace.trace_id.slice(0, 8)}` }));
+  const detail = await screen.findByLabelText("调用详情");
+  expect(within(detail).getByText("HTTP 422")).toBeVisible();
+  expect(within(detail).getByText(/题面复核未通过.*切换为填空/)).toBeVisible();
+  expect(within(detail).queryByText("失败线索")).not.toBeInTheDocument();
+});
+
 it("does not load private data for guests or ordinary accounts", () => {
   useAuth.setState({ user: { ...user, is_admin: false } });
   show();

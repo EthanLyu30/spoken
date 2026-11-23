@@ -148,7 +148,7 @@ def guest_request_summary(db, now):
         columns.extend([
             func.count(func.distinct(case((within, record.guest_subject_hash)))).label(f"browsers_{hours}"),
             func.count(case((within, 1))).label(f"requests_{hours}"),
-            func.count(case((and_(within, record.outcome.in_(("error", "timeout"))), 1))).label(f"failed_{hours}"),
+            func.count(case((and_(within, record.diagnostic_outcome.in_(("error", "timeout"))), 1))).label(f"failed_{hours}"),
             func.count(case((and_(within, record.outcome == "cancelled"), 1))).label(f"cancelled_{hours}"),
         ])
         columns.extend(func.count(case((and_(within, record.operation.in_(operations)), 1))).label(f"{kind}_{hours}")

@@ -34,7 +34,7 @@ docker compose up -d --build
 - Root Directory = `frontend`，Framework = **Vite**，Build = `npm run build`，Output = `dist`。
 - 环境变量 `VITE_API_BASE_URL = <后端地址>`（当前生产为 `https://spoken-backend-sg.onrender.com`）。
 - `frontend/vercel.json` 已配置单页应用路由回退：直接打开或刷新 `/me`、`/words`、`/practice/cafe` 等地址时返回 `index.html`，再由 React Router 渲染页面。此配置随前端重新部署后生效；现有静态资源仍由 Vercel 正常提供。
-- Moonshine / Kokoro 权重由浏览器空闲时从 Hugging Face 下载并写入 Cache Storage；不增加 Vercel 服务端资源。首次访问会有较大的后台下载，国内网络无法访问 Hugging Face 时会自动继续使用讯飞。若后续要求本地模型高覆盖率，应把权重镜像到可控的对象存储/CDN。
+- 默认朗读使用设备音色，默认识别使用讯飞。选择本地语音模式后，浏览器才会按设备能力从 Hugging Face 下载 Moonshine / Kokoro 权重并缓存。Interview 的题目和参考文本由 Spoken 后端提供。
 
 ### 零停机部署
 Render Web Service 部署或重启时，会先在旁边启动新实例；只有健康检查 `/api/ready` 返回 200（应用已就绪且数据库可查询）后才把新流量切过去，旧实例继续服务，随后收到 `SIGTERM`。因此新实例启动通常不会让用户看到冷启动或 502。
@@ -102,7 +102,7 @@ DeepSeek 统一使用官方滚动名称 `deepseek-flash`（当前对应 V4.1 Fla
 
 - **自定义域名**：买个域名，在 Vercel 项目 **Settings → Domains** 添加并按提示配 DNS（自有域名比 `*.vercel.app` 稳）。加好后把后端 `CORS_ORIGINS` 加上新域名（多个用逗号分隔）。
 - **保活后端**：使用下面的 Cloudflare Cron 作为主要定时器；`.github/workflows/keepalive.yml` 保留为备用和手动健康检查。GitHub 定时任务可能延迟或漏跑，不能单独保证每 5 分钟保活。
-- **想要国内更快**：本项目当前已使用 Render Singapore + Neon Singapore；若仍不够，可继续迁到香港（如 fly.io `hkg`），离用户更近；或走 ICP 备案 + 国内 CDN（最快但最折腾）。免费版 Cloudflare 在大陆无节点，通常帮助有限、甚至更慢。
+- 正式入口是 [www.spokenai.org](https://www.spokenai.org/)。根域 `spokenai.org` 需要先完成 HTTPS 连接才能跳转。在 DNS 服务商核对 Vercel 项目为根域推荐的记录，并从内地网络分别检查根域跳转、`www` 首页和新加坡 Render 的 `/api/ready`。生产数据库连接由 Render 的 `DATABASE_URL` 配置。
 
 ### Cloudflare Workers 独立保活
 

@@ -57,6 +57,7 @@ export interface AdminOverview {
   source: "server" | "browser"; server_release?: string; traffic_filter?: boolean; delivery_filter?: boolean;
   count: number; success_rate: number | null;
   errors: number; timeouts: number; cancelled: number;
+  fallbacks?: number;
   latency: Percentiles; ttft: Percentiles; ttft_known?: number; input_tokens: number | null; output_tokens: number | null; usage_known: number;
   operations: string[]; facets?: { operations: string[]; models: string[]; releases: string[] };
   trend: { time: string; operation: string; count: number; p95: number | null }[];

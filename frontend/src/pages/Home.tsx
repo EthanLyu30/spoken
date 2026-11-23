@@ -9,21 +9,26 @@ import { PipFeedbackBubble } from "../components/FeedbackEntry";
 import { quotes } from "../data/quotes";
 import { speakText } from "../lib/speech";
 
+function preloadPracticePrep() {
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+  if (connection?.saveData) return;
+  // Navigation has its own loading and retry UI if this optional preload fails.
+  void import("./PracticePrep").catch(() => undefined);
+}
+
 export default function Home() {
   const quote = quotes[Math.floor(Date.now() / 86400000) % quotes.length];
   useEffect(() => {
-    // Warm the practice route after the landing data has settled. The CTA
-    // also starts the import on hover/focus/touch so the first tap is cheap.
-    const preload = () => { void import("./Conversation"); };
+    // Warm the route the primary action opens after the first paint.
     const idleHost = window as Window & {
       requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
       cancelIdleCallback?: (handle: number) => void;
     };
     if (idleHost.requestIdleCallback) {
-      const handle = idleHost.requestIdleCallback(preload, { timeout: 5_000 });
+      const handle = idleHost.requestIdleCallback(preloadPracticePrep, { timeout: 5_000 });
       return () => idleHost.cancelIdleCallback?.(handle);
     }
-    const timer = window.setTimeout(preload, 2_500);
+    const timer = window.setTimeout(preloadPracticePrep, 2_500);
     return () => window.clearTimeout(timer);
   }, []);
   return (
@@ -39,9 +44,9 @@ export default function Home() {
               <Link
                 to="/prepare/cafe"
                 className="ui-button"
-                onPointerEnter={() => { void import("./Conversation"); }}
-                onFocus={() => { void import("./Conversation"); }}
-                onPointerDown={() => { void import("./Conversation"); }}
+                onPointerEnter={preloadPracticePrep}
+                onFocus={preloadPracticePrep}
+                onPointerDown={preloadPracticePrep}
               >
                 <Mic aria-hidden="true" />
                 开始语音练习
