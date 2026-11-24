@@ -625,7 +625,8 @@ export async function retryPendingOwnerWrites(): Promise<number> {
 
 function isOwnerWrite(path: string, init?: RequestInit): boolean {
   if (path.startsWith("/api/scene-cues/")) return init?.method === "PATCH";
-  return Boolean(init?.method && init.method !== "GET" && /^\/api\/(sessions|practice|words)(\/|$)/.test(path));
+  if (/^\/api\/words\/\d+\/translation$/.test(path)) return false;
+  return Boolean(init?.method && init.method !== "GET" && /^\/api\/(sessions|practice|words|practice-rewards)(\/|$)/.test(path));
 }
 
 /**
@@ -762,9 +763,9 @@ export async function request<T>(path: string, init?: RequestInit, timeoutMs = D
         // Retry in the guest space only while the initiating identity is still
         // current. A claim from another tab can arrive before this response.
         checkGeneration();
-        // Scene preparation shipped with claim-aware writes. Without a proven
-        // transition a rejected PATCH must not create a row for the old guest.
-        if (path.startsWith("/api/scene-cues/")) throw error;
+        // Without a proven transition, these writes must not be retried
+        // against a guest space that may have been reused since the claim.
+        if (path === "/api/words/topics" || path.startsWith("/api/scene-cues/") || path.startsWith("/api/practice-rewards/")) throw error;
         const headers = new Headers(requestInit.headers);
         headers.delete("X-Claim-Protocol");
         headers.delete("Authorization");
@@ -1485,6 +1486,8 @@ export interface Word {
   meaning: string;
   example: string;
   scenario_id: string;
+  topic?: string | null;
+  familiarity?: "familiar" | "uncertain" | "forgot" | null;
   kind: string; // "word" | "sentence"
   mastered: boolean;
   created_at: string;
@@ -1521,6 +1524,7 @@ export function postWord(
   payload: {
     text: string;
     scenario_id?: string;
+    topic?: string;
     meaning?: string;
     example?: string;
     kind?: string;
@@ -1541,10 +1545,13 @@ export function getDueWords(kind?: string, signal?: AbortSignal): Promise<Word[]
 }
 
 /** Record an SRS review: remembered pushes the next review out, forgot resets it. */
-export function reviewWord(id: number, remembered: boolean, signal?: AbortSignal, clientRequestId?: string): Promise<Word> {
+export type ReviewChoice = boolean | "uncertain";
+
+export function reviewWord(id: number, choice: ReviewChoice, signal?: AbortSignal, clientRequestId?: string): Promise<Word> {
   return request<Word>(`/api/words/${id}/review`, {
     method: "POST",
-    body: JSON.stringify({ remembered, client_request_id: clientRequestId }),
+    body: JSON.stringify({ remembered: choice === true, client_request_id: clientRequestId,
+      ...(choice === "uncertain" ? { uncertain: true } : {}) }),
     signal,
   });
 }
@@ -1555,6 +1562,25 @@ export function patchWord(id: number, mastered: boolean, signal?: AbortSignal): 
     body: JSON.stringify({ mastered }),
     signal,
   });
+}
+
+export function patchWordTopic(id: number, topic: string | null): Promise<Word> {
+  return request<Word>(`/api/words/${id}`, { method: "PATCH", body: JSON.stringify({ topic }) });
+}
+
+export function patchWordTopicGroup(source: string, target: string | null): Promise<Word[]> {
+  return request<Word[]>("/api/words/topics", { method: "PATCH", body: JSON.stringify({ source, target }) });
+}
+
+export interface TranslationGrade {
+  verdict: "equivalent" | "partial" | "different";
+  feedback: string;
+}
+
+export function checkWordTranslation(id: number, answer: string, signal: AbortSignal): Promise<TranslationGrade> {
+  return request<TranslationGrade>(`/api/words/${id}/translation`, {
+    method: "POST", body: JSON.stringify({ answer }), signal,
+  }, 15_000);
 }
 
 export async function deleteWord(id: number, signal?: AbortSignal): Promise<void> {

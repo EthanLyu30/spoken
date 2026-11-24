@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { beginOwnerTransition, completeOwnerTransition, flushPendingWrites, postSession, retryPendingOwnerWrites } from "./api";
+import { beginOwnerTransition, completeOwnerTransition, flushPendingWrites, patchWordTopicGroup, postSession, retryPendingOwnerWrites } from "./api";
 import { clearToken, setToken } from "./authToken";
 import { progressGeneration } from "./progressCache";
 import { changeSceneCues } from "./sceneCuesApi";
@@ -417,6 +417,15 @@ it("does not retry a claimed cue write before the other tab's identity change is
 
   await expect(changeSceneCues({ scenarioId: "airport" }, [], { action: "add_hint", sentence: "Is this my gate?" }))
     .rejects.toMatchObject({ status: 409 });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it("does not replay an unproven claimed group edit in the guest space", async () => {
+  localStorage.setItem("spoken-client-id", "claimed-whole-topic");
+  const fetcher = vi.fn(async () => Response.json({ detail: "guest_data_claimed" }, { status: 409 }));
+  vi.stubGlobal("fetch", fetcher);
+
+  await expect(patchWordTopicGroup("旧报价", "商务英语")).rejects.toMatchObject({ status: 409 });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 

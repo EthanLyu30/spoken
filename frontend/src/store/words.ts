@@ -2,16 +2,18 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { resilientStorage } from "../lib/resilientStorage";
 import { createPracticeId } from "../lib/sessionSave";
-import { deleteWord, getWords, patchWord, postWord, reviewWord, type Word } from "../lib/api";
+import { deleteWord, getWords, patchWord, patchWordTopic, patchWordTopicGroup, postWord, reviewWord, type ReviewChoice, type Word } from "../lib/api";
 let tempSeq = -1;
 let ownerGeneration = 0;
 let revision = 0;
 let refreshRevision = 0;
+let topicWrites: Promise<unknown> = Promise.resolve();
 interface CollectPayload {
   text: string;
   meaning?: string;
   example?: string;
   scenario_id?: string;
+  topic?: string;
   kind?: string;
 }
 interface CollectionIntent {
@@ -34,7 +36,7 @@ const mastery = new Map<number, {
 }>();
 const reviews = new Map<number, {
   row: Word;
-  remembered: boolean;
+  remembered: ReviewChoice;
   key: string;
   pending?: Promise<void>;
 }>();
@@ -65,6 +67,14 @@ function enqueue<T>(id: number, generation: number, action: () => Promise<T>): P
   }).catch(() => undefined);
   return next;
 }
+function enqueueTopic<T>(generation: number, action: () => Promise<T>): Promise<T> {
+  const operation = topicWrites.catch(() => undefined).then(() => {
+    if (generation !== ownerGeneration) throw new DOMException("Owner changed", "AbortError");
+    return action();
+  });
+  topicWrites = operation;
+  return operation;
+}
 interface WordsState {
   words: Word[];
   fetchedOnce: boolean;
@@ -75,7 +85,9 @@ interface WordsState {
   collect: (payload: CollectPayload) => void;
   remove: (id: number) => void;
   toggleMaster: (id: number) => void;
-  review: (id: number, remembered: boolean) => Promise<void>;
+  review: (id: number, remembered: ReviewChoice) => Promise<void>;
+  setTopic: (id: number, topic: string | null) => Promise<void>;
+  editTopic: (source: string, target: string | null) => Promise<number>;
   reset: () => void;
 }
 export const useWords = create<WordsState>()(persist((set, get) => {
@@ -175,7 +187,7 @@ export const useWords = create<WordsState>()(persist((set, get) => {
         replace(text, existing.row);
         return;
       }
-      const row: Word = { id: tempSeq--, text, meaning: payload.meaning ?? "", example: payload.example ?? "", scenario_id: payload.scenario_id ?? "", kind: payload.kind ?? "word", mastered: false, created_at: new Date().toISOString() };
+      const row: Word = { id: tempSeq--, text, meaning: payload.meaning ?? "", example: payload.example ?? "", scenario_id: payload.scenario_id ?? "", topic: payload.topic, kind: payload.kind ?? "word", mastered: false, created_at: new Date().toISOString() };
       const intent = { desired: true, row, payload, running: false };
       collections.set(text, intent);
       replace(text, row);
@@ -229,6 +241,36 @@ export const useWords = create<WordsState>()(persist((set, get) => {
         }
       });
     },
+    setTopic: async (id, topic) => {
+      const target = get().words.find(w => w.id === id);
+      if (!target || id < 0) throw new Error("请先保存表达。");
+      const generation = ownerGeneration;
+      mutation(target.text, 1);
+      try {
+        await enqueueTopic(generation, async () => {
+          if (!sameWord(target, get().words.find(w => w.id === id))) throw new DOMException("Word changed", "AbortError");
+          const row = await patchWordTopic(id, topic);
+          if (generation === ownerGeneration) set(s => ({ words: s.words.map(w => sameWord(target, w) ? { ...w, topic: row.topic } : w) }));
+        });
+      } finally {
+        if (generation === ownerGeneration) mutation(target.text, -1);
+      }
+    },
+    editTopic: (source, target) => {
+      const generation = ownerGeneration;
+      return enqueueTopic(generation, async () => {
+        const updated = await patchWordTopicGroup(source, target);
+        if (generation !== ownerGeneration) throw new DOMException("Owner changed", "AbortError");
+        const changed = new Map(updated.map(word => [word.id, word]));
+        for (const word of updated) mutation(word.text, 0);
+        set(s => ({ words: s.words.map(word => {
+          const row = changed.get(word.id);
+          return row && sameWord(word, row) ? { ...word, topic: row.topic } : word;
+        }) }));
+        if (!updated.length) await get().refresh();
+        return updated.length;
+      });
+    },
     review: async (id, remembered) => {
       if (id < 0)
         throw new Error("请等待单词保存后再复习。");
@@ -254,9 +296,9 @@ export const useWords = create<WordsState>()(persist((set, get) => {
       }).then(row => {
         if (generation !== ownerGeneration || reviews.get(id) !== attempt || !sameWord(target, get().words.find(w => w.id === id)))
           throw new DOMException("Owner changed", "AbortError");
-        // A later optimistic mastery choice still owns that field.
-        const desired = get().words.find(w => w.id === id)?.mastered;
-        set(s => ({ words: s.words.map(w => w.id === id ? { ...row, mastered: desired ?? row.mastered } : w) }));
+        set(s => ({ words: s.words.map(w => w.id === id ? {
+          ...w, box: row.box, due_at: row.due_at, last_reviewed: row.last_reviewed, familiarity: row.familiarity,
+        } : w) }));
         if (reviews.get(id) === attempt) reviews.delete(id);
       }).finally(() => {
         if (generation === ownerGeneration) {
@@ -272,6 +314,7 @@ export const useWords = create<WordsState>()(persist((set, get) => {
       collections.clear();
       mutations.clear();
       queues.clear();
+      topicWrites = Promise.resolve();
       mastery.clear();
       reviews.clear();
       set({ words: [], fetchedOnce: false, refreshing: false, error: false });

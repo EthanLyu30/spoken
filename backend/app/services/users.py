@@ -8,7 +8,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models.practice import PracticeRecord
-from app.models.progress import GuestClaim
+from app.models.progress import GuestClaim, RewardEntry
 from app.models.scene_cues import ScenePreparation
 from app.models.session import PracticeSession
 from app.models.user import User
@@ -16,7 +16,7 @@ from app.models.word import WordEntry
 from app.services import progress, request_receipts
 
 # Every owner-scoped table keyed by client_id; claiming rewrites the owner.
-_OWNED = (WordEntry, PracticeSession, PracticeRecord, ScenePreparation)
+_OWNED = (WordEntry, PracticeSession, PracticeRecord, ScenePreparation, RewardEntry)
 
 
 class GuestAlreadyClaimed(Exception):

@@ -19,10 +19,12 @@ class WordEntry(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     client_id: Mapped[str] = mapped_column(String(64), default="anon", index=True)
-    text: Mapped[str] = mapped_column(String(128), index=True)
+    text: Mapped[str] = mapped_column(String(600), index=True)
     meaning: Mapped[str] = mapped_column(Text, default="")
     example: Mapped[str] = mapped_column(Text, default="")
     scenario_id: Mapped[str] = mapped_column(String(64), default="")
+    topic: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    familiarity: Mapped[str | None] = mapped_column(String(16), nullable=True)
     kind: Mapped[str] = mapped_column(String(16), default="word", index=True)  # word | phrase | sentence
     mastered: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)

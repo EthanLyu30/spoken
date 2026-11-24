@@ -23,7 +23,7 @@ class LearningEvent(Base):
     scenario_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     kind: Mapped[str | None] = mapped_column(String(24), nullable=True)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    word_text: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    word_text: Mapped[str | None] = mapped_column(String(600), nullable=True)
 
 
 class EarnedBadge(Base):
@@ -56,3 +56,11 @@ class GuestClaim(Base):
 class ProgressMigration(Base):
     __tablename__ = "progress_migrations"
     version: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+
+class RewardEntry(Base):
+    __tablename__ = "practice_rewards"
+
+    client_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    reward_key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    coins: Mapped[int] = mapped_column(Integer)

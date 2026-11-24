@@ -24,6 +24,8 @@ from app.models.progress import EarnedBadge, LearningEvent, ProgressMigration, P
 from app.models.session import PracticeSession
 from app.models.word import WordEntry
 
+DAILY_PRACTICE_GOAL = 3
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -235,7 +237,7 @@ def _stats_payload(activity: ActivitySummary, snapshot: ProgressSnapshot,
     return {
         "streak_days": streak,
         "today_count": activity.today_count,
-        "today_goal": 3,
+        "today_goal": DAILY_PRACTICE_GOAL,
         "level": level,
         "xp": xp_total % 250,
         "xp_to_next": 250,

@@ -103,6 +103,23 @@ def test_saving_a_hint_keeps_its_meaning_and_never_overwrites_an_edited_meaning(
         assert got["meaning"] == "询问能否换冰饮。"
 
 
+def test_word_bag_shows_saved_sentences_by_scene_for_the_current_owner():
+    owner = guest()
+    with TestClient(app) as client:
+        sentence = "Could I have it iced?"
+        patch(client, owner, "add_hint", sentence=sentence, meaning="可以做成冰的吗？")
+        patch(client, owner, "add_hint", url="/api/scene-cues/custom", custom=ROOM, sentence="Can I check in early?")
+        patch(client, guest(), "add_hint", sentence="Foreign sentence.")
+        response = client.get("/api/scene-cues", headers=owner)
+        assert response.status_code == 200 and "no-store" in response.headers["cache-control"]
+        collections = {group["key"]: group for group in response.json()}
+        assert [cue["sentence"] for cue in collections["cafe"]["sentences"]] == [sentence]
+        custom = next(group for key, group in collections.items() if key.startswith("custom-"))
+        assert custom["title"] == "订房"
+        assert [cue["sentence"] for cue in custom["sentences"]] == ["Can I check in early?"]
+        assert client.get("/api/scene-cues", headers=guest()).json() == []
+
+
 def test_sign_up_claim_account_devices_export_and_deletion_keep_owner_boundaries(monkeypatch):
     monkeypatch.setenv("GUEST_CLAIM_PROTOCOL", "1")
     owner = guest()

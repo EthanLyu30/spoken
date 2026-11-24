@@ -18,7 +18,7 @@ from app.core.observability import TelemetryMiddleware
 from app.services.telemetry import TelemetrySink, RetentionWorker, configured_bootstrap_admin
 from app.services.feedback_notifications import recover_notifications
 from app.services.deepseek import DeepSeekClient, create_http_client
-from app.api import account, admin, product_feedback, telemetry
+from app.api import account, admin, product_feedback, rewards, telemetry
 from app.api import (
     asr,
     auth,
@@ -204,6 +204,7 @@ app.include_router(asr.router, prefix="/api")
 app.include_router(pronunciation.router, prefix="/api")
 app.include_router(hint.router, prefix="/api")
 app.include_router(words.router, prefix="/api")
+app.include_router(rewards.router, prefix="/api")
 app.include_router(daily.router, prefix="/api")
 app.include_router(custom.router, prefix="/api")
 app.include_router(interview.router, prefix="/api")

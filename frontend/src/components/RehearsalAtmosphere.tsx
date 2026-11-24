@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import type { RehearsalAir } from "../data/rehearsalScenes";
 
 const particleLight: Record<RehearsalAir, string> = {
-  cafe: "255,244,198", daylight: "255,245,213", sky: "241,251,255", leaves: "211,184,93",
+  cafe: "255,244,198", "cafe-rain": "224,242,251", daylight: "255,245,213", sky: "241,251,255", leaves: "211,184,93",
   lamplight: "255,218,142", screen: "249,247,235", water: "218,243,255",
 };
 
@@ -46,7 +46,31 @@ export function RehearsalAtmosphere({ still, effect }: { still: boolean; effect:
     function draw() {
       if (!ctx || !width || !height) return;
       ctx.clearRect(0, 0, width, height);
-      if (effect === "cafe") drawSteam();
+      if (effect === "cafe" || effect === "cafe-rain") drawSteam();
+      if (effect === "cafe-rain") {
+        const rainTime = still ? .32 : time;
+        ctx.lineCap = "round";
+        for (let i = 0; i < 46; i++) {
+          const depth = (i * .381966) % 1;
+          const phase = (i * .618034 + rainTime * (.48 + depth * .38)) % 1;
+          const x = width * (.04 + ((i * .271828) % 1) * .89 + phase * .048);
+          const y = height * (.02 + .70 * phase);
+          const length = height * (.018 + depth * .044);
+          ctx.lineWidth = Math.max(.55, width * (.001 + depth * .0014));
+          ctx.strokeStyle = `rgba(${particleLight[effect]},${(.23 + depth * .32) * Math.sin(phase * Math.PI)})`;
+          ctx.beginPath();
+          ctx.moveTo(x, y - length);
+          ctx.lineTo(x + length * .19, y);
+          ctx.stroke();
+          if (phase > .88) {
+            const radius = width * (.003 + (phase - .88) * .065);
+            ctx.beginPath();
+            ctx.ellipse(x, height * (.69 + depth * .043), radius, radius * .23, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        }
+        return;
+      }
       if (still) return;
       if (effect === "water" && backdrop && stageElement) {
         // Keep the glints on the water even when the atlas is cropped or panned.

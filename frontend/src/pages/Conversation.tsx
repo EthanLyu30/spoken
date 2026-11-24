@@ -34,6 +34,7 @@ import {
 import { createPracticeId, persistSessionOnce, unscoredSession } from "../lib/sessionSave";
 import { correctionDrills, correctionKey, includeMarkedCorrections, isCorrectionCategory } from "../lib/practiceCorrections";
 import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
+import { playCafeChime, useRewardEquipped } from "../lib/rewards";
 import {
   speakText,
   prepareSpeech,
@@ -83,6 +84,7 @@ function subscribeLayout(update: () => void) {
 
 export default function Conversation() {
   const generation = useRef(getAuthGeneration()).current;
+  const chime = useRewardEquipped("cafe-chime");
   const { scenarioId } = useParams();
   const [search] = useSearchParams();
   const focusId = search.get("focus");
@@ -184,12 +186,13 @@ export default function Conversation() {
   }, [turnMeta]);
 
   function finish() {
-    if (!id || generation !== getAuthGeneration()) return;
+    if (!id || goingToReportRef.current || generation !== getAuthGeneration()) return;
     goingToReportRef.current = true; // the report page will save this session
     callRef.current?.end();
     requestControllerRef.current?.abort();
     callQueueRef.current?.stop();
     speakingRef.current?.stop();
+    if (chime && !muted && messages.some(message => message.role === "user")) void playCafeChime();
     setSession(id, messages, practiceIdRef.current, marksRef.current, customScene);
     navigate(`/report/${practiceIdRef.current}`);
   }

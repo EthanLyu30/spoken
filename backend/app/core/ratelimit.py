@@ -56,6 +56,8 @@ def limit_for(path: str) -> tuple[int, int] | None:
     """Return (requests, window seconds) for a costly path."""
     if path == "/api/progress/coaching/plan":
         return 6, 60
+    if path.startswith("/api/words/") and path.endswith("/translation"):
+        return 30, 60
     if path.startswith(_AUTH_PREFIXES):
         return 20, 60
     if path.startswith(_VOICE_PREFIXES):

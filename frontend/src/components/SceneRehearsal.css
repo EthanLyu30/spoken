@@ -32,6 +32,7 @@
   transform: scale(1.055) translate(var(--pan-x, 0px), var(--pan-y, 0px));
   transition: transform .8s cubic-bezier(.2,.8,.2,1);
 }
+.rehearsal-stage[data-weather="rain"] .rehearsal-backdrop { filter: saturate(.73) brightness(.89) contrast(.97); }
 .rehearsal-atlas {
   inset: auto auto 0 -4%; width: 108%; height: auto; aspect-ratio: 3 / 2;
   background-size: 300% 300%; background-repeat: no-repeat;
@@ -103,9 +104,10 @@ button.rehearsal-motion:hover { color: var(--coral-deep); }
 .rehearsal-menu ol > li[data-selected="true"]::before { transform: scaleY(1); }
 .rehearsal-menu-line { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; gap: 3px 5px; }
 .rehearsal-order { display: flex; align-items: baseline; gap: 2px 9px; flex-wrap: wrap; text-align: left; justify-self: start; }
-.rehearsal-order strong { font-size: clamp(18px, 1.55vw, 23px); font-weight: 850; line-height: 1.18; }
-.rehearsal-order span, .rehearsal-history-hint { font-size: 12px; line-height: 1.18; color: var(--muted); font-weight: 550; }
-.rehearsal-menu-line p { grid-column: 1; font: clamp(17px, 1.62vw, 23px)/1.35 Georgia, serif; overflow-wrap: anywhere; }
+.rehearsal-order strong, .rehearsal-menu-line p { font-family: inherit; font-size: clamp(17px, 1.62vw, 23px); line-height: 1.35; overflow-wrap: anywhere; }
+.rehearsal-order strong { font-weight: 800; }
+.rehearsal-order > span, .rehearsal-history-hint { font-size: 12px; line-height: 1.18; color: var(--muted); font-weight: 550; }
+.rehearsal-menu-line p { grid-column: 1; }
 .rehearsal-speaker { grid-column: 2; grid-row: 1 / 3; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; color: var(--coral-deep); }
 .rehearsal-speaker:hover, .rehearsal-menu li[data-phase] .rehearsal-speaker { background: var(--surface-2); }
 .rehearsal-meter { display: flex; align-items: center; gap: 3px; }
@@ -155,8 +157,7 @@ button.rehearsal-motion:hover { color: var(--coral-deep); }
   .rehearsal-pip { width: 25%; }
   .rehearsal-caption { font-size: 12px; gap: 5px; margin-top: 6px; }
   .prep-rehearsal .rehearsal-menu h2 { font-size: 23px; }
-  .rehearsal-order strong { font-size: 19px; }
-  .rehearsal-menu-line p { font-size: 18px; }
+  .rehearsal-order strong, .rehearsal-menu-line p { font-size: 19px; }
   .rehearsal-menu ol > li { padding-block: 10px; }
   .rehearsal-start { margin-top: 14px; }
   .rehearsal-caption .rehearsal-mobile-line { display: inline-flex; font: 1rem/1.3 Georgia, serif; color: var(--ink); }
@@ -164,5 +165,5 @@ button.rehearsal-motion:hover { color: var(--coral-deep); }
 }
 @media (max-width: 370px) {
   .app-route > .prep-page.prep-rehearsal > .prep-shell { padding-inline: 14px; }
-  .rehearsal-order span { font-size: 11px; }
+  .rehearsal-order > span { font-size: 11px; }
 }

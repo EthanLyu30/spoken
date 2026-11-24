@@ -13,11 +13,14 @@ import {
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../store/auth";
 import { Wordmark } from "./Wordmark";
+import { RewardAvatar } from "./RewardAvatar";
+import { useRewardEquipped } from "../lib/rewards";
 
 export function AppHeader() {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const user = useAuth((s) => s.user);
+  const withScarf = useRewardEquipped("pip-scarf");
   const { pathname } = useLocation();
   return (
     <header className="app-header print:hidden">
@@ -92,7 +95,7 @@ export function AppHeader() {
           {user?.is_admin && <NavLink to="/admin"><Activity />运行后台</NavLink>}
         </nav>
         <Link to="/me" className="account-entry" aria-label="个人中心">
-          {user?.avatar_url ? (
+          {withScarf ? <RewardAvatar /> : user?.avatar_url ? (
             <img src={user.avatar_url} alt="" />
           ) : (
             <span className="account-avatar">

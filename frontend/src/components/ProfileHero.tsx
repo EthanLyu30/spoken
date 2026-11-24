@@ -6,6 +6,8 @@ import { AuthModal } from "./AuthModal";
 import { useAuth } from "../store/auth";
 import { fileToAvatarDataUrl } from "../lib/image";
 import { getAuthGeneration } from "../lib/authToken";
+import { useRewardEquipped } from "../lib/rewards";
+import { RewardAvatar } from "./RewardAvatar";
 
 /**
  * The "我的小屋" identity card with the account woven in:
@@ -26,6 +28,7 @@ export function ProfileHero({
 }) {
   const generation = useRef(getAuthGeneration()).current;
   const user = useAuth((s) => s.user);
+  const withScarf = useRewardEquipped("pip-scarf");
   const logout = useAuth((s) => s.logout);
   const updateProfile = useAuth((s) => s.updateProfile);
 
@@ -77,7 +80,7 @@ export function ProfileHero({
             aria-label="更换头像"
             className="relative block rounded-full transition-transform hover:-translate-y-0.5 disabled:opacity-60"
           >
-            {user.avatar_url ? (
+            {withScarf ? <RewardAvatar size={112} /> : user.avatar_url ? (
               <img
                 src={user.avatar_url}
                 alt="头像"
@@ -90,7 +93,7 @@ export function ProfileHero({
               <Camera className="h-4 w-4" />
             </span>
           </button>
-        ) : (
+        ) : withScarf ? <RewardAvatar size={112} /> : (
           <Buddy mood="happy" size={120} />
         )}
         <input

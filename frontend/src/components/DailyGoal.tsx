@@ -2,6 +2,7 @@ import { ArrowRight, Target } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useProfileData } from "../hooks/useProfileData";
 import { useAuth } from "../store/auth";
+import { PracticeRewards } from "./PracticeRewards";
 
 export function DailyGoal() {
   const owner = useAuth((s) => s.user?.id ?? null);
@@ -52,6 +53,7 @@ export function DailyGoal() {
         查看学习进度
         <ArrowRight />
       </Link>
+      <PracticeRewards practiceCount={stats?.today_count} />
     </aside>
   );
 }

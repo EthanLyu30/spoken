@@ -57,6 +57,8 @@ def _migrate_sqlite() -> None:
             "due_at": "ALTER TABLE words ADD COLUMN due_at DATETIME",
             "last_reviewed": "ALTER TABLE words ADD COLUMN last_reviewed DATETIME",
             "client_id": f"ALTER TABLE words {_CID}",
+            "topic": "ALTER TABLE words ADD COLUMN topic VARCHAR(48)",
+            "familiarity": "ALTER TABLE words ADD COLUMN familiarity VARCHAR(16)",
         },
         "sessions": {"client_id": f"ALTER TABLE sessions {_CID}"},
         "practice_records": {"client_id": f"ALTER TABLE practice_records {_CID}"},
@@ -105,6 +107,7 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _migrate_sqlite()
+    _migrate_word_topics()
     _migrate_users()
     _migrate_session_identity()
     _migrate_telemetry_errors()
@@ -112,6 +115,24 @@ def init_db() -> None:
     from app.services.progress import backfill_progress
 
     backfill_progress(engine)
+
+
+def _migrate_word_topics() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    from sqlalchemy import inspect
+
+    with engine.begin() as conn:
+        words = {col["name"]: col["type"] for col in inspect(conn).get_columns("words")}
+        events = {col["name"]: col["type"] for col in inspect(conn).get_columns("learning_events")}
+        if "topic" not in words:
+            conn.exec_driver_sql("ALTER TABLE words ADD COLUMN IF NOT EXISTS topic VARCHAR(48)")
+        if "familiarity" not in words:
+            conn.exec_driver_sql("ALTER TABLE words ADD COLUMN IF NOT EXISTS familiarity VARCHAR(16)")
+        if getattr(words["text"], "length", None) == 128:
+            conn.exec_driver_sql("ALTER TABLE words ALTER COLUMN text TYPE VARCHAR(600)")
+        if getattr(events["word_text"], "length", None) == 128:
+            conn.exec_driver_sql("ALTER TABLE learning_events ALTER COLUMN word_text TYPE VARCHAR(600)")
 
 
 def _migrate_feedback_payouts() -> None:

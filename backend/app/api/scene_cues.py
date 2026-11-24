@@ -3,6 +3,7 @@
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_client_id, get_optional_client_id
@@ -43,6 +44,19 @@ def read(scenario_id: str, response: Response, owner: str = Depends(_reader),
          db: Session = Depends(get_db)) -> SceneCueSnapshot:
     key, _ = _scene(scenario_id)
     return _snapshot(db.get(ScenePreparation, (owner, key)), response)
+
+
+@router.get("")
+def saved_sentences(response: Response, owner: str = Depends(_reader), db: Session = Depends(get_db)):
+    response.headers["Cache-Control"] = "private, no-store"
+    result = []
+    for row in db.scalars(select(ScenePreparation).where(ScenePreparation.client_id == owner)
+                          .order_by(ScenePreparation.title, ScenePreparation.scene_key)):
+        sentences = [cue for cue in row.cues if not cue["id"].startswith("default-")
+                     and cue["kind"] == "pattern" and _sentence_key(cue["keyword"]) == _sentence_key(cue["sentence"])]
+        if sentences:
+            result.append({"key": row.scene_key, "title": row.title, "sentences": sentences})
+    return result
 
 
 @router.post("/custom/lookup")

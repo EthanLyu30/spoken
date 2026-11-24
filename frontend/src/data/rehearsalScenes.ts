@@ -10,7 +10,7 @@ import work from "../assets/prep/work-scenes.webp";
 import customAtlas from "../assets/prep/custom-scenes.webp";
 import type { CustomScene } from "../lib/api";
 
-export type RehearsalAir = "cafe" | "daylight" | "sky" | "leaves" | "lamplight" | "screen" | "water";
+export type RehearsalAir = "cafe" | "cafe-rain" | "daylight" | "sky" | "leaves" | "lamplight" | "screen" | "water";
 
 interface RehearsalScene {
   atlas: string;

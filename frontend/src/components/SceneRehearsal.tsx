@@ -12,6 +12,7 @@ import { usePracticePlayback } from "../hooks/usePracticePlayback";
 import type { useSceneCues } from "../hooks/useSceneCues";
 import type { CoachingExample, CustomScene } from "../lib/api";
 import { replayHref, replayReference } from "../lib/practiceCorrections";
+import { useRewardEquipped } from "../lib/rewards";
 import { InteractiveEnglishText } from "./dictionary/InteractiveEnglishText";
 import { CoachingExamples } from "./PersonalCoaching";
 import { Wordmark } from "./Wordmark";
@@ -74,6 +75,7 @@ export function SceneRehearsal({ scenarioId, customScene, title, goal, icon: Ico
   const audio = usePracticePlayback(scenarioId);
   const theme = rehearsalScene(scenarioId, customScene);
   const isCafe = scenarioId === "cafe";
+  const rainy = useRewardEquipped("cafe-rain", isCafe);
   const custom = scenarioId === "custom";
   const usesDefaultBackdrop = custom && theme === rehearsalScene("custom");
   const defaults = practiceCues(scenarioId);
@@ -134,7 +136,7 @@ export function SceneRehearsal({ scenarioId, customScene, title, goal, icon: Ico
       {children}
       <div className="rehearsal-spread" data-still={still}>
         <figure className="rehearsal-figure">
-          <div className="rehearsal-stage" onPointerMove={pan} onPointerLeave={({ currentTarget }) => {
+          <div className="rehearsal-stage" data-weather={rainy ? "rain" : undefined} onPointerMove={pan} onPointerLeave={({ currentTarget }) => {
             currentTarget.style.removeProperty("--pan-x"); currentTarget.style.removeProperty("--pan-y");
           }}>
             {isCafe ? <img className="rehearsal-backdrop" src={counter} alt="" draggable={false} />
@@ -163,9 +165,10 @@ export function SceneRehearsal({ scenarioId, customScene, title, goal, icon: Ico
                 <CueIcon size={24} aria-hidden="true" />
               </span>
             </button>)}
-            <RehearsalAtmosphere still={still} effect={isCafe ? "cafe" : theme.air} />
+            <RehearsalAtmosphere still={still} effect={rainy ? "cafe-rain" : isCafe ? "cafe" : theme.air} />
           </div>
           <figcaption className="rehearsal-caption">
+            {rainy && <span>雨天咖啡馆</span>}
             {usesDefaultBackdrop && <span>通用背景</span>}
             {hasHotspots && <span className="rehearsal-instruction" data-chosen={choice.takes > 0}><Hand size={16} />
               {isCafe ? "点柜台上的物品，听对应的例句。" : "点场景里的图标，听对应的例句。"}</span>}
@@ -183,7 +186,7 @@ export function SceneRehearsal({ scenarioId, customScene, title, goal, icon: Ico
             return <li key={id} data-selected={active} data-phase={phase}>
               <div className="rehearsal-menu-line">
                 {sentence === keyword ? <div className="rehearsal-order">
-                  <strong lang="en"><InteractiveEnglishText text={keyword} /></strong>{meaning && <span>{meaning}</span>}
+                  <p lang="en"><InteractiveEnglishText text={keyword} /></p>{meaning && <span>{meaning}</span>}
                 </div> : <>
                   <button type="button" className="rehearsal-order" aria-pressed={active} onClick={() => select(index)}>
                     <strong lang="en">{keyword}</strong>{meaning && <span>{meaning}</span>}

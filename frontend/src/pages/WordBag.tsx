@@ -3,20 +3,25 @@ import { Link } from "react-router-dom";
 import { BookOpen, Check, Plus, Trash2, Volume2 } from "lucide-react";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
-import { Button } from "../components/ui/Button";
-import { type Word } from "../lib/api";
+import type { Word } from "../lib/api";
 import { useWords } from "../store/words";
 import { speakText } from "../lib/speech";
 import { getScenario } from "../data/scenarios";
 import { themeFor } from "../lib/theme";
 import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
+import { familiarityOf, reviewDueAt, reviewPrompt, type ReviewMode } from "../lib/wordReview";
+import { SceneBookmarks } from "../components/SceneBookmarks";
+import { WordReviewDeck, ReviewDue } from "../components/WordReviewDeck";
+import "./WordBagStudy.css";
+
+const familiarityLabels = { new: "未复习", familiar: "熟悉", uncertain: "模糊", forgot: "遗忘" };
+const topicOf = (word: Word) => word.topic || getScenario(word.scenario_id)?.titleZh || (word.scenario_id === "custom" ? "自定义场景" : "未分类");
 
 /** A word is due for review when it isn't mastered and its due date has passed. */
 function isDue(w: Word): boolean {
   if (w.id < 0 || w.mastered) return false;
-  if (!w.due_at) return true;
-  const due = new Date(w.due_at.endsWith("Z") ? w.due_at : `${w.due_at}Z`);
-  return Number.isNaN(due.getTime()) || due.getTime() <= Date.now();
+  const due = reviewDueAt(w.due_at);
+  return !due || due.getTime() <= Date.now();
 }
 
 export default function WordBag() {
@@ -32,9 +37,13 @@ export default function WordBag() {
   const [open, setOpen] = useState<number | null>(null);
   const [review, setReview] = useState(false);
   const [reviewKey, setReviewKey] = useState(0);
-  const [deck, setDeck] = useState<Word[]>([]); // snapshot for the review session
+  const [deck, setDeck] = useState<{ words: Word[]; mode: ReviewMode }>({ words: [], mode: "flip" });
   const [tab, setTab] = useState<"word" | "sentence">("word");
   const [newWord, setNewWord] = useState("");
+  const [topic, setTopic] = useState("");
+  const [familiarity, setFamiliarity] = useState("");
+  const [preferredMode, setPreferredMode] = useState<ReviewMode | null>(null);
+  const [topicNotice, setTopicNotice] = useState("");
   const lastRefreshRef = useRef(Date.now());
 
   useEffect(() => {
@@ -55,12 +64,14 @@ export default function WordBag() {
       document.removeEventListener("visibilitychange", revalidate);
     };
   }, []);
-  useEffect(() => subscribeAuthGeneration(() => setReview(false)), []);
+  useEffect(() => subscribeAuthGeneration(() => {
+    setReview(false); setOpen(null); setTopic(""); setFamiliarity(""); setTopicNotice(""); setPreferredMode(null);
+  }), []);
 
   function addWord() {
     const text = newWord.trim();
     if (!text) return;
-    collect({ text, kind: "word" }); // optimistic —释义/例句 fill in shortly
+    collect({ text, kind: "word", ...(topic && topic !== "未分类" ? { topic } : {}) });
     setNewWord("");
     setTab("word");
   }
@@ -74,14 +85,22 @@ export default function WordBag() {
   const kindOf = (w: Word) => (w.kind === "sentence" ? "sentence" : "word");
   const wordCount = all.filter((w) => kindOf(w) === "word").length;
   const sentCount = all.filter((w) => kindOf(w) === "sentence").length;
-  const active = all.filter((w) => kindOf(w) === tab);
-  const dueCount = active.filter(isDue).length;
+  const topics = [...new Set(all.map(topicOf))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  const active = all.filter(w => kindOf(w) === tab && (!topic || topicOf(w) === topic)
+    && (!familiarity || familiarityOf(w) === familiarity));
+  const eligible = active.filter(w => w.id > 0 && (!w.mastered || familiarity === "familiar"));
+  const dueEligible = eligible.filter(isDue);
+  const modeCandidates = dueEligible.length ? dueEligible : eligible;
+  const mode = preferredMode ?? (["translate", "cloze"] as const).find(option =>
+    modeCandidates.some(word => reviewPrompt(word, option))) ?? "flip";
+  const reviewable = eligible.filter(w => mode === "flip" || reviewPrompt(w, mode));
+  const dueCount = reviewable.filter(isDue).length;
 
   function startReview() {
-    const dueNow = active.filter(isDue);
-    const pool = dueNow.length ? dueNow : active.filter((w) => w.id > 0 && !w.mastered);
+    const dueNow = reviewable.filter(isDue);
+    const pool = dueNow.length ? dueNow : reviewable;
     if (!pool.length) return;
-    setDeck(pool);
+    setDeck({ words: pool, mode });
     setReviewKey((key) => key + 1);
     setReview(true);
   }
@@ -99,7 +118,7 @@ export default function WordBag() {
             type="button"
             className="ui-button"
             onClick={() => (review ? setReview(false) : startReview())}
-            disabled={!active.some((w) => w.id > 0 && !w.mastered)}
+            disabled={!review && !reviewable.length}
           >
             <BookOpen />
             {review ? "列表" : dueCount > 0 ? `复习 ${dueCount}` : "开始复习"}
@@ -124,6 +143,32 @@ export default function WordBag() {
                 </button>
               ))}
             </div>
+            <div className="wordbag-study-filters">
+              <label>话题<select value={topic} onChange={event => { setTopic(event.target.value); setReview(false); setOpen(null); setTopicNotice(""); }}>
+                <option value="">全部话题</option>
+                {topic && !topics.includes(topic) && <option value={topic}>{topic}</option>}
+                {topics.map(name => <option key={name} value={name}>{name}</option>)}
+              </select></label>
+              <label>熟悉度<select value={familiarity} onChange={event => { setFamiliarity(event.target.value); setReview(false); }}>
+                <option value="">全部熟悉度</option>
+                {Object.entries(familiarityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select></label>
+              <label>复习方式<select value={mode} onChange={event => {
+                setPreferredMode(event.target.value as ReviewMode); setReview(false);
+              }}>
+                <option value="flip">翻卡回忆</option>
+                <option value="translate">看中文写英文</option>
+                <option value="cloze">关键词填空</option>
+              </select></label>
+              {mode !== "flip" && eligible.length > reviewable.length && <p>本组有 {eligible.length - reviewable.length} 条缺少可用题面，可用翻卡复习。</p>}
+            </div>
+            {!review && topic && topics.includes(topic) && <TopicGroupEditor key={topic} source={topic} topics={topics}
+              count={all.filter(word => word.id > 0 && topicOf(word) === topic).length} onSaved={(target, count) => {
+                setTopic(current => current === topic ? target ?? "" : current);
+                setTopicNotice(count ? `已更新 ${count} 条表达的话题。` : "已同步当前话题。");
+              }} />}
+            {topicNotice && <p className="wordbag-topic-notice" role="status">{topicNotice}</p>}
+            {!review && <SceneBookmarks />}
             {tab === "word" && (
               <div className="wordbag-add">
                 <input
@@ -175,15 +220,16 @@ export default function WordBag() {
             )}
             {hasCache &&
               (review ? (
-                <ReviewDeck
+                <WordReviewDeck
                   key={reviewKey}
-                  deck={deck}
+                  deck={deck.words}
+                  mode={deck.mode}
                   review={reviewWordId}
                   onDone={() => setReview(false)}
                 />
               ) : active.length === 0 ? (
                 <p className="wordbag-state">
-                  {tab === "word"
+                  {topic || familiarity ? "这个筛选下还没有收藏。" : tab === "word"
                     ? "还没有单词，试着加一个吧。"
                     : "还没有收藏句子，去每日金句找找灵感。"}
                 </p>
@@ -246,6 +292,10 @@ export default function WordBag() {
                                 {sc.titleZh}
                               </span>
                             )}
+                            <ReviewDue word={w} />
+                            <WordTopicEditor key={w.id} word={w} topics={topics} onChange={(next) => {
+                              if (topic && next !== topic) setTopic(next);
+                            }} />
                             <div className="mt-3 flex flex-wrap gap-2">
                               <button
                                 type="button"
@@ -281,20 +331,20 @@ export default function WordBag() {
           <aside className="wordbag-aside">
             <h2>今天，复习这一小组。</h2>
             <p>
-              当前分组有 <strong>{dueCount}</strong>{" "}
-              条到期表达。记得的稍后再见，忘记的很快再练。
+              当前方式有 <strong>{dueCount}</strong>{" "}
+              条到期表达。熟悉的隔久一点，模糊或遗忘的早点再练。
             </p>
             <button
               type="button"
               className="ui-button"
-              disabled={!active.some((w) => w.id > 0 && !w.mastered)}
+              disabled={!reviewable.length}
               onClick={startReview}
             >
               开始复习
             </button>
             <section>
               <h3>把表达真正用起来</h3>
-              <p>先想意思，再翻面看答案。下次对话时，试着用上一句。</p>
+              <p>先自己想或写出答案，再对照参考标记熟悉度。下次对话时，试着用上一句。</p>
               <Link to="/scenes" className="ui-link">
                 去场景里试试
               </Link>
@@ -307,147 +357,69 @@ export default function WordBag() {
   );
 }
 
-/** Spaced-repetition review: flip the card, then grade 记得 / 忘了. */
-function ReviewDeck({
-  deck,
-  review,
-  onDone,
-}: {
-  deck: Word[];
-  review: (id: number, remembered: boolean) => Promise<void>;
-  onDone: () => void;
-}) {
-  const [i, setI] = useState(0);
-  const [flipped, setFlipped] = useState(false);
-  const [stats, setStats] = useState({ know: 0, again: 0 });
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState(false);
-  const [failed, setFailed] = useState<{ id: number; remembered: boolean } | null>(null);
-  const choice = useRef<boolean | null>(null);
-  const locked = useRef(false);
-  const pending = useRef(0);
-  const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  // A new card re-opens the click guard; the previous save keeps running in
-  // the background and never blocks this card.
-  useEffect(() => { locked.current = false; }, [i]);
-  const w = deck[i];
-
-  if (!w) {
-    return (
-      <section className="card grid place-items-center gap-3 p-8 text-center">
-        <Buddy mood="cheer" size={120} />
-        <h3 className="font-display text-xl font-semibold text-ink">
-          复习完成！
-        </h3>
-        <p className="text-sm text-muted">
-          记得 {stats.know} · 待加强 {stats.again}
-        </p>
-        <p className="text-xs text-muted">
-          记得的词会过段时间再出现，忘了的很快会再考你。
-        </p>
-        {saveError && failed && (
-          <div role="alert" className="wordbag-save-error">
-            <span>有一条复习尚未确认保存。</span>
-            <Button onClick={() => void retryFailed()}>重试保存</Button>
-          </div>
-        )}
-        <Button onClick={onDone}>回到列表</Button>
-      </section>
-    );
-  }
-
-  function answer(remembered: boolean) {
-    if (locked.current || !w) return;
-    locked.current = true;
+function WordTopicEditor({ word, topics, onChange }: { word: Word; topics: string[]; onChange: (topic: string) => void }) {
+  const save = useWords(s => s.setTopic);
+  const [value, setValue] = useState<string>();
+  const [pending, setPending] = useState(false);
+  const [failed, setFailed] = useState(false);
+  return <form className="wordbag-topic-editor" onSubmit={async event => {
+    event.preventDefault();
+    if (pending || value === undefined) return;
+    setPending(true); setFailed(false);
     const generation = getAuthGeneration();
-    const target = w;
-    const selected = choice.current ?? remembered;
-    choice.current = selected;
-    // Advance immediately. The idempotent, owner-scoped review write continues
-    // in the background; a failure is surfaced with a retry that reuses the
-    // same receipt instead of trapping the learner on this card.
-    setStats((s) => (selected ? { ...s, know: s.know + 1 } : { ...s, again: s.again + 1 }));
-    setFlipped(false);
-    setI((x) => x + 1);
-    choice.current = null;
-    pending.current++;
-    setSaving(true);
-    const current = () => mounted.current && generation === getAuthGeneration();
-    void Promise.resolve(review(target.id, selected)).catch((error: unknown) => {
-      if (!current()) return;
-      // A previous deck may have left an ambiguous save. Recover its original
-      // choice before retrying the same receipt, rather than trapping retries.
-      const retryChoice = error && typeof error === "object" && "remembered" in error && typeof (error as { remembered?: unknown }).remembered === "boolean"
-        ? (error as { remembered: boolean }).remembered
-        : selected;
-      setFailed({ id: target.id, remembered: retryChoice });
-      setSaveError(true);
-    }).finally(() => {
-      if (!current()) return;
-      pending.current = Math.max(0, pending.current - 1);
-      if (pending.current === 0) setSaving(false);
-    });
-  }
-
-  async function retryFailed() {
-    if (!failed) return;
-    const target = failed;
-    setSaveError(false);
     try {
-      await review(target.id, target.remembered);
-      if (mounted.current) setFailed(null);
+      await save(word.id, value.trim() || null);
+      if (generation === getAuthGeneration()) { setValue(undefined); onChange(topicOf({ ...word, topic: value.trim() })); }
+    } catch { if (generation === getAuthGeneration()) setFailed(true); }
+    finally { if (generation === getAuthGeneration()) setPending(false); }
+  }}>
+    <label>话题名称<input list={`word-topics-${word.id}`} maxLength={48} value={value ?? word.topic ?? ""}
+      placeholder={topicOf({ ...word, topic: null })} onChange={e => setValue(e.target.value)} disabled={word.id < 1 || pending} /></label>
+    <datalist id={`word-topics-${word.id}`}>{topics.map(name => <option key={name} value={name} />)}</datalist>
+    <button type="submit" className="ui-secondary" disabled={word.id < 1 || pending || value === undefined}>保存话题</button>
+    <small>留空使用原场景分组</small>
+    {failed && <p role="alert">话题未保存，请重试。</p>}
+  </form>;
+}
+
+function TopicGroupEditor({ source, topics, count, onSaved }: {
+  source: string; topics: string[]; count: number; onSaved: (target: string | null, changed: number) => void;
+}) {
+  const edit = useWords(s => s.editTopic);
+  const [name, setName] = useState(source);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState(false);
+  const target = name.trim();
+  const merges = target !== source && topics.includes(target);
+
+  async function save(value: string | null) {
+    if (pending) return;
+    const generation = getAuthGeneration();
+    setPending(true);
+    setError(false);
+    try {
+      const changed = await edit(source, value);
+      if (generation === getAuthGeneration()) onSaved(value, changed);
     } catch {
-      if (mounted.current) setSaveError(true);
+      if (generation === getAuthGeneration()) setError(true);
+    } finally {
+      if (generation === getAuthGeneration()) setPending(false);
     }
   }
 
-  return (
-    <section className="card grid place-items-center gap-4 p-8 text-center">
-      <p className="text-xs font-bold uppercase tracking-wide text-muted">
-        {i + 1} / {deck.length}
-      </p>
-      <button
-        type="button"
-        onClick={() => setFlipped((f) => !f)}
-        className="grid min-h-[9rem] w-full place-items-center rounded-3xl bg-surface-2 px-6 py-8"
-      >
-        {!flipped ? (
-          <span className="font-display text-2xl font-bold text-ink">
-            {w.text}
-          </span>
-        ) : (
-          <div>
-            <p className="text-lg text-ink">{w.meaning || "（暂无释义）"}</p>
-            {w.example && (
-              <p className="mt-2 text-sm text-muted">{w.example}</p>
-            )}
-          </div>
-        )}
-      </button>
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => speakText(w.text)}
-          className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-ink"
-        >
-          <Volume2 className="h-3.5 w-3.5" /> 朗读
-        </button>
-        <span className="text-xs text-muted">点卡片翻面看释义</span>
-      </div>
-      <div className="flex gap-3">
-        <Button variant="soft" onClick={() => answer(false)}>
-          忘了
-        </Button>
-        <Button onClick={() => answer(true)}>记得 ✓</Button>
-      </div>
-      {saving && <p role="status">正在后台保存复习…</p>}
-      {saveError && failed && (
-        <div role="alert" className="wordbag-save-error">
-          <span>上次选择“{failed.remembered ? "记得" : "忘了"}”尚未确认保存。</span>
-          <Button onClick={() => void retryFailed()}>重试保存</Button>
-        </div>
-      )}
-    </section>
-  );
+  return <details className="wordbag-group-editor">
+    <summary>编辑整组话题 · {count} 条表达</summary>
+    <form className="wordbag-topic-editor" onSubmit={event => {
+      event.preventDefault();
+      if (target && target !== source) void save(target);
+    }}>
+      <label>整组话题名称<input value={name} list="wordbag-group-targets" maxLength={48} disabled={pending}
+        onChange={event => setName(event.target.value)} /></label>
+      <datalist id="wordbag-group-targets">{topics.filter(topic => topic !== source).map(topic => <option key={topic} value={topic} />)}</datalist>
+      <button type="submit" className="ui-secondary" disabled={pending || !target || target === source}>{merges ? "合并到已有话题" : "重命名整组"}</button>
+      <button type="button" className="ui-link" disabled={pending} onClick={() => void save(null)}>恢复按原场景归组</button>
+      <small>整组操作包含单词、短语和句子。</small>
+      {error && <p role="alert">话题更新失败，请重试。</p>}
+    </form>
+  </details>;
 }

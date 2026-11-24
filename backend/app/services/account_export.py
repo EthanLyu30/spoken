@@ -29,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.practice import PracticeRecord
-from app.models.progress import EarnedBadge, LearningEvent
+from app.models.progress import EarnedBadge, LearningEvent, RewardEntry
 from app.models.scene_cues import ScenePreparation
 from app.models.session import PracticeSession
 from app.models.user import User
@@ -54,6 +54,8 @@ def build_account_export(db: Session, user: User) -> dict:
         "sessions": _sessions(db, owner),
         "practice": _practice(db, owner),
         "words": _words(db, owner),
+        "practice_rewards": [dict(row) for row in db.execute(select(RewardEntry.reward_key, RewardEntry.coins)
+                             .where(RewardEntry.client_id == owner).order_by(RewardEntry.reward_key)).mappings()],
         "scene_cues": [
             {"scene_key": row.scene_key, "title": row.title, "cues": row.cues}
             for row in db.scalars(select(ScenePreparation).where(ScenePreparation.client_id == owner)
@@ -97,6 +99,8 @@ def _words(db: Session, owner: str) -> list[dict[str, Any]]:
             "meaning": word.meaning or "",
             "example": word.example or "",
             "scenario_id": word.scenario_id or "",
+            "topic": word.topic,
+            "familiarity": word.familiarity,
             "kind": word.kind,
             "mastered": bool(word.mastered),
             "created_at": _iso(word.created_at),

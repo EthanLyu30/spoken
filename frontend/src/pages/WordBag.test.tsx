@@ -57,6 +57,7 @@ it("reviews due words and keeps remember/forget and completion reachable", async
       <WordBag />
     </MemoryRouter>,
   );
+  await user.selectOptions(screen.getByLabelText("复习方式"), "flip");
   await user.click(screen.getByRole("button", { name: "复习 1" }));
   await user.click(screen.getByRole("button", { name: "recommend" }));
   expect(screen.getByText("推荐")).toBeVisible();
@@ -87,6 +88,7 @@ it("starts a fresh review deck from its first card when restarted from the sideb
       <WordBag />
     </MemoryRouter>,
   );
+  await user.selectOptions(screen.getByLabelText("复习方式"), "flip");
   await user.click(screen.getByRole("button", { name: "复习 2" }));
   await user.click(screen.getByRole("button", { name: /记得/ }));
   useWords.setState({
@@ -111,6 +113,7 @@ it("advances immediately, keeps a failed review visible, and retries the origina
   review.mockReturnValueOnce(new Promise<void>((_resolve,r)=>{reject=r;})).mockResolvedValueOnce(undefined);
   useWords.setState({words:[{id:1,text:"hello",meaning:"你好",example:"",scenario_id:"",kind:"word",mastered:false,created_at:""}]});
   const user=userEvent.setup();render(<MemoryRouter><WordBag /></MemoryRouter>);
+  await user.selectOptions(screen.getByLabelText("复习方式"), "flip");
   await user.click(screen.getByRole("button",{name:"复习 1"}));
   await user.click(screen.getByRole("button",{name:/记得/}));
   // The card advances before the network write settles.
@@ -127,9 +130,78 @@ it("recovers the original choice when retrying an ambiguous save after advancing
   review.mockReset().mockRejectedValueOnce(Object.assign(new Error("retry original"),{remembered:true})).mockResolvedValueOnce(undefined);
   useWords.setState({words:[{id:1,text:"hello",meaning:"你好",example:"",scenario_id:"",kind:"word",mastered:false,created_at:""}]});
   const user=userEvent.setup();render(<MemoryRouter><WordBag /></MemoryRouter>);
-  await user.click(screen.getByRole("button",{name:"复习 1"}));await user.click(screen.getByRole("button",{name:"忘了"}));
-  expect(screen.getByText("复习完成！")).toBeVisible();
+  await user.selectOptions(screen.getByLabelText("复习方式"), "flip");
+  await user.click(screen.getByRole("button",{name:"复习 1"}));await user.click(screen.getByRole("button",{name:"遗忘（忘了）"}));
+  expect(screen.getByText("刚才忘记的表达，再练一次")).toBeVisible();
+  expect(screen.getByRole("button",{name:/熟悉/})).toBeDisabled();
   await user.click(screen.getByRole("button",{name:"重试保存"}));
   expect(review.mock.calls).toEqual([[1,false],[1,true]]);
+  await user.click(screen.getByRole("button",{name:/遗忘/}));
+  expect(screen.getByText("复习完成！")).toBeVisible();
+  expect(review.mock.calls).toEqual([[1,false],[1,true],[1,false]]);
   expect(screen.getByText("记得 0 · 待加强 1")).toBeVisible();
+});
+
+it("lets the learner select a saved topic, translate its sentence, and save uncertain", async () => {
+  review.mockResolvedValue(undefined);
+  useWords.setState({ words: [
+    { id: 1, text: "I will look into it.", meaning: "我会调查这件事。", example: "", scenario_id: "cafe", topic: "工作沟通", kind: "sentence", mastered: false, created_at: "" },
+    { id: 2, text: "Could I have it iced?", meaning: "能做成冰的吗？", example: "", scenario_id: "cafe", kind: "sentence", mastered: false, created_at: "" },
+  ] });
+  const user = userEvent.setup();
+  render(<MemoryRouter><WordBag /></MemoryRouter>);
+  await user.click(screen.getByRole("button", { name: "收藏句子 2" }));
+  await user.selectOptions(screen.getByLabelText("话题"), "工作沟通");
+  expect(screen.queryByText("Could I have it iced?")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("复习方式")).toHaveValue("translate");
+  await user.click(screen.getByRole("button", { name: "复习 1" }));
+  expect(screen.getByText("我会调查这件事。")).toBeVisible();
+  expect(screen.queryByText("I will look into it.")).not.toBeInTheDocument();
+  await user.type(screen.getByLabelText("输入英文"), "I will look into it");
+  await user.click(screen.getByRole("button", { name: "检查答案" }));
+  expect(screen.getByText("与参考一致")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "模糊" }));
+  expect(review).toHaveBeenCalledWith(1, "uncertain");
+});
+
+it("defaults to a usable cloze when no Chinese prompt is available and keeps flip accessible", async () => {
+  useWords.setState({ words: [{ id: 1, text: "receipt", meaning: "", example: "Please keep your receipt.", scenario_id: "cafe", kind: "word", mastered: false, created_at: "" }] });
+  const user = userEvent.setup();
+  render(<MemoryRouter><WordBag /></MemoryRouter>);
+  expect(screen.getByLabelText("复习方式")).toHaveValue("cloze");
+  await user.click(screen.getByRole("button", { name: "复习 1" }));
+  expect(screen.getByText("Please keep your ____." )).toBeVisible();
+  await user.selectOptions(screen.getByLabelText("复习方式"), "flip");
+  await user.click(screen.getByRole("button", { name: "复习 1" }));
+  expect(screen.getByRole("button", { name: "receipt" })).toBeVisible();
+});
+
+it("masks a content word in a collected sentence even if it ends in a pronoun", async () => {
+  useWords.setState({ words: [{ id: 1, text: "I will look into it.", meaning: "我会调查这件事。", example: "I will look into it.", scenario_id: "cafe", kind: "sentence", mastered: false, created_at: "" }] });
+  const user = userEvent.setup();
+  render(<MemoryRouter><WordBag /></MemoryRouter>);
+  await user.click(screen.getByRole("button", { name: "收藏句子 1" }));
+  await user.selectOptions(screen.getByLabelText("复习方式"), "cloze");
+  await user.click(screen.getByRole("button", { name: "复习 1" }));
+  expect(screen.getByText("I will ____ into it.")).toBeVisible();
+  await user.type(screen.getByLabelText("输入英文"), "look{Enter}");
+  expect(screen.getByText("look")).toBeVisible();
+});
+
+it("asks for another attempt just once after forgetting and shows the saved review date", async () => {
+  const word = { id: 1, text: "remember", meaning: "记住", example: "I remember it.", scenario_id: "", kind: "word", mastered: false, created_at: "" };
+  review.mockResolvedValueOnce(undefined).mockImplementationOnce(async () => {
+    useWords.setState({ words: [{ ...word, due_at: "2099-12-31T12:00:00Z" }] });
+  });
+  useWords.setState({ words: [word] });
+  const user = userEvent.setup();
+  render(<MemoryRouter><WordBag /></MemoryRouter>);
+  await user.selectOptions(screen.getByLabelText("复习方式"), "flip");
+  await user.click(screen.getByRole("button", { name: "复习 1" }));
+  await user.click(screen.getByRole("button", { name: /遗忘/ }));
+  expect(screen.getByText("刚才忘记的表达，再练一次")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: /熟悉/ }));
+  expect(screen.getByText("复习完成！")).toBeVisible();
+  expect(await screen.findByText(/下次复习.*2099/)).toBeVisible();
+  expect(review.mock.calls).toEqual([[1, false], [1, true]]);
 });
