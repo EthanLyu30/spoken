@@ -7,6 +7,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
 
+DELETED_SESSION_EVENT = "deleted_session"
+DELETED_PRACTICE_EVENT = "deleted_practice"
+DELETED_HISTORY_EVENTS = (DELETED_SESSION_EVENT, DELETED_PRACTICE_EVENT)
+
 
 class LearningEvent(Base):
     __tablename__ = "learning_events"

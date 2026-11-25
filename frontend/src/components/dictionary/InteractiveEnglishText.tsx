@@ -1,11 +1,12 @@
 import {
   Fragment,
+  useContext,
   useState,
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
 import { cn } from "../../lib/utils";
-import { useDictionary } from "./DictionaryContext";
+import { DictionarySceneContext, dictionaryTextOrigins, useDictionary } from "./DictionaryContext";
 
 const TOKEN_RE = /([A-Za-z]+(?:['’-][A-Za-z]+)*)/g;
 const WORD_TOKEN_RE = /^[A-Za-z]+(?:['’-][A-Za-z]+)*$/;
@@ -18,6 +19,7 @@ export function InteractiveEnglishText({
   className?: string;
 }) {
   const { openDictionary } = useDictionary();
+  const origin = useContext(DictionarySceneContext);
   const parts = text.split(TOKEN_RE);
   const wordIndexes = parts.flatMap((part, index) => WORD_TOKEN_RE.test(part) ? [index] : []);
   const [activeWord, setActiveWord] = useState<number | null>(null);
@@ -43,11 +45,17 @@ export function InteractiveEnglishText({
       query: word,
       rect: target.getBoundingClientRect(),
       trigger: target,
+      ...(origin ? { origin } : {}),
     });
   }
 
   return (
-    <span data-dictionary-text tabIndex={-1} className={className}>
+    <span data-dictionary-text tabIndex={-1} className={className} ref={element => {
+      if (element) {
+        if (origin) dictionaryTextOrigins.set(element, origin);
+        else dictionaryTextOrigins.delete(element);
+      }
+    }}>
       {parts.map((part, index) =>
         WORD_TOKEN_RE.test(part) ? (
           <span

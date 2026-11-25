@@ -1,30 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { BookOpen, Check, Plus, Trash2, Volume2 } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, BookOpen, Check, Clock, Plus, RotateCcw, Trash2, Volume2 } from "lucide-react";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import type { Word } from "../lib/api";
 import { useWords } from "../store/words";
 import { speakText } from "../lib/speech";
 import { getScenario } from "../data/scenarios";
-import { themeFor } from "../lib/theme";
 import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
 import { familiarityOf, reviewDueAt, reviewPrompt, type ReviewMode } from "../lib/wordReview";
 import { SceneBookmarks } from "../components/SceneBookmarks";
 import { WordReviewDeck, ReviewDue } from "../components/WordReviewDeck";
+import { WordReviewContext } from "../components/WordReviewContext";
+import { WordRetest } from "../components/WordRetest";
+import { WordBagArtwork, WordBagMotionProvider } from "../components/WordBagArtwork";
+import { WordBagFilters } from "../components/WordBagFilters";
 import "./WordBagStudy.css";
 
-const familiarityLabels = { new: "未复习", familiar: "熟悉", uncertain: "模糊", forgot: "遗忘" };
+const familiarityLabels = { new: "待学习", familiar: "熟悉", uncertain: "模糊", forgot: "遗忘" };
 const topicOf = (word: Word) => word.topic || getScenario(word.scenario_id)?.titleZh || (word.scenario_id === "custom" ? "自定义场景" : "未分类");
-
-/** A word is due for review when it isn't mastered and its due date has passed. */
-function isDue(w: Word): boolean {
-  if (w.id < 0 || w.mastered) return false;
-  const due = reviewDueAt(w.due_at);
-  return !due || due.getTime() <= Date.now();
-}
+const dueTime = (word: Word) => reviewDueAt(word.due_at)?.getTime() ?? 0;
 
 export default function WordBag() {
+  return <WordBagMotionProvider><WordBagContent /></WordBagMotionProvider>;
+}
+
+function WordBagContent() {
   const words = useWords((s) => s.words);
   const fetchedOnce = useWords((s) => s.fetchedOnce);
   const error = useWords((s) => s.error);
@@ -35,16 +36,25 @@ export default function WordBag() {
   const reviewWordId = useWords((s) => s.review);
 
   const [open, setOpen] = useState<number | null>(null);
-  const [review, setReview] = useState(false);
-  const [reviewKey, setReviewKey] = useState(0);
-  const [deck, setDeck] = useState<{ words: Word[]; mode: ReviewMode }>({ words: [], mode: "flip" });
+  const [deck, setDeck] = useState<{ words: Word[]; mode: ReviewMode; kind: "learn" | "due" | "early" } | null>(null);
+  const [retesting, setRetesting] = useState(false);
   const [tab, setTab] = useState<"word" | "sentence">("word");
   const [newWord, setNewWord] = useState("");
   const [topic, setTopic] = useState("");
   const [familiarity, setFamiliarity] = useState("");
   const [preferredMode, setPreferredMode] = useState<ReviewMode | null>(null);
   const [topicNotice, setTopicNotice] = useState("");
+  const [, updateClock] = useState(Date.now);
+  const listHeading = useRef<HTMLHeadingElement>(null);
+  const returnFocus = useRef(false);
   const lastRefreshRef = useRef(Date.now());
+  const viewingList = !deck && !retesting;
+
+  useEffect(() => {
+    if (!viewingList || !returnFocus.current) return;
+    returnFocus.current = false;
+    listHeading.current?.focus();
+  }, [viewingList]);
 
   useEffect(() => {
     ensureLoaded();
@@ -52,6 +62,7 @@ export default function WordBag() {
   useEffect(() => {
     const revalidate = () => {
       if (document.visibilityState !== "visible") return;
+      updateClock(Date.now());
       if (Date.now() - lastRefreshRef.current < 60_000) return;
       if (useWords.getState().refreshing) return;
       lastRefreshRef.current = Date.now();
@@ -59,13 +70,15 @@ export default function WordBag() {
     };
     window.addEventListener("focus", revalidate);
     document.addEventListener("visibilitychange", revalidate);
+    const timer = window.setInterval(() => updateClock(Date.now()), 60_000);
     return () => {
       window.removeEventListener("focus", revalidate);
       document.removeEventListener("visibilitychange", revalidate);
+      window.clearInterval(timer);
     };
   }, []);
   useEffect(() => subscribeAuthGeneration(() => {
-    setReview(false); setOpen(null); setTopic(""); setFamiliarity(""); setTopicNotice(""); setPreferredMode(null);
+    setDeck(null); setRetesting(false); setOpen(null); setTopic(""); setFamiliarity(""); setTopicNotice(""); setPreferredMode(null);
   }), []);
 
   function addWord() {
@@ -89,43 +102,91 @@ export default function WordBag() {
   const active = all.filter(w => kindOf(w) === tab && (!topic || topicOf(w) === topic)
     && (!familiarity || familiarityOf(w) === familiarity));
   const eligible = active.filter(w => w.id > 0 && (!w.mastered || familiarity === "familiar"));
-  const dueEligible = eligible.filter(isDue);
-  const modeCandidates = dueEligible.length ? dueEligible : eligible;
+  const newWords = eligible.filter(word => familiarityOf(word) === "new");
+  const learned = eligible.filter(word => familiarityOf(word) !== "new").sort((a, b) => dueTime(a) - dueTime(b) || a.id - b.id);
+  const now = Date.now();
+  const due = learned.filter(word => !word.mastered && dueTime(word) <= now);
+  const nextDue = learned.find(word => !word.mastered && dueTime(word) > now);
+  const modeCandidates = newWords.length ? newWords : due.length ? due : learned;
   const mode = preferredMode ?? (["translate", "cloze"] as const).find(option =>
     modeCandidates.some(word => reviewPrompt(word, option))) ?? "flip";
-  const reviewable = eligible.filter(w => mode === "flip" || reviewPrompt(w, mode));
-  const dueCount = reviewable.filter(isDue).length;
+  const recallCount = mode === "flip" ? 0 : eligible.filter(word => !reviewPrompt(word, mode)).length;
+  const chooseEarly = due.length === 0 && learned.length > 0;
 
-  function startReview() {
-    const dueNow = reviewable.filter(isDue);
-    const pool = dueNow.length ? dueNow : reviewable;
+  function startRound(pool: Word[], kind: "learn" | "due" | "early") {
     if (!pool.length) return;
-    setDeck({ words: pool, mode });
-    setReviewKey((key) => key + 1);
-    setReview(true);
+    setDeck({ words: pool, mode, kind });
+    setOpen(null);
   }
+
+  function closeRetest(focus?: "forgot" | "uncertain") {
+    const generation = getAuthGeneration();
+    returnFocus.current = true;
+    setRetesting(false);
+    if (focus) { setFamiliarity(focus); setTopic(""); setOpen(null); }
+    void useWords.getState().refresh().then(() => {
+      if (!focus || generation !== getAuthGeneration()) return;
+      const matching = useWords.getState().words.filter(word => familiarityOf(word) === focus);
+      setTab(current => !matching.length || matching.some(word => kindOf(word) === current) ? current : kindOf(matching[0]));
+    });
+  }
+
+  function closeDeck() {
+    returnFocus.current = true;
+    setDeck(null);
+  }
+
+  if (deck || retesting) {
+    const title = retesting ? "重测已有收藏" : deck?.kind === "learn" ? "学习新收藏" : deck?.kind === "early" ? "提前复习" : "到期复习";
+    return <div className="min-h-screen pb-24">
+      <main className="mx-auto wordbag-focus">
+        <header className="wordbag-focus-header">
+          <button type="button" className="ui-secondary" onClick={() => retesting ? closeRetest() : closeDeck()}>
+            <ArrowLeft aria-hidden="true" /> 返回列表
+          </button>
+          {!retesting && <h1>{title}</h1>}
+        </header>
+        {retesting ? <WordRetest onClose={closeRetest} onFocus={closeRetest} /> : deck && <WordReviewDeck
+          deck={deck.words} mode={deck.mode} activity={deck.kind === "learn" ? "learn" : "review"}
+          review={reviewWordId} onDone={closeDeck} />}
+      </main>
+      <BottomNav />
+    </div>;
+  }
+
+  const artworkScene = topic ? active.find(word => getScenario(word.scenario_id))?.scenario_id : undefined;
+  const scope = [tab === "word" ? "单词与短语" : "收藏句子", topic, familiarityLabels[familiarity as keyof typeof familiarityLabels]].filter(Boolean).join(" · ");
 
   return (
     <div className="min-h-screen pb-24">
       <main className="mx-auto wordbag-page">
-        <div className="ui-page-head">
-          <div>
-            <p className="eyebrow">MY WORD BAG</p>
-            <h1>把好表达，留给下次用。</h1>
-            <p>收藏单词、短语和句子，用间隔复习记得更牢。</p>
+        <section className="wordbag-hero" aria-labelledby="wordbag-title">
+          <div className="wordbag-hero-copy">
+            <p className="wordbag-hero-kicker">生词本 <span aria-hidden="true">/</span> 今日安排</p>
+            <h1 id="wordbag-title" ref={listHeading} tabIndex={-1}><span>把好表达，</span><span>留给下次用。</span></h1>
+            <div className="wordbag-plan" aria-label="学习与复习">
+              <p className="wordbag-scope">当前范围 · {scope}</p>
+              {(fetchedOnce || hasCache) && <div className="wordbag-queue-actions">
+                <button type="button" className={newWords.length ? "ui-button" : "ui-secondary"}
+                  onClick={() => startRound(newWords, "learn")} disabled={!newWords.length}>
+                  <BookOpen aria-hidden="true" /> 学习新收藏 <span>{newWords.length}</span>
+                </button>
+                <button type="button" className={!newWords.length && due.length ? "ui-button" : "ui-secondary"}
+                  onClick={() => startRound(due, "due")} disabled={!due.length}>
+                  <Clock aria-hidden="true" /> 复习到期表达 <span>{due.length}</span>
+                </button>
+              </div>}
+              {!due.length && nextDue && <ReviewDue word={nextDue} />}
+              {(fetchedOnce || hasCache) && <div className="wordbag-plan-links">
+                {chooseEarly && <button type="button" className="ui-link" onClick={() => startRound(learned, "early")}>提前复习 {learned.length}</button>}
+                <button type="button" className="ui-link" onClick={() => setRetesting(true)}><RotateCcw size={15} aria-hidden="true" /> 重测已有收藏</button>
+              </div>}
+            </div>
           </div>
-          <button
-            type="button"
-            className="ui-button"
-            onClick={() => (review ? setReview(false) : startReview())}
-            disabled={!review && !reviewable.length}
-          >
-            <BookOpen />
-            {review ? "列表" : dueCount > 0 ? `复习 ${dueCount}` : "开始复习"}
-          </button>
-        </div>
-        <div className="wordbag-layout">
-          <div>
+          <WordBagArtwork scenarioId={artworkScene} />
+        </section>
+        <div className="wordbag-library">
+          <div className="wordbag-library-tools">
             <div className="wordbag-tabs">
               {(["word", "sentence"] as const).map((k) => (
                 <button
@@ -134,7 +195,7 @@ export default function WordBag() {
                   aria-pressed={tab === k}
                   onClick={() => {
                     setTab(k);
-                    setReview(false);
+                    setOpen(null);
                   }}
                 >
                   {k === "word"
@@ -143,32 +204,18 @@ export default function WordBag() {
                 </button>
               ))}
             </div>
-            <div className="wordbag-study-filters">
-              <label>话题<select value={topic} onChange={event => { setTopic(event.target.value); setReview(false); setOpen(null); setTopicNotice(""); }}>
-                <option value="">全部话题</option>
-                {topic && !topics.includes(topic) && <option value={topic}>{topic}</option>}
-                {topics.map(name => <option key={name} value={name}>{name}</option>)}
-              </select></label>
-              <label>熟悉度<select value={familiarity} onChange={event => { setFamiliarity(event.target.value); setReview(false); }}>
-                <option value="">全部熟悉度</option>
-                {Object.entries(familiarityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select></label>
-              <label>复习方式<select value={mode} onChange={event => {
-                setPreferredMode(event.target.value as ReviewMode); setReview(false);
-              }}>
-                <option value="flip">翻卡回忆</option>
-                <option value="translate">看中文写英文</option>
-                <option value="cloze">关键词填空</option>
-              </select></label>
-              {mode !== "flip" && eligible.length > reviewable.length && <p>本组有 {eligible.length - reviewable.length} 条缺少可用题面，可用翻卡复习。</p>}
-            </div>
-            {!review && topic && topics.includes(topic) && <TopicGroupEditor key={topic} source={topic} topics={topics}
+            <WordBagFilters topics={topics} topic={topic} familiarity={familiarity} mode={mode}
+              onTopic={next => { setTopic(next); setOpen(null); setTopicNotice(""); }}
+              onFamiliarity={setFamiliarity} onMode={setPreferredMode} />
+          </div>
+            {recallCount > 0 && <p className="wordbag-mode-note">本组有 {recallCount} 条会用翻卡回忆。</p>}
+            {topic && topics.includes(topic) && <TopicGroupEditor key={topic} source={topic} topics={topics}
               count={all.filter(word => word.id > 0 && topicOf(word) === topic).length} onSaved={(target, count) => {
                 setTopic(current => current === topic ? target ?? "" : current);
                 setTopicNotice(count ? `已更新 ${count} 条表达的话题。` : "已同步当前话题。");
               }} />}
             {topicNotice && <p className="wordbag-topic-notice" role="status">{topicNotice}</p>}
-            {!review && <SceneBookmarks />}
+            <SceneBookmarks />
             {tab === "word" && (
               <div className="wordbag-add">
                 <input
@@ -219,15 +266,7 @@ export default function WordBag() {
               </section>
             )}
             {hasCache &&
-              (review ? (
-                <WordReviewDeck
-                  key={reviewKey}
-                  deck={deck.words}
-                  mode={deck.mode}
-                  review={reviewWordId}
-                  onDone={() => setReview(false)}
-                />
-              ) : active.length === 0 ? (
+              (active.length === 0 ? (
                 <p className="wordbag-state">
                   {topic || familiarity ? "这个筛选下还没有收藏。" : tab === "word"
                     ? "还没有单词，试着加一个吧。"
@@ -236,10 +275,6 @@ export default function WordBag() {
               ) : (
                 <ul className="space-y-3">
                   {active.map((w) => {
-                    const sc = w.scenario_id
-                      ? getScenario(w.scenario_id)
-                      : undefined;
-                    const t = themeFor(w.scenario_id);
                     const isOpen = open === w.id;
                     return (
                       <li key={w.id} className="card overflow-hidden p-0">
@@ -262,6 +297,7 @@ export default function WordBag() {
                             {w.text}
                           </span>
                           <span className="flex items-center gap-2">
+                            {w.id > 0 && familiarityOf(w) === "new" && <span className="wordbag-new-label">待学习</span>}
                             {w.mastered && (
                               <Check className="h-4 w-4 text-leaf" />
                             )}
@@ -284,14 +320,7 @@ export default function WordBag() {
                                 {w.example}
                               </p>
                             )}
-                            {sc && (
-                              <span
-                                className="mt-2 inline-block rounded-full px-2 py-0.5 text-xs font-semibold"
-                                style={{ background: t.soft, color: t.deep }}
-                              >
-                                {sc.titleZh}
-                              </span>
-                            )}
+                            <WordReviewContext word={w} showConversation />
                             <ReviewDue word={w} />
                             <WordTopicEditor key={w.id} word={w} topics={topics} onChange={(next) => {
                               if (topic && next !== topic) setTopic(next);
@@ -327,29 +356,9 @@ export default function WordBag() {
                   })}
                 </ul>
               ))}
-          </div>
-          <aside className="wordbag-aside">
-            <h2>今天，复习这一小组。</h2>
-            <p>
-              当前方式有 <strong>{dueCount}</strong>{" "}
-              条到期表达。熟悉的隔久一点，模糊或遗忘的早点再练。
-            </p>
-            <button
-              type="button"
-              className="ui-button"
-              disabled={!reviewable.length}
-              onClick={startReview}
-            >
-              开始复习
-            </button>
-            <section>
-              <h3>把表达真正用起来</h3>
-              <p>先自己想或写出答案，再对照参考标记熟悉度。下次对话时，试着用上一句。</p>
-              <Link to="/scenes" className="ui-link">
-                去场景里试试
-              </Link>
-            </section>
-          </aside>
+          {hasCache && <div className="wordbag-scene-link">
+            <Link className="ui-link" to="/scenes">去场景里试试 <ArrowUpRight size={15} aria-hidden="true" /></Link>
+          </div>}
         </div>
       </main>
       <BottomNav />

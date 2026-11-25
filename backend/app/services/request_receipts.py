@@ -16,6 +16,12 @@ class RequestConflict(Exception):
     """A stable operation key was reused with different input."""
 
 
+class DeletedPracticeRecord(Exception):
+    """A stable operation key belongs to an explicitly deleted record."""
+
+    detail = {"code": "practice_record_deleted", "message": "这条练习记录已删除。"}
+
+
 def payload_hash(payload: dict) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"),
                                     ensure_ascii=False).encode("utf-8")).hexdigest()
@@ -26,8 +32,11 @@ def find(db: Session, owner: str, operation: str, key: str | None,
     if key is None:
         return None
     receipt = db.get(RequestReceipt, (owner, operation, key))
-    if receipt is not None and receipt.payload_hash != fingerprint:
-        raise RequestConflict("client_request_id was already used with different input")
+    if receipt is not None:
+        if operation == "practice" and not receipt.payload_hash:
+            raise DeletedPracticeRecord
+        if receipt.payload_hash != fingerprint:
+            raise RequestConflict("client_request_id was already used with different input")
     return receipt
 
 
@@ -37,6 +46,13 @@ def remember(db: Session, owner: str, operation: str, key: str | None,
         db.add(RequestReceipt(client_id=owner, operation=operation, client_request_id=key,
             payload_hash=fingerprint, source_id=event.source_id, event_key=event.event_key,
             response_metadata=json.dumps(metadata)))
+
+
+def scrub_practice(db: Session, owner: str, event_key: str) -> None:
+    # An empty hash reserves the key without retaining a fingerprint or replay body.
+    db.execute(update(RequestReceipt).where(RequestReceipt.client_id == owner,
+        RequestReceipt.operation == "practice", RequestReceipt.event_key == event_key)
+        .values(payload_hash="", response_metadata="{}"))
 
 
 def claim(db: Session, device_id: str, owner_id: str) -> None:
@@ -49,6 +65,10 @@ def claim(db: Session, device_id: str, owner_id: str) -> None:
         .where(RequestReceipt.client_id == owner_id)).tuples())
     for receipt in db.scalars(select(RequestReceipt).where(RequestReceipt.client_id == device_id)):
         if (receipt.operation, receipt.client_request_id) not in account_keys:
+            continue
+        if receipt.operation == "practice" and not receipt.payload_hash:
+            # Retain the exact delete receipt after the account wins the stable key.
+            db.delete(receipt)
             continue
         if receipt.operation == "practice":
             metadata = json.loads(receipt.response_metadata)

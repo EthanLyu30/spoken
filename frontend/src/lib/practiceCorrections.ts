@@ -1,6 +1,7 @@
 import type { ChatMessage, CoachingExample, CoachingPattern, Correction, CorrectionCategory, FeedbackResponse } from "./api";
 import { getScenario } from "../data/scenarios";
 import { previousPartnerMessage } from "./conversationTurns";
+import { recordCreationQuery } from "./practiceRecordStatus";
 
 export const correctionDrills = {
   articles: { label: "冠词", task: "第一次提到一个可数的人或物时，用 a 或 an。对方已知道你指哪一个时，用 the。", prompt: "第一次提到一把雨伞，接着再提同一把雨伞。用英语说两句。", answer: "I need an umbrella. Is the umbrella by the door?" },
@@ -34,7 +35,8 @@ export const coachingPatternLabel = (pattern: CoachingPattern) => patternNames[p
 
 export function replayHref(example: CoachingExample) {
   const scene = getScenario(example.scenario_id) ? example.scenario_id : "custom";
-  return `/prepare/${scene}?review=${example.session_id}:${example.turn_index}`;
+  const createdAt = recordCreationQuery(example.created_at ?? undefined).replace(/^\?/, "&");
+  return `/prepare/${scene}?review=${example.session_id}:${example.turn_index}${createdAt}`;
 }
 
 export type ReplaySentence = Pick<CoachingExample, "original" | "previous_partner_message" | "corrections">;

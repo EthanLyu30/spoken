@@ -21,10 +21,12 @@ import { copyText } from "../lib/clipboard";
 import type { UserTurnMeta } from "../lib/conversationTurns";
 import { speakText } from "../lib/speech";
 import { InteractiveEnglishText } from "./dictionary/InteractiveEnglishText";
+import { sceneWordOrigin } from "../lib/wordOrigin";
 import { PronunciationFeedback } from "./PronunciationFeedback";
 import { getAuthGeneration } from "../lib/authToken";
 import { bindInteraction, getInteraction, reportTiming } from "../lib/telemetry";
 import { correctionDrills, isCorrectionCategory } from "../lib/practiceCorrections";
+import { useWords } from "../store/words";
 
 type LoadState<T> =
   | { status: "idle" | "loading" | "error"; data?: undefined }
@@ -39,7 +41,7 @@ export interface TurnCorrectionCardProps {
   onUseSuggestion: (suggestion: string) => void;
   markedIssues?: Correction[];
   onToggleMark?: (issue: TurnCorrectionIssue) => void;
-  onToggleSentence?: () => void;
+  onSaveFavorite?: (confirmation: Promise<string | undefined>) => void;
 }
 
 export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
@@ -49,6 +51,8 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
   const [pronunciationState, setPronunciationState] =
     useState<LoadState<PronunciationResult>>({ status: "idle" });
   const [copied, setCopied] = useState(false);
+  const [attemptedSave, setAttemptedSave] = useState("");
+  const owner = useRef(getAuthGeneration()).current;
   const mountedRef = useRef(true);
   const controllersRef = useRef<{ text?: AbortController; pronunciation?: AbortController }>({});
   const revisionsRef = useRef({ text: 0, pronunciation: 0 });
@@ -64,7 +68,43 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
   }, []);
 
   const canAssessPronunciation = Boolean(props.meta.spokenText && props.meta.pcm);
-  const sentenceMarked = props.markedIssues?.some((mark) => mark.self_marked) ?? false;
+  const suggestion = textState.data?.suggestion.trim() ?? "";
+  const saved = useWords(state => suggestion ? state.words.find(word => word.text === suggestion) : undefined);
+  const ensureWordsLoaded = useWords(state => state.ensureLoaded);
+  const saveable = suggestion.length > 0 && Array.from(suggestion).length <= 600;
+  const favorite = props.markedIssues?.some(mark => mark.self_marked && (mark.suggestion || mark.original) === suggestion);
+  const existingSentence = saved && saved.id > 0 && saved.kind === "sentence";
+  const canAttach = !!props.onSaveFavorite && existingSentence && !favorite;
+
+  useEffect(() => {
+    if (open && suggestion && owner === getAuthGeneration()) ensureWordsLoaded();
+  }, [open, suggestion, owner, ensureWordsLoaded]);
+
+  useEffect(() => {
+    if (saved && saved.id > 0) setAttemptedSave("");
+  }, [saved]);
+
+  function saveSuggestion() {
+    if (!saveable || favorite || owner !== getAuthGeneration()) return;
+    const existing = useWords.getState().words.find(word => word.text === suggestion);
+    if (existing) {
+      if (existing.id > 0 && existing.kind === "sentence") props.onSaveFavorite?.(Promise.resolve(suggestion));
+      return;
+    }
+    const customTitle = props.custom?.title_zh?.trim() || props.custom?.title?.trim();
+    const confirmation = useWords.getState().collect({
+      text: suggestion,
+      example: suggestion,
+      ...sceneWordOrigin(props.scenarioId, props.custom, props.previousPartnerMessage),
+      kind: "sentence",
+      ...(customTitle ? { topic: Array.from(customTitle).slice(0, 48).join("") } : {}),
+    });
+    if (!confirmation) return;
+    props.onSaveFavorite?.(confirmation.then(word =>
+      word && word.id > 0 && word.kind === "sentence" && word.text === suggestion && owner === getAuthGeneration()
+        ? word.text : undefined));
+    setAttemptedSave(suggestion);
+  }
 
   function beginRequest(stage: "text" | "pronunciation") {
     controllersRef.current[stage]?.abort();
@@ -166,13 +206,6 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
         <Sparkles className="h-3.5 w-3.5" />
         {open ? "收起纠错" : "即时纠错"}
         </button>
-        {props.onToggleSentence && (
-          <button type="button" onClick={props.onToggleSentence} aria-pressed={sentenceMarked}
-            className="inline-flex min-h-8 items-center gap-1.5 text-xs font-semibold text-coral-deep">
-            <Bookmark size={14} fill={sentenceMarked ? "currentColor" : "none"} />
-            {sentenceMarked ? "已收藏这句" : "收藏这句"}
-          </button>
-        )}
         {!open && props.markedIssues?.some((mark) => !mark.self_marked) && <span className="text-xs font-semibold">已标记复练</span>}
       </div>
 
@@ -211,12 +244,20 @@ export function TurnCorrectionCard(props: TurnCorrectionCardProps) {
               <p className="text-sm">
                 <InteractiveEnglishText text={textState.data.original} />
               </p>
-              <p className="mt-2 text-[0.62rem] font-bold uppercase text-leaf-deep">
-                推荐表达
-              </p>
+              <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3">
+                <p className="text-[0.62rem] font-bold text-leaf-deep">推荐表达</p>
+                {saveable && <button type="button" onClick={saveSuggestion} disabled={favorite || (!!saved && !canAttach)}
+                  className="inline-flex min-h-8 items-center gap-1.5 text-xs font-semibold text-coral-deep disabled:text-muted">
+                  <Bookmark size={14} aria-hidden="true" fill={favorite || existingSentence ? "currentColor" : "none"} />
+                  {favorite ? "已收藏" : canAttach ? "在小结中收藏" : existingSentence ? "已收藏" :
+                    saved ? saved.id > 0 ? "生词本已有同文" : "收藏中…" : "收藏推荐表达"}
+                </button>}
+              </div>
               <p className="text-sm font-bold text-leaf-deep">
                 <InteractiveEnglishText text={textState.data.suggestion} />
               </p>
+              {suggestion && !saveable && <p className="mt-1 text-xs text-muted">这条表达超出生词本的 600 字符上限。</p>}
+              {attemptedSave === suggestion && !!attemptedSave && !saved && <p role="alert" className="mt-1 text-xs text-coral-deep">收藏失败，请重试。</p>}
 
               {textState.data.natural ? (
                 <p className="mt-2 text-xs text-muted">表达自然，无需修改。</p>

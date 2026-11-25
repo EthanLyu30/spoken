@@ -109,12 +109,15 @@
 .coaching-plan-practice h4 { color: var(--coral-deep); font-size: .8125rem; font-weight: 800; }
 .coaching-plan-scene .coaching-plan-title { font-size: 1.15rem; font-weight: 800; }
 .coaching-plan-scene .coaching-primary { margin-top: 12px; }
-.review-turn { padding: 16px 0; border-bottom: 1px solid var(--border); }
-.review-turn-meta, .review-marked { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
-.review-marked { color: var(--coral-deep); }
+.review-turn { padding: 16px 0; border-bottom: 1px solid var(--border); scroll-margin-top: 88px; }
+.review-turn-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.review-marked, .review-favorite { display: inline-flex; align-items: center; gap: 4px; }
+.review-marked { color: var(--leaf-deep); }
 .review-full-line { margin: 6px 0 8px; }
 .review-fix { margin: 10px 0; padding-left: 12px; border-left: 2px solid var(--border); }
-.review-fix > p { font-size: .8125rem; color: var(--muted); margin-top: 3px; }
+.review-note { font-size: .8125rem; color: var(--muted); margin-top: 3px; }
+.review-choice { min-height: 36px; font-size: .8125rem; }
+.review-choice.is-selected { color: var(--muted); }
 
 .guided-preview-toggle, .guided-listen {
   display: inline-flex; align-items: center; gap: 8px; min-height: 44px;

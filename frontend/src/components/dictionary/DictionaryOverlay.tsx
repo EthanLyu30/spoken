@@ -17,7 +17,7 @@ import type { DictionaryOpenRequest } from "./DictionaryContext";
 
 type OverlayState =
   | { status: "idle" | "loading" | "error"; entry?: undefined }
-  | { status: "ready"; entry: DictionaryEntry };
+  | { status: "ready"; entry: DictionaryEntry; request: DictionaryOpenRequest };
 
 export function DictionaryOverlay({
   request,
@@ -28,6 +28,7 @@ export function DictionaryOverlay({
 }) {
   const [state, setState] = useState<OverlayState>({ status: "idle" });
   const [copied, setCopied] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
   const words = useWords((value) => value.words);
   const collect = useWords((value) => value.collect);
@@ -41,11 +42,10 @@ export function DictionaryOverlay({
     const controller = new AbortController();
     setState({ status: "loading" });
     getDictionaryEntry(request.query, controller.signal).then(
-      (entry) => setState({ status: "ready", entry }),
+      (entry) => { if (!controller.signal.aborted) setState({ status: "ready", entry, request }); },
       (error: unknown) => {
         if (
-          error instanceof DOMException &&
-          error.name === "AbortError"
+          controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")
         ) {
           return;
         }
@@ -54,7 +54,7 @@ export function DictionaryOverlay({
     );
     window.requestAnimationFrame(() => panelRef.current?.focus());
     return () => controller.abort();
-  }, [request]);
+  }, [request, attempt]);
 
   useEffect(() => {
     if (!request) return;
@@ -92,14 +92,6 @@ export function DictionaryOverlay({
     onClose();
     window.getSelection()?.removeAllRanges();
     activeRequest.trigger?.focus();
-  }
-
-  function retry() {
-    setState({ status: "loading" });
-    getDictionaryEntry(activeRequest.query).then(
-      (entry) => setState({ status: "ready", entry }),
-      () => setState({ status: "error" }),
-    );
   }
 
   return (
@@ -150,7 +142,7 @@ export function DictionaryOverlay({
             </p>
             <button
               type="button"
-              onClick={retry}
+              onClick={() => setAttempt(value => value + 1)}
               className="mt-2 inline-flex items-center gap-1 text-sm font-bold"
             >
               <RotateCcw className="h-4 w-4" />
@@ -159,7 +151,7 @@ export function DictionaryOverlay({
           </div>
         )}
 
-        {state.status === "ready" && (
+        {state.status === "ready" && state.request === activeRequest && (
           <>
             {(state.entry.phonetic ||
               state.entry.part_of_speech) && (
@@ -212,6 +204,7 @@ export function DictionaryOverlay({
                 disabled={collected}
                 onClick={() =>
                   collect({
+                    ...activeRequest.origin,
                     text: state.entry.query,
                     meaning: state.entry.meaning,
                     example: state.entry.example,

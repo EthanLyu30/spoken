@@ -57,5 +57,7 @@ export function reviewDueAt(value?: string | null): Date | null {
 
 export function familiarityOf(word: Word) {
   if (word.mastered) return "familiar";
-  return word.familiarity ?? (word.last_reviewed ? (word.box ? "familiar" : "forgot") : "new");
+  if (word.familiarity) return word.familiarity;
+  if (word.box) return "familiar";
+  return word.last_reviewed ? "forgot" : "new";
 }

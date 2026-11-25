@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { postDictionaryLookup } from "../../lib/api";
 import { clearDictionarySessionCache } from "../../lib/dictionary";
 import { DictionaryProvider } from "./DictionaryProvider";
+import { DictionarySceneContext } from "./DictionaryContext";
 import { InteractiveEnglishText } from "./InteractiveEnglishText";
 
 const { collectWord } = vi.hoisted(() => ({
@@ -80,7 +81,7 @@ describe("InteractiveEnglishText", () => {
     getSelection.mockRestore();
   });
 
-  it("opens a lookup for a selected short phrase", async () => {
+  it("keeps the original scene when a selected phrase is added from the dictionary", async () => {
     vi.mocked(postDictionaryLookup).mockResolvedValue({
       ...worldEntry,
       query: "run into",
@@ -92,7 +93,9 @@ describe("InteractiveEnglishText", () => {
     });
     const { container } = render(
       <DictionaryProvider>
-        <InteractiveEnglishText text="I may run into an old friend." />
+        <DictionarySceneContext.Provider value={{ scenario_id: "networking" }}>
+          <InteractiveEnglishText text="I may run into an old friend." />
+        </DictionarySceneContext.Provider>
       </DictionaryProvider>,
     );
     const root = container.querySelector("[data-dictionary-text]");
@@ -101,6 +104,7 @@ describe("InteractiveEnglishText", () => {
       isCollapsed: false,
       rangeCount: 1,
       anchorNode: root,
+      focusNode: root,
       toString: () => "run into",
       getRangeAt: () =>
         ({
@@ -113,6 +117,8 @@ describe("InteractiveEnglishText", () => {
     expect(await screen.findByText("偶然遇见")).toBeInTheDocument();
     expect(postDictionaryLookup).toHaveBeenCalledWith("run into");
     getSelection.mockRestore();
+    await userEvent.click(screen.getByRole("button", { name: "加入生词本" }));
+    expect(collectWord).toHaveBeenCalledWith(expect.objectContaining({ scenario_id: "networking", text: "run into", kind: "phrase" }));
   });
 
   it("adds a loaded word to the word bag", async () => {

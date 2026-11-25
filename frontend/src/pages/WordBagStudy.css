@@ -1,4 +1,3 @@
-.wordbag-study-filters,
 .wordbag-topic-editor {
   display: flex;
   align-items: end;
@@ -6,7 +5,6 @@
   gap: 9px 14px;
   margin-bottom: 14px;
 }
-.wordbag-study-filters label,
 .wordbag-topic-editor label,
 .wordbag-review-output label {
   display: grid;
@@ -14,9 +12,86 @@
   font-size: 13px;
   color: var(--muted);
 }
-.wordbag-study-filters label { min-width: min(144px, 100%); max-width: 100%; }
-.wordbag-study-filters p { flex-basis: 100%; color: var(--muted); font-size: 13px; }
-.wordbag-study-filters select,
+.wordbag-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.18fr) minmax(0, 1fr);
+  align-items: stretch;
+  margin-block: clamp(16px, 4vw, 42px) 28px;
+  border: 1px solid #e9d9cb;
+  border-radius: 26px;
+  overflow: hidden;
+  background: #faf6ee;
+}
+.wordbag-hero-copy { padding: clamp(22px, 4vw, 54px); min-width: 0; }
+.wordbag-hero-kicker { color: var(--coral-deep); font-size: .8125rem; font-weight: 750; letter-spacing: .065em; }
+.wordbag-hero-kicker span { margin-inline: 4px; color: #b1846d; }
+.wordbag-hero h1 { margin-block: 10px 24px; font-size: clamp(1.85rem, 4vw, 3.65rem); line-height: 1.14; font-weight: 800; letter-spacing: -.045em; }
+.wordbag-hero h1 span { display: block; }
+.wordbag-plan { min-width: 0; }
+.wordbag-scope { color: var(--muted); font-size: .875rem; margin-bottom: 10px; overflow-wrap: anywhere; }
+.wordbag-queue-actions, .wordbag-learn-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.wordbag-queue-actions button { min-height: 44px; font-size: .875rem; }
+.wordbag-queue-actions button span { border-radius: 999px; padding: 1px 7px; background: #b0352915; font-variant-numeric: tabular-nums; }
+.wordbag-queue-actions .ui-button span { background: #fff3; }
+.wordbag-plan-links { display: flex; gap: 4px 16px; flex-wrap: wrap; margin-top: 6px; }
+.wordbag-plan-links .ui-link { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; font-size: .8125rem; }
+.wordbag-artwork { position: relative; isolation: isolate; overflow: hidden; min-height: 205px; background: #f8f2e9; }
+.wordbag-artwork-compact { min-height: 155px; }
+.wordbag-art-image { position: absolute; inset: 0; background: center 55% / cover no-repeat var(--wordbag-art); animation: wordbag-image-in 700ms ease-out both, wordbag-art-drift 12s ease-in-out infinite alternate; }
+.wordbag-artwork[data-paused="true"] .wordbag-art-image { animation-play-state: running, paused; }
+.wordbag-art-atlas { inset: 50% 0 auto; min-height: 100%; aspect-ratio: 3 / 2; transform: translateY(-50%); background-size: 300% 300%; background-position: var(--wordbag-position); }
+.wordbag-artwork .rehearsal-air { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.wordbag-art-motion {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid #92684742;
+  background: #fff9efed;
+  color: #613e2f;
+  transition: background-color 160ms ease;
+}
+.wordbag-art-motion:hover { background: #fff; }
+@keyframes wordbag-image-in { from { opacity: .65; } to { opacity: 1; } }
+@keyframes wordbag-art-drift { from { scale: 1.01; } to { scale: 1.06; } }
+.wordbag-library { border-top: 1px solid var(--border); padding-top: 15px; }
+.wordbag-scene-link { padding-block: 12px; }
+.wordbag-scene-link .ui-link { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; }
+.wordbag-library-tools { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; margin-bottom: 12px; }
+.wordbag-library-tools .wordbag-tabs { margin-bottom: 0; }
+.wordbag-filters { display: contents; }
+.wordbag-filter-trigger, .wordbag-choice-strip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 5px 10px;
+  font-size: .8125rem;
+  color: var(--muted);
+}
+.wordbag-filter-trigger { justify-self: end; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
+.wordbag-filter-trigger span { padding-inline: 4px; color: var(--coral-deep); font-weight: 750; }
+.wordbag-filter-panel { grid-column: 1 / -1; margin-top: 2px; padding: 8px 0; border-block: 1px solid var(--border); animation: wordbag-image-in 180ms ease both; }
+.wordbag-filter-group { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px; padding-block: 2px; }
+.wordbag-filter-group > span { min-width: 58px; color: var(--ink); font-size: .8125rem; font-weight: 750; }
+.wordbag-choice-strip { display: flex; flex: 1 1 260px; flex-wrap: wrap; gap: 2px 4px; min-width: 0; }
+.wordbag-choice-strip button { border-radius: 999px; overflow-wrap: anywhere; }
+.wordbag-choice-strip button[aria-pressed="true"] { background: #fae6d9; color: var(--coral-deep); font-weight: 750; }
+.wordbag-choice-strip button:hover:not([aria-pressed="true"]) { background: var(--surface-2); }
+.wordbag-filter-search { display: flex; align-items: center; gap: 8px; flex-basis: 100%; color: var(--muted); padding: 4px 0; }
+.wordbag-filter-search input { min-height: 38px; width: min(100%, 260px); padding: 5px 9px; border: 1px solid var(--border); background: var(--surface); border-radius: 8px; }
+.wordbag-mode-note { font-size: .8125rem; color: var(--muted); margin-bottom: 10px; }
+.wordbag-new-label { color: var(--coral-deep); white-space: nowrap; font-size: .72rem; font-weight: 700; }
 .wordbag-topic-editor input,
 .wordbag-review-output input {
   min-height: 38px;
@@ -67,7 +142,103 @@
 .wordbag-group-editor { padding: 0 3px 12px; font-size: 13px; }
 .wordbag-group-editor summary { color: var(--coral-deep); cursor: pointer; font-weight: 700; }
 .wordbag-topic-notice, .wordbag-due { color: var(--muted); font-size: 12px; margin-top: 6px; }
-.wordbag-repeat { color: var(--coral-deep); font-size: 14px; font-weight: 700; }
+.wordbag-attempt { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 5px 10px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.wordbag-attempt > strong { color: var(--coral-deep); }
+.wordbag-learn {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+}
+.wordbag-learn .wordbag-attempt { justify-content: flex-start; }
+.wordbag-learn-expression { display: grid; gap: 8px; color: var(--ink); overflow-wrap: anywhere; }
+.wordbag-learn-expression h3 { font-size: clamp(1.5rem, 4vw, 2.25rem); font-weight: 750; line-height: 1.3; }
+.wordbag-focus { max-width: 960px; width: calc(100% - 32px); padding-block: clamp(16px, 3vw, 34px); }
+.wordbag-focus-header { display: flex; align-items: center; gap: 14px 20px; margin-bottom: 18px; flex-wrap: wrap; }
+.wordbag-focus-header h1 { color: var(--ink); font-size: 1.1rem; font-weight: 750; }
+.wordbag-focus > .card { background: var(--surface); border-color: var(--border); padding: clamp(17px, 4vw, 40px); }
+.wordbag-focus .wordbag-learn { grid-template-columns: minmax(0, 1fr); }
+.wordbag-focus .wordbag-learn:has(.wordbag-artwork) { grid-template-columns: minmax(0, 1fr) minmax(0, .86fr); grid-template-areas: "step art" "context art" "expression art" "controls art"; align-items: start; gap: 17px 30px; }
+.wordbag-learn .wordbag-artwork { grid-area: art; align-self: stretch; min-height: 200px; border-radius: 16px; }
+.wordbag-learn:has(.wordbag-artwork) .wordbag-attempt { grid-area: step; }
+.wordbag-learn:has(.wordbag-artwork) .wordbag-origin { grid-area: context; }
+.wordbag-learn:has(.wordbag-artwork) .wordbag-learn-expression { grid-area: expression; }
+.wordbag-learn:has(.wordbag-artwork) .wordbag-learn-controls { grid-area: controls; }
+.wordbag-question > .wordbag-artwork { width: min(100%, 520px); height: clamp(108px, 17vw, 172px); min-height: 0; border-radius: 14px; }
+.wordbag-question > .wordbag-artwork .wordbag-art-image:not(.wordbag-art-atlas) { background-size: auto 146%; }
+.wordbag-learn-example { font-size: .875rem; color: var(--muted); }
+.wordbag-learn-recall { display: grid; justify-items: center; gap: 12px; width: min(100%, 520px); overflow-wrap: anywhere; }
+.wordbag-learn-recall strong { font-size: clamp(1.1rem, 3vw, 1.5rem); }
+.wordbag-repeat { padding-inline-start: 10px; border-inline-start: 1px solid var(--border); color: var(--coral-deep); font-weight: 700; }
 .wordbag-review-dates { width: min(100%, 520px); text-align: left; overflow-wrap: anywhere; }
 .wordbag-review-dates li { padding: 8px 0; border-top: 1px solid var(--border); }
 .wordbag-review-output .wordbag-reference { color: var(--ink); font-size: 16px; margin-top: 8px; }
+.wordbag-origin {
+  width: min(100%, 520px);
+  padding-block: 8px;
+  border-block: 1px solid var(--border);
+  color: var(--muted);
+  font-size: .8125rem;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.wordbag-origin-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 8px; }
+.wordbag-origin-row svg { flex: none; align-self: center; color: var(--coral-deep); }
+.wordbag-origin-row strong { color: var(--ink); }
+.wordbag-origin-background { line-height: 1.5; }
+.wordbag-origin-conversation { margin-top: 6px; }
+.wordbag-origin-conversation summary { color: var(--coral-deep); cursor: pointer; }
+.wordbag-origin-conversation p { margin-top: 5px; color: var(--ink); line-height: 1.55; }
+.wordbag-retest { min-width: 0; padding-block: 10px 24px; }
+.wordbag-retest-intro { padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.wordbag-retest-intro h1 { margin-bottom: 7px; font-size: clamp(1.35rem, 3vw, 1.8rem); font-weight: 800; }
+.wordbag-retest p { color: var(--muted); font-size: .875rem; line-height: 1.65; }
+.wordbag-retest-intro progress {
+  appearance: none;
+  display: block;
+  width: min(100%, 350px);
+  height: 7px;
+  margin-top: 10px;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.wordbag-retest-intro progress::-webkit-progress-bar { background: var(--surface-2); }
+.wordbag-retest-intro progress::-webkit-progress-value { background: var(--coral-deep); }
+.wordbag-retest-intro progress::-moz-progress-bar { background: var(--coral-deep); }
+.wordbag-retest-options, .wordbag-retest-result { padding-block: 20px; }
+.wordbag-retest-options > :not(:last-child) { margin-bottom: 12px; }
+.wordbag-retest-options label { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: .875rem; cursor: pointer; }
+.wordbag-retest-options input { accent-color: var(--coral-deep); }
+.wordbag-retest-result h3 { font-size: 1.125rem; font-weight: 750; }
+.wordbag-retest-result dl, .wordbag-retest-actions { display: flex; flex-wrap: wrap; gap: 10px 24px; }
+.wordbag-retest-result dl { margin-block: 12px 18px; }
+.wordbag-retest-result dd { font-size: 1.3rem; font-weight: 750; color: var(--ink); }
+.wordbag-retest-result dt { color: var(--muted); font-size: .8125rem; }
+.wordbag-retest .wordbag-retest-error { margin-block: 10px; color: var(--coral-deep); }
+.wordbag-retest > .card { margin-top: 18px; border: 1px solid var(--border); background: var(--surface); border-radius: 18px; }
+.wordbag-retest > .card .wordbag-review-output > p { color: var(--ink); font-size: clamp(19px, 3vw, 28px); }
+.wordbag-retest-prep { display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(0, 1fr); align-items: center; gap: 18px 30px; }
+.wordbag-retest-prep .wordbag-artwork { border-radius: 16px; }
+.wordbag-retest-prep .wordbag-art-image { background-size: contain; }
+.wordbag-retest-options .wordbag-round-size { color: var(--ink); font-weight: 750; }
+
+@media (max-width: 680px) {
+  .wordbag-hero { grid-template-columns: minmax(0, 1fr); border-radius: 18px; }
+  .wordbag-hero .wordbag-artwork { grid-row: 1; min-height: 168px; }
+  .wordbag-hero .wordbag-art-image:not(.wordbag-art-atlas) { background-size: auto 100%; }
+  .wordbag-hero-copy { padding: 18px; }
+  .wordbag-hero h1 { margin-block: 7px 17px; letter-spacing: -.02em; }
+  .wordbag-queue-actions { gap: 6px; }
+  .wordbag-queue-actions button { padding-inline: 10px; font-size: .8125rem; gap: 5px; }
+  .wordbag-queue-actions button svg { width: 16px; }
+  .wordbag-focus .wordbag-learn:has(.wordbag-artwork) { grid-template-columns: minmax(0, 1fr); grid-template-areas: "step" "art" "context" "expression" "controls"; }
+  .wordbag-learn .wordbag-artwork { min-height: 138px; }
+  .wordbag-retest-prep { grid-template-columns: minmax(0, 1fr); }
+  .wordbag-retest-prep .wordbag-artwork { min-height: 150px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wordbag-art-image, .wordbag-filter-panel { animation: none; }
+  .wordbag-art-motion { transition: none; }
+}

@@ -118,7 +118,7 @@ def _matches_scene(snapshot: dict | None, identity: str) -> bool:
 
 def coaching_snapshot(db: Session, owner: str, scene_id: str | None = None, *,
                       custom: SessionScene | None = None) -> CoachingSnapshot:
-    query = (select(PracticeSession.id, PracticeSession.scenario_id, PracticeSession.corrections)
+    query = (select(PracticeSession.id, PracticeSession.scenario_id, PracticeSession.corrections, PracticeSession.created_at)
         .where(PracticeSession.client_id == owner)
         .order_by(PracticeSession.created_at.desc(), PracticeSession.id.desc()).limit(50))
     if custom is None:
@@ -126,14 +126,16 @@ def coaching_snapshot(db: Session, owner: str, scene_id: str | None = None, *,
     else:
         identity = custom.identity()
         saved_custom = db.execute(query.add_columns(PracticeSession.custom).where(PracticeSession.scenario_id == "custom"))
-        rows = [(session_id, scenario, corrections) for session_id, scenario, corrections, snapshot in saved_custom
+        rows = [(session_id, scenario, corrections, created_at)
+                for session_id, scenario, corrections, created_at, snapshot in saved_custom
                 if _matches_scene(snapshot, identity)]
+    creation_times = {session_id: created_at for session_id, _, _, created_at in rows}
     candidates = []
     by_pattern = defaultdict(Counter)
-    for session_id, scenario_id, stored in rows:
+    for session_id, scenario_id, stored, _ in rows:
         by_turn = defaultdict(list)
         for fix in read_corrections(stored, session_id):
-            if fix.turn_index is not None and (fix.marked or fix.category):
+            if fix.turn_index is not None and not fix.self_marked and (fix.marked or fix.category):
                 by_turn[fix.turn_index].append(fix)
         for turn_index, fixes in sorted(by_turn.items(), reverse=True):
             candidates.append((session_id, scenario_id, turn_index, fixes))
@@ -155,11 +157,13 @@ def coaching_snapshot(db: Session, owner: str, scene_id: str | None = None, *,
     focal_examples.sort(key=lambda row: row[2] != first_turn_by_session[row[0]])
     planned = focal_examples[:6]
     wanted = {(row[0], row[2]): row for row in [*selected, *planned]}.values()
-    refs = {(session_id, i) for session_id, _, index, _ in wanted for i in (index, index - 1) if i >= 0}
+    refs = {(session_id, creation_times[session_id], i)
+            for session_id, _, index, _ in wanted for i in (index, index - 1) if i >= 0}
     turns = {
         (turn.session_id, turn.idx): turn for turn in db.execute(select(Turn.session_id, Turn.idx, Turn.role, Turn.content)
             .join(PracticeSession, PracticeSession.id == Turn.session_id)
-            .where(PracticeSession.client_id == owner, tuple_(Turn.session_id, Turn.idx).in_(refs)))
+            .where(PracticeSession.client_id == owner,
+                   tuple_(Turn.session_id, PracticeSession.created_at, Turn.idx).in_(refs)))
     } if refs else {}
     samples = {}
     for session_id, scenario_id, index, fixes in wanted:
@@ -167,10 +171,14 @@ def coaching_snapshot(db: Session, owner: str, scene_id: str | None = None, *,
         if turn is None or turn.role != "user":
             continue
         previous = turns.get((session_id, index - 1))
-        samples[(session_id, index)] = CoachingExample(session_id=session_id, scenario_id=scenario_id, turn_index=index,
+        samples[(session_id, index)] = CoachingExample(session_id=session_id, created_at=creation_times[session_id],
+            scenario_id=scenario_id, turn_index=index,
             original=turn.content, previous_partner_message=previous.content if previous and previous.role == "assistant" else "",
             corrections=fixes[:8])
     examples = [samples[(row[0], row[2])] for row in selected if (row[0], row[2]) in samples]
+    queued_examples = [samples[(session_id, index)].model_copy(update={"corrections": marked})
+                       for session_id, _, index, fixes in selected if (session_id, index) in samples
+                       and (marked := [fix for fix in fixes if fix.marked])]
     plan_examples = []
     for session_id, _, index, fixes in planned:
         sample = samples.get((session_id, index))
@@ -178,7 +186,8 @@ def coaching_snapshot(db: Session, owner: str, scene_id: str | None = None, *,
             continue
         focus_fixes = [fix for fix, counts in _distinct_errors(fixes) if patterns[0].kind in counts][:4]
         plan_examples.append(sample.model_copy(update={"corrections": focus_fixes}))
-    snapshot = CoachingSnapshot(revision="", examples=examples, patterns=patterns[:5], plan_examples=plan_examples)
+    snapshot = CoachingSnapshot(revision="", examples=examples, queued_examples=queued_examples,
+                                patterns=patterns[:5], plan_examples=plan_examples)
     evidence = snapshot.model_dump_json(exclude={"revision", "can_generate_plan"}) + "\n" + "\n".join(sample.model_dump_json() for sample in plan_examples)
     snapshot.revision = sha256(evidence.encode("utf-8")).hexdigest()
     return snapshot

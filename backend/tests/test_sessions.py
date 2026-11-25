@@ -99,6 +99,101 @@ def test_unscored_conversation_preserves_marks_without_changing_the_score_and_up
         assert [(receipt.event_key, receipt.score) for receipt in receipts] == [(original_key, 0)]
 
 
+@pytest.mark.parametrize("score", [None, 84])
+def test_late_sentence_favorite_is_added_to_the_exact_saved_transcript(score):
+    with TestClient(app, headers={"X-Client-Id": f"late-favorite-owner-{score}"}) as owner:
+        payload = {**_payload(), "client_session_id": "late-favorite", "overall": score}
+        if score is None:
+            payload.update(summary="", tip="", scores=[])
+        checkpoint = owner.post("/api/sessions", json=payload).json()
+        original = payload["messages"][1]["content"]
+        mark = {"original": original, "suggestion": "May I have a latte, please?", "note": "", "turn_index": 1,
+                "category": None, "marked": True, "self_marked": True}
+        retry = {**payload, "overall": None, "scores": [], "summary": "Ignored", "tip": "Ignored",
+                 "corrections": [mark, mark, {**mark, "turn_index": 0}, {**mark, "original": "latte"}]}
+
+        changed = {**retry, "messages": [{**payload["messages"][0], "content": "Another opener"}, *payload["messages"][1:]]}
+        assert owner.post("/api/sessions", json=changed).json() == checkpoint
+        assert owner.post("/api/sessions", json={**retry, "scenario_id": "hotel"}).json() == checkpoint
+        expected = {**checkpoint, "corrections": [mark]}
+        assert owner.post("/api/sessions", json=retry).json() == expected
+        assert owner.post("/api/sessions", json=retry).json() == expected
+
+        path = f"/api/sessions/{checkpoint['id']}"
+        identity = {"created_at": checkpoint["created_at"]}
+        assert owner.get(path, params=identity).json() == expected
+        assert owner.get(path, headers={"X-Client-Id": "another-late-favorite-owner"}).status_code == 404
+        assert owner.delete(path, params=identity).status_code == 204
+        assert owner.post("/api/sessions", json=retry).json()["detail"]["code"] == "practice_record_deleted"
+        assert owner.get(path, params=identity).status_code == 404
+
+
+def test_only_selected_corrections_join_the_queue_and_unmark_survives_score_retry():
+    owner = TestClient(app, headers={"X-Client-Id": uuid4().hex})
+    stranger = TestClient(app, headers={"X-Client-Id": uuid4().hex})
+    saved_line = "I really liked the talk on sales theory in the media."
+    sentence = "Yesterday I come to speak peer sales."
+    messages = [
+        {"role": "user", "content": saved_line},
+        {"role": "assistant", "content": "Who did you come to meet?"},
+        {"role": "user", "content": sentence},
+    ]
+    favorite = {"original": saved_line, "suggestion": "", "note": "", "turn_index": 0,
+                "marked": True, "self_marked": True}
+    tense = {"original": "come", "suggestion": "came", "note": "用过去式。", "turn_index": 2, "category": "tense"}
+    phrase = {"original": "speak peer sales", "suggestion": "speak with peers in sales", "note": "用 speak with。",
+              "turn_index": 2, "category": "word_choice"}
+    payload = {**_payload(), "messages": messages, "client_session_id": "selected-practice",
+               "overall": None, "scores": [], "corrections": [favorite, tense, phrase]}
+    saved = owner.post("/api/sessions", json=payload).json()
+    detail = f"/api/sessions/{saved['id']}"
+    url = f"{detail}/corrections/practice"
+    selection = {key: phrase[key] for key in ("turn_index", "category", "original", "suggestion")}
+    selection["created_at"] = saved["created_at"]
+
+    initial = owner.get("/api/progress/coaching").json()
+    assert initial["queued_examples"] == []
+    assert [example["original"] for example in initial["examples"]] == [sentence]
+    assert initial["examples"][0]["created_at"] == saved["created_at"]
+    assert stranger.patch(url, json={**selection, "marked": True}).status_code == 404
+    assert owner.patch(url, json={**selection, "suggestion": "stale suggestion", "marked": True}).status_code == 409
+
+    for _ in range(2):
+        result = owner.patch(url, json={**selection, "marked": True})
+        assert result.status_code == 200
+        assert result.json()[2]["marked"] is True
+    assert [fix["original"] for fix in owner.get(detail).json()["corrections"] if fix["marked"] and not fix["self_marked"]] == [phrase["original"]]
+    coaching = owner.get("/api/progress/coaching").json()
+    assert [(item["created_at"], item["turn_index"], [fix["original"] for fix in item["corrections"]])
+            for item in coaching["queued_examples"]] == [(saved["created_at"], 2, [phrase["original"]])]
+    assert coaching["patterns"] == initial["patterns"]
+    assert stranger.get("/api/progress/coaching").json()["queued_examples"] == []
+
+    undone = owner.patch(url, json={**selection, "marked": False})
+    assert undone.status_code == 200
+    grade = {**payload, "overall": 84, "corrections": [{**phrase, "marked": True}, tense]}
+    for _ in range(2):
+        upgraded = owner.post("/api/sessions", json=grade).json()
+        assert upgraded["id"] == saved["id"] and upgraded["overall"] == 84
+        assert [fix["original"] for fix in upgraded["corrections"] if fix["marked"]] == [saved_line]
+    assert owner.get("/api/progress/coaching").json()["queued_examples"] == []
+
+
+def test_selecting_a_legacy_fragment_uses_the_same_turn_on_retry():
+    owner = TestClient(app, headers={"X-Client-Id": uuid4().hex})
+    legacy = {"original": "latte", "suggestion": "a latte", "note": "加冠词。", "category": None}
+    saved = owner.post("/api/sessions", json={**_payload(), "corrections": [legacy]}).json()
+    assert saved["corrections"][0]["turn_index"] is None
+    url = f"/api/sessions/{saved['id']}/corrections/practice"
+    request = {**legacy, "created_at": saved["created_at"], "turn_index": 1, "marked": True}
+    for _ in range(2):
+        result = owner.patch(url, json=request)
+        assert result.status_code == 200
+        assert result.json()[0]["turn_index"] == 1 and result.json()[0]["marked"] is True
+    queue = owner.get("/api/progress/coaching").json()["queued_examples"]
+    assert [(entry["turn_index"], entry["original"]) for entry in queue] == [(1, "A latte please.")]
+
+
 def test_concurrent_score_retries_return_one_score_and_leave_the_original_practice_count():
     owner = TestClient(app, headers={"X-Client-Id": "parallel-score-owner"})
     draft = {**_payload(), "client_session_id": "same-draft", "overall": None, "scores": []}
@@ -270,6 +365,39 @@ def test_self_mark_and_distinct_article_errors_are_available_as_private_examples
     empty = other.get("/api/progress/coaching").json()
     assert empty["examples"] == empty["patterns"] == []
     assert empty["can_generate_plan"] is False
+
+
+def test_whole_sentence_favorite_survives_scoring_and_stays_out_of_practice():
+    owner = TestClient(app, headers={"X-Client-Id": uuid4().hex})
+    other = TestClient(app, headers={"X-Client-Id": uuid4().hex})
+    payload = _payload()
+    original = "I'd like latte, please."
+    suggestion = "I'd like a latte, please."
+    payload["messages"][1]["content"] = original
+    favorite = {"original": original, "suggestion": suggestion, "note": "", "turn_index": 1,
+                "marked": True, "self_marked": True}
+    unscored = {**payload, "overall": None, "scores": [], "client_session_id": "corrected-sentence-favorite",
+                "corrections": [{**favorite, "suggestion": f"  {suggestion}  ", "category": "articles"},
+                                {**favorite, "original": "latte"},
+                                {**favorite, "original": payload["messages"][0]["content"], "turn_index": 0},
+                                {**favorite, "turn_index": 2}]}
+    response = owner.post("/api/sessions", json=unscored)
+    assert response.status_code == 201, response.text
+    detail = f"/api/sessions/{response.json()['id']}"
+    expected = [{**favorite, "category": None}]
+    assert response.json()["corrections"] == expected
+    scored = {**payload, "client_session_id": unscored["client_session_id"],
+              "corrections": [{**favorite, "suggestion": ""}]}
+    assert owner.post("/api/sessions", json=scored).json()["corrections"] == expected
+    assert owner.get(detail).json()["corrections"] == expected
+    assert other.get(detail).status_code == 404
+    coaching = owner.get("/api/progress/coaching").json()
+    assert coaching["queued_examples"] == coaching["examples"] == coaching["patterns"] == []
+
+    oversized = owner.post("/api/sessions", json={**unscored, "client_session_id": "oversized-sentence-favorite",
+                                                    "corrections": [{**favorite, "suggestion": "a" * 601}]})
+    assert oversized.status_code == 201
+    assert oversized.json()["corrections"] == []
 
 
 def test_coaching_discloses_unsupported_target_and_classifies_direct_attempt(monkeypatch):

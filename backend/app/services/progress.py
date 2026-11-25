@@ -20,11 +20,14 @@ from sqlalchemy.orm import Session
 
 from app.core.performance import measure
 from app.models.practice import PracticeRecord
-from app.models.progress import EarnedBadge, LearningEvent, ProgressMigration, ProgressOwner
+from app.data.scenarios import SCENARIOS
+from app.models.progress import DELETED_HISTORY_EVENTS, DELETED_SESSION_EVENT, EarnedBadge, LearningEvent, ProgressMigration, ProgressOwner
 from app.models.session import PracticeSession
 from app.models.word import WordEntry
 
 DAILY_PRACTICE_GOAL = 3
+REWARD_ACHIEVEMENT_TARGETS = {"seven-days": 7, "five-scenes": 5}
+REWARD_ACHIEVEMENT_BADGES = {key: f"reward:{key}" for key in REWARD_ACHIEVEMENT_TARGETS}
 
 
 def utcnow() -> datetime:
@@ -77,13 +80,15 @@ def read_snapshot(db: Session, client_id: str, *, include_events: bool = False) 
     The scalar seed always returns one row; its outer join yields every badge
     without JSON aggregation or a separate vocabulary count round trip.
     """
-    has_events = (select(LearningEvent.event_key).where(LearningEvent.client_id == client_id).exists()
+    has_events = (select(LearningEvent.event_key).where(LearningEvent.client_id == client_id,
+                   LearningEvent.event_type.not_in(DELETED_HISTORY_EVENTS)).exists()
                   if include_events else literal(False))
     seed = select(has_events.label("has_events"),
         select(func.count(WordEntry.id)).where(WordEntry.client_id == client_id)
         .scalar_subquery().label("words_count")).subquery()
     rows = db.execute(select(seed.c.has_events, seed.c.words_count, EarnedBadge.badge_key)
-        .select_from(seed.outerjoin(EarnedBadge, EarnedBadge.client_id == client_id))).all()
+        .select_from(seed.outerjoin(EarnedBadge, and_(EarnedBadge.client_id == client_id,
+            EarnedBadge.badge_key.not_in(REWARD_ACHIEVEMENT_BADGES.values()))))).all()
     return ProgressSnapshot(bool(rows[0].has_events),
         frozenset(row.badge_key for row in rows if row.badge_key is not None), rows[0].words_count)
 
@@ -94,6 +99,29 @@ def record_event(db: Session, client_id: str, event_type: str, **metadata) -> Le
     db.add(event)
     db.flush()
     return event
+
+
+def reward_achievement_counts(dialect: str):
+    occurred = LearningEvent.occurred_at
+    beijing_day = (cast(func.timezone("Asia/Shanghai", func.timezone("UTC", occurred)), Date)
+                   if dialect == "postgresql" else func.date(occurred, "+8 hours"))
+    speaking = LearningEvent.event_type.in_(("session", "practice"))
+    from_scene = (LearningEvent.event_type == "session") & LearningEvent.scenario_id.in_(
+        [scene.id for scene in SCENARIOS])
+    return (func.count(case((speaking, beijing_day)).distinct()),
+            func.count(case((from_scene, LearningEvent.scenario_id)).distinct()))
+
+
+def preserve_reward_achievements(db: Session, client_id: str) -> None:
+    """Preserve earned reward achievements before activity can be removed."""
+    counts = db.execute(select(*reward_achievement_counts(db.get_bind().dialect.name)).where(
+        LearningEvent.client_id == client_id, LearningEvent.event_type.in_(("session", "practice")),
+        LearningEvent.occurred_at.is_not(None))).one()
+    earned = (REWARD_ACHIEVEMENT_BADGES[key]
+              for (key, target), count in zip(REWARD_ACHIEVEMENT_TARGETS.items(), counts, strict=True)
+              if count >= target)
+    _insert_many(db, EarnedBadge, ({"client_id": client_id, "badge_key": badge, "earned_at": utcnow()}
+                                 for badge in earned))
 
 
 def _local_date(timestamp: datetime, zone: ZoneInfo):
@@ -133,7 +161,8 @@ def _activity_query(client_id: str, zone_name: str, dialect: str):
                  func.spoken_local_date(LearningEvent.occurred_at, zone_name, type_=Date))
     events = select(LearningEvent.event_type, LearningEvent.word_text, LearningEvent.kind,
         LearningEvent.score, LearningEvent.scenario_id, local_day.label("local_day"))\
-        .where(LearningEvent.client_id == client_id).cte("owner_events")
+        .where(LearningEvent.client_id == client_id,
+               LearningEvent.event_type.not_in(DELETED_HISTORY_EVENTS)).cte("owner_events")
     e = events.c
     conversation = e.event_type == "session"
     practice = e.event_type == "practice"
@@ -189,7 +218,8 @@ def _supplied_activity(events: list[LearningEvent], zone: ZoneInfo, today: date)
         conversation_max=max((e.score for e in conversations if e.score is not None), default=0),
         pronunciation_max=max((e.score or 0 for e in practices if e.kind == "pronunciation"), default=0),
         scenarios=len({e.scenario_id for e in conversations if e.scenario_id}),
-        days={_local_date(e.occurred_at, zone) for e in events if e.occurred_at is not None},
+        days={_local_date(e.occurred_at, zone) for e in events if e.occurred_at is not None
+              and e.event_type not in DELETED_HISTORY_EVENTS},
         today_count=sum(e.occurred_at is not None and _local_date(e.occurred_at, zone) == today
                         for e in conversations + practices))
 
@@ -377,6 +407,10 @@ def claim_progress(db: Session, device_id: str, owner_id: str) -> None:
     duplicates = list(db.scalars(select(LearningEvent).where(
         LearningEvent.client_id == device_id, LearningEvent.client_session_id.in_(account_keys))))
     for event in duplicates:
+        if event.event_type == DELETED_SESSION_EVENT:
+            # Keep the exact delete receipt without taking the account's stable key.
+            event.client_session_id = None
+            continue
         source = db.scalar(select(PracticeSession).where(
             PracticeSession.client_id == device_id,
             PracticeSession.client_session_id == event.client_session_id))

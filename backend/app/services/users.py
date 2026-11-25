@@ -74,6 +74,9 @@ def claim_device_data(
             return False
         request_receipts.claim(db, device_id, owner_id)
         progress.claim_progress(db, device_id, owner_id)
+        from app.services import word_retest
+
+        word_retest.claim(db, device_id, owner_id)
         for model in _OWNED:
             db.execute(
                 update(model).where(model.client_id == device_id).values(client_id=owner_id)

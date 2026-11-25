@@ -5,12 +5,12 @@ from hashlib import sha256
 import json
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 from app.schemas.chat import ChatMessage
 from app.schemas.coaching import PracticeExercise
 from app.schemas.custom import CustomScene
-from app.schemas.feedback import Correction, CorrectionFocus, SkillScore
+from app.schemas.feedback import Correction, CorrectionCategory, CorrectionFocus, SkillScore
 from app.schemas.practice import Insights
 
 
@@ -63,6 +63,15 @@ class SessionDetail(SessionSummary):
     messages: list[ChatMessage]
     corrections: list[Correction] = Field(default_factory=list)
     custom: SessionScene | None = None
+
+
+class CorrectionPracticeSelection(BaseModel):
+    created_at: datetime
+    original: str = Field(min_length=1)
+    suggestion: str
+    category: CorrectionCategory | None
+    turn_index: int | None = Field(ge=0, strict=True)
+    marked: StrictBool
 
 
 class LatestSessionScores(BaseModel):

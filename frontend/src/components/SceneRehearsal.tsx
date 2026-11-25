@@ -14,6 +14,8 @@ import type { CoachingExample, CustomScene } from "../lib/api";
 import { replayHref, replayReference } from "../lib/practiceCorrections";
 import { useRewardEquipped } from "../lib/rewards";
 import { InteractiveEnglishText } from "./dictionary/InteractiveEnglishText";
+import { DictionarySceneContext } from "./dictionary/DictionaryContext";
+import { sceneWordOrigin } from "../lib/wordOrigin";
 import { CoachingExamples } from "./PersonalCoaching";
 import { Wordmark } from "./Wordmark";
 import { RehearsalAtmosphere } from "./RehearsalAtmosphere";
@@ -117,7 +119,7 @@ export function SceneRehearsal({ scenarioId, customScene, title, goal, icon: Ico
     stage.style.setProperty("--pan-y", `${4 * ((event.clientY - box.top) / box.height - .5)}px`);
   }
 
-  return <div className="prep-page prep-rehearsal">
+  return <DictionarySceneContext.Provider value={sceneWordOrigin(scenarioId, customScene)}><div className="prep-page prep-rehearsal">
     <header className="rehearsal-site">
       <Wordmark />
       <Link className="rehearsal-crumb" to={custom ? "/custom" : "/scenes"}>{custom ? "自定义场景" : "场景练习"}</Link>
@@ -213,5 +215,5 @@ export function SceneRehearsal({ scenarioId, customScene, title, goal, icon: Ico
         </section>
       </div>
     </main>
-  </div>;
+  </div></DictionarySceneContext.Provider>;
 }

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
@@ -23,12 +23,16 @@ import { PersonalCoaching } from "../components/PersonalCoaching";
 import { useProgressData } from "../hooks/useProgressData";
 import { useAuth } from "../store/auth";
 import { getClientId } from "../lib/clientId";
-import { getPracticeDetail, type InterviewScore, type ProgressSessions } from "../lib/api";
+import { ApiError, getPracticeDetail, request, type InterviewScore, type ProgressSessions } from "../lib/api";
 import { getScenario } from "../data/scenarios";
 import { tokens } from "../lib/tokens";
 import { interviewProgressSummary } from "../lib/interviewScoring";
 import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
 import { correctionDrills, isCorrectionCategory } from "../lib/practiceCorrections";
+import { recordCreationQuery } from "../lib/practiceRecordStatus";
+import { invalidateProgress } from "../lib/progressCache";
+import { forgetSavedSession } from "../lib/sessionSave";
+import { HistoryActions, HistoryDeleteDialog } from "./ProgressHistoryActions";
 
 const EChart = lazy(() =>
   import("../components/EChart").then((module) => ({ default: module.EChart })),
@@ -37,16 +41,39 @@ const mean = (values: number[]) =>
   values.length
     ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10
     : null;
-function date(iso: string) {
+function date(iso: string, includeYear = false) {
   const value = new Date(/(?:Z|[+-]\d\d:\d\d)$/.test(iso) ? iso : iso + "Z");
   return Number.isNaN(value.getTime())
     ? iso
     : value.toLocaleString("zh-CN", {
+        year: includeYear ? "numeric" : undefined,
         month: "numeric",
         day: "numeric",
         hour: "2-digit",
         minute: "2-digit",
       });
+}
+
+type HistoryItem = {
+  id: number;
+  kind: string;
+  title: string;
+  at: string;
+  score: number | null;
+  scale: number;
+};
+
+type HistoryDeletion = {
+  item: HistoryItem;
+  owner: string;
+  generation: number;
+  trigger: HTMLButtonElement;
+  status: "confirmation" | "pending" | "error";
+};
+
+function historyKind(kind: string) {
+  if (kind === "interview") return "主题访谈";
+  return kind === "session" ? "场景对话" : "跟读练习";
 }
 
 function scenarioTitle(id: string) {
@@ -77,6 +104,7 @@ export default function Progress() {
   const navigate = useNavigate();
   const account = useAuth((s) => s.user?.id);
   const owner = account ? "account:" + account : "device:" + getClientId();
+  const authGeneration = useSyncExternalStore(subscribeAuthGeneration, getAuthGeneration, getAuthGeneration);
   const data = useProgressData(owner);
   const {
     sessions,
@@ -88,6 +116,7 @@ export default function Progress() {
     status,
     errors,
     reload,
+    forgetHistoryRecord,
   } = data;
   const [filter, setFilter] = useState("all");
   const [grammarRefresh, setGrammarRefresh] = useState(0);
@@ -106,6 +135,11 @@ export default function Progress() {
   const [reviewError, setReviewError] = useState(false);
   const [reviewLoading, setReviewLoading] = useState<number | null>(null);
   const detailRequest = useRef<{revision:number; controller:AbortController | null}>({revision:0,controller:null});
+  const [deletion, setDeletion] = useState<HistoryDeletion | null>(null);
+  const [deleteStatus, setDeleteStatus] = useState("");
+  const deleteRequest = useRef<AbortController | null>(null);
+  const historyHeading = useRef<HTMLHeadingElement>(null);
+  const nextHistoryFocus = useRef<HTMLElement | null>(null);
   const currentOwner = useRef(owner);
   currentOwner.current = owner;
   const cancelReview = useCallback(() => {
@@ -121,6 +155,26 @@ export default function Progress() {
     const unsubscribe=subscribeAuthGeneration(closeReview);
     return () => {unsubscribe();cancelReview();};
   }, [owner, closeReview, cancelReview]);
+  useEffect(() => {
+    const reset = () => {
+      deleteRequest.current?.abort();
+      deleteRequest.current = null;
+      nextHistoryFocus.current = null;
+      setDeletion(null);
+      setDeleteStatus("");
+    };
+    reset();
+    const unsubscribe = subscribeAuthGeneration(reset);
+    return () => {
+      unsubscribe();
+      deleteRequest.current?.abort();
+    };
+  }, [owner]);
+  useEffect(() => {
+    if (deletion) return;
+    nextHistoryFocus.current?.focus();
+    nextHistoryFocus.current = null;
+  }, [deletion]);
   const interview = practice.filter((p) => p.kind === "interview");
   const trendSessions = useMemo(() => sessions.filter(
     (session): session is typeof session & { overall: number } => session.overall !== null,
@@ -188,9 +242,8 @@ export default function Progress() {
     }),
     [latest],
   );
-  const history = [
+  const history: HistoryItem[] = [
     ...sessions.map((s) => ({
-      key: "s" + s.id,
       id: s.id,
       kind: "session",
       title: scenarioTitle(s.scenario_id),
@@ -199,7 +252,6 @@ export default function Progress() {
       at: s.created_at,
     })),
     ...practice.map((p) => ({
-      key: "p" + p.id,
       id: p.id,
       kind: p.kind,
       title:
@@ -211,7 +263,60 @@ export default function Progress() {
   ]
     .filter((item) => filter === "all" || item.kind === filter)
     .sort((a, b) => b.at.localeCompare(a.at));
-  async function openReview(id: number) {
+
+  function isCurrentHistoryOwner(expectedOwner: string, generation: number) {
+    const activeAccount = useAuth.getState().user?.id;
+    const activeOwner = activeAccount ? "account:" + activeAccount : "device:" + getClientId();
+    return owner === expectedOwner && activeOwner === expectedOwner && generation === getAuthGeneration();
+  }
+
+  function chooseHistoryDelete(item: HistoryItem, trigger: HTMLButtonElement) {
+    if (deleteRequest.current || !isCurrentHistoryOwner(owner, authGeneration)) return;
+    closeReview();
+    setDeleteStatus("");
+    setDeletion({ item, trigger, owner, generation: authGeneration, status: "confirmation" });
+  }
+
+  function cancelHistoryDelete() {
+    if (!deletion || deleteRequest.current) return;
+    nextHistoryFocus.current = deletion.trigger;
+    setDeletion(null);
+  }
+
+  async function confirmHistoryDelete() {
+    if (!deletion || deleteRequest.current || !isCurrentHistoryOwner(deletion.owner, deletion.generation)) return;
+    const { item } = deletion;
+    const collection = item.kind === "session" ? "sessions" : "practice";
+    const controller = new AbortController();
+    const isCurrent = () => deleteRequest.current === controller && !controller.signal.aborted
+      && isCurrentHistoryOwner(deletion.owner, deletion.generation);
+    function finish(message: string) {
+      forgetHistoryRecord(collection, item.id, item.at);
+      nextHistoryFocus.current = historyHeading.current;
+      setDeletion(null);
+      setDeleteStatus(message);
+    }
+    deleteRequest.current = controller;
+    setDeletion({ ...deletion, status: "pending" });
+    try {
+      const query = new URLSearchParams({ created_at: item.at });
+      await request<void>(`/api/${collection}/${item.id}?${query}`, { method: "DELETE", signal: controller.signal });
+      if (isCurrent()) {
+        if (collection === "sessions") forgetSavedSession(item.id, item.at);
+        finish("已删除这次练习。");
+      }
+    } catch (error) {
+      if (!isCurrent()) return;
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
+        invalidateProgress();
+        finish("这条练习已变更或无法访问。");
+      } else setDeletion({ ...deletion, status: "error" });
+    } finally {
+      if (deleteRequest.current === controller) deleteRequest.current = null;
+    }
+  }
+
+  async function openReview(id: number, createdAt: string) {
     cancelReview();
     const controller=new AbortController();
     detailRequest.current.controller=controller;
@@ -222,7 +327,7 @@ export default function Progress() {
     const expectedOwner = owner;
     const current = () => currentOwner.current === expectedOwner && generation === getAuthGeneration() && detailRequest.current.revision === revision && !controller.signal.aborted;
     try {
-      const record = await getPracticeDetail(id,controller.signal);
+      const record = await getPracticeDetail(id, controller.signal, createdAt);
       if (!current()) return;
       const detail = JSON.parse(record.detail);
       if (!Array.isArray(detail.results) || !detail.results.length)
@@ -271,7 +376,7 @@ export default function Progress() {
                   " 次场景 · " +
                   stats.total_practice +
                   " 次专项"
-                : "正在读取你的积累"
+                : errors.includes("stats") ? "累计练习暂时无法更新" : "正在读取你的积累"
             }
           />
           <Metric
@@ -494,7 +599,7 @@ export default function Progress() {
           <div className="learning-section-title">
             <div>
               <p className="eyebrow">EVERY CONVERSATION COUNTS</p>
-              <h2>回看走过的每一步</h2>
+              <h2 ref={historyHeading} tabIndex={-1}>回看走过的每一步</h2>
             </div>
             <CalendarDays size={21} />
           </div>
@@ -518,6 +623,9 @@ export default function Progress() {
               </button>
             ))}
           </div>
+          <div role="status">
+            {deleteStatus && <p className="learning-notice history-delete-status">{deleteStatus}</p>}
+          </div>
           {reviewError && (
             <p role="status" className="learning-notice">
               这条旧记录没有保存逐题详情，或暂时无法读取。其他记录仍可查看。
@@ -526,10 +634,10 @@ export default function Progress() {
           {history.length ? (
             <ul>
               {history.map((item) => (
-                <li key={item.key}>
+                <li className="history-record" key={`${owner}:${authGeneration}:${item.kind}:${item.id}:${item.at}`}>
                   {item.kind === "session" ? (
                     <Link
-                      to={"/session/" + item.id}
+                      to={`/session/${item.id}${recordCreationQuery(item.at)}`}
                       className="learning-history-row"
                     >
                       <HistoryRow item={item} />
@@ -537,7 +645,7 @@ export default function Progress() {
                   ) : item.kind === "interview" ? (
                     <button
                       className="learning-history-row"
-                      onClick={() => void openReview(item.id)}
+                      onClick={() => void openReview(item.id, item.at)}
                       disabled={reviewLoading === item.id}
                     >
                       <HistoryRow item={item} />
@@ -547,6 +655,7 @@ export default function Progress() {
                       <HistoryRow item={item} />
                     </div>
                   )}
+                  <HistoryActions label={`${item.title} · ${date(item.at)}`} onDelete={(trigger) => chooseHistoryDelete(item, trigger)} />
                 </li>
               ))}
             </ul>
@@ -575,6 +684,18 @@ export default function Progress() {
             </div>
           )}
         </section>
+        {deletion?.owner === owner && deletion.generation === authGeneration && (
+          <HistoryDeleteDialog
+            title={deletion.item.title}
+            kind={historyKind(deletion.item.kind)}
+            createdAt={deletion.item.at}
+            date={date(deletion.item.at, true)}
+            pending={deletion.status === "pending"}
+            error={deletion.status === "error"}
+            onCancel={cancelHistoryDelete}
+            onConfirm={() => void confirmHistoryDelete()}
+          />
+        )}
         {review?.owner === owner && (
           <ReviewDialog onClose={closeReview}>
             <InterviewResults
@@ -653,17 +774,7 @@ function Metric({
     </div>
   );
 }
-function HistoryRow({
-  item,
-}: {
-  item: {
-    kind: string;
-    title: string;
-    at: string;
-    score: number | null;
-    scale: number;
-  };
-}) {
+function HistoryRow({ item }: { item: HistoryItem }) {
   return (
     <>
       <span className={"learning-history-icon " + item.kind}>
@@ -678,18 +789,13 @@ function HistoryRow({
       <span className="learning-history-copy">
         <strong>{item.title}</strong>
         <small>
-          {date(item.at)} ·{" "}
-          {item.kind === "interview"
-            ? "主题访谈"
-            : item.kind === "session"
-              ? "场景对话"
-              : "跟读练习"}
+          {date(item.at)} · {historyKind(item.kind)}
         </small>
       </span>
       <span className="learning-history-score">
         {item.score === null ? "未评分" : <>{item.score}<small> / {item.scale}</small></>}
       </span>
-      <ChevronRight size={17} />
+      {item.kind !== "pronunciation" && <ChevronRight size={17} aria-hidden="true" />}
     </>
   );
 }

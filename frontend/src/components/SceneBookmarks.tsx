@@ -44,12 +44,14 @@ export function SceneBookmarks() {
         <summary>{group.title} · {group.sentences.length} 句</summary>
         <ul>{group.sentences.map(cue => {
           const exists = words.find(word => word.text === cue.sentence);
+          const custom = group.key.startsWith("custom-");
           return <li key={cue.id}>
             <div><strong lang="en">{cue.sentence}</strong>{cue.meaning && <p>{cue.meaning}</p>}</div>
             <button type="button" className="ui-secondary" disabled={!!exists} onClick={() => collect({
               text: cue.sentence, meaning: cue.meaning, example: cue.sentence, kind: "sentence",
-              scenario_id: group.key.startsWith("custom-") ? "custom" : group.key, topic: group.title.slice(0, 48),
-            })}>{exists ? exists.id > 0 ? "已加入" : "正在加入…" : "加入复习"}</button>
+              scenario_id: custom ? "custom" : group.key, topic: Array.from(group.title).slice(0, 48).join(""),
+              ...(custom ? { source: { key: group.key, title: group.title } } : {}),
+            })}>{exists ? exists.id > 0 ? "已在生词本" : "正在加入…" : "加入复习"}</button>
           </li>;
         })}</ul>
       </details>))}

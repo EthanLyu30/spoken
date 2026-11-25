@@ -12,7 +12,7 @@ const article: Correction = { original: "umbrella", suggestion: "an umbrella", n
 function review(original: string, corrections: Correction[]) {
   const messages: ChatMessage[] = [{ role: "assistant", content: "What happened yesterday?" }, { role: "user", content: original }];
   return render(<DictionaryContext.Provider value={{ openDictionary: () => {} }}>
-    <CorrectionReview messages={messages} corrections={corrections} scenarioId="airport" />
+    <CorrectionReview messages={messages} corrections={corrections.map(fix => ({ ...fix, marked: true }))} scenarioId="airport" />
   </DictionaryContext.Provider>);
 }
 

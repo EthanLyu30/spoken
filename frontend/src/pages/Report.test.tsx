@@ -1,8 +1,8 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
-const api = vi.hoisted(() => ({ getSession: vi.fn(), postFeedback: vi.fn(), postSession: vi.fn(), getWords: vi.fn(), postTurnCorrection: vi.fn() }));
+const api = vi.hoisted(() => ({ getSession: vi.fn(), postFeedback: vi.fn(), postSession: vi.fn(), getWords: vi.fn(), postTurnCorrection: vi.fn(), setCorrectionPractice: vi.fn() }));
 vi.mock("../lib/api", () => api);
 vi.mock("../components/Buddy", () => ({ Buddy: () => null }));
 vi.mock("../components/dictionary/InteractiveEnglishText", () => ({ InteractiveEnglishText: ({ text }: { text: string }) => <span>{text}</span> }));
@@ -11,6 +11,7 @@ import { useSession } from "../store/session";
 import { useCustomScene } from "../store/custom";
 import { useWords } from "../store/words";
 import { setToken } from "../lib/authToken";
+import { persistSessionOnce, unscoredSession } from "../lib/sessionSave";
 const feedback = { overall: 80, summary: "Nice work", tip: "Keep going", scores: [], corrections: [], phrases: [] };
 let sequence = 0;
 beforeEach(() => {
@@ -26,7 +27,7 @@ const mount = (id = useSession.getState().practiceId) => render(
     <Routes><Route path="/report/:sessionId" element={<Report />} /></Routes>
   </MemoryRouter>,
 );
-const openSaved = () => render(<MemoryRouter initialEntries={["/report/saved/18"]}>
+const openSaved = (query = "") => render(<MemoryRouter initialEntries={[`/report/saved/18${query}`]}>
   <Routes><Route path="/report/saved/:savedSessionId" element={<Report />} /></Routes>
 </MemoryRouter>);
 
@@ -62,6 +63,31 @@ it("keeps a marked learner sentence in the report and saved session even when th
   }), expect.any(AbortSignal));
 });
 
+it("renders the original and corrected whole favorite without offering practice even when feedback lists no fixes", async () => {
+  const original = "I'd like latte, please.";
+  const suggestion = "I'd like a latte, please.";
+  const messages = [{ role: "user" as const, content: original }];
+  const favorite = { original, suggestion, note: "", turn_index: 0, marked: true, self_marked: true };
+  useSession.getState().setSession("cafe", messages, `favorite-${sequence}`, [favorite]);
+  api.postSession.mockResolvedValueOnce({ ...feedback, id: 18, corrections: [favorite] });
+  const live = mount();
+  const checkFavorite = async () => {
+    const review = within(await screen.findByRole("region", { name: "句子纠错" }));
+    expect(review.getByText(original)).toBeVisible();
+    expect(review.getByText(suggestion)).toBeVisible();
+    expect(review.getByText("已收藏")).toBeVisible();
+    expect(review.queryByRole("button", { name: /复练|填空|中译英/ })).not.toBeInTheDocument();
+  };
+  await checkFavorite();
+  expect(api.postSession).toHaveBeenCalledWith(expect.objectContaining({ corrections: [favorite] }));
+  live.unmount();
+  useSession.getState().clear();
+  api.getSession.mockResolvedValueOnce({ ...feedback, id: 18, scenario_id: "cafe", messages, corrections: [favorite] });
+  openSaved();
+  await checkFavorite();
+  expect(api.postFeedback).toHaveBeenCalledTimes(1);
+});
+
 it("does not save feedback that completes after an identity transition", async () => {
   let resolve!: (value: typeof feedback) => void;
   api.postFeedback.mockReturnValue(new Promise(r => { resolve = r; }));
@@ -94,12 +120,45 @@ it("saves the transcript and marked sentence on feedback failure, then sends a s
   useSession.getState().setSession("cafe", messages, `retry-grade-${sequence}`, [mark]);
   api.postFeedback.mockRejectedValueOnce(new Error("temporarily unavailable"));
   mount();
-  expect(await screen.findByRole("link", {name: /对话和错句标记已保存为未评分/})).toBeVisible();
+  expect(await screen.findByRole("link", {name: /对话已保存为未评分/})).toBeVisible();
   const samePractice = { client_session_id: `retry-grade-${sequence}`, messages, corrections: [mark] };
   expect(api.postSession).toHaveBeenNthCalledWith(1, expect.objectContaining({...samePractice, overall: null, scores: []}));
   await userEvent.click(screen.getByRole("button", {name: "重试生成"}));
   expect(await screen.findByRole("heading", {name: "Nice work"})).toBeVisible();
   expect(api.postSession).toHaveBeenNthCalledWith(2, expect.objectContaining({...samePractice, overall: 80}));
+});
+
+it("saves a favorite confirmed after an unscored checkpoint when the summary score fails", async () => {
+  const original = "I coordinate three team.";
+  const suggestion = "I coordinate three teams.";
+  const favorite = { original, suggestion, note: "", marked: true, self_marked: true, turn_index: 0 };
+  const messages = [{ role: "user" as const, content: original }];
+  const practiceId = `stop-then-favorite-${sequence}`;
+  const checkpoint = { ...unscoredSession([]), id: 18, scenario_id: "interview", created_at: "2026-11-25T08:00:00.000123",
+    client_session_id: practiceId, messages };
+  api.postSession.mockResolvedValueOnce(checkpoint).mockResolvedValueOnce({ ...checkpoint, corrections: [favorite] });
+  await persistSessionOnce("interview", messages, unscoredSession([]), practiceId);
+
+  useSession.getState().setSession("interview", messages, practiceId, [favorite]);
+  api.postFeedback.mockRejectedValueOnce(new Error("temporarily unavailable"));
+  const active = mount();
+  const review = within(await screen.findByRole("region", { name: "句子纠错" }));
+  expect(review.getByText(original)).toBeVisible();
+  expect(review.getByText(suggestion)).toBeVisible();
+  expect(review.getByText("已收藏")).toBeVisible();
+  expect(screen.getByRole("link", { name: /对话已保存为未评分/ })).toHaveAttribute("href",
+    "/session/18?created_at=2026-11-25T08%3A00%3A00.000123");
+  expect(review.queryByRole("button", { name: /重练原句|填空|中译英/ })).not.toBeInTheDocument();
+  expect(api.postSession).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    client_session_id: practiceId, messages, overall: null, scores: [], corrections: [favorite],
+  }));
+
+  active.unmount();
+  api.getSession.mockResolvedValueOnce({ ...checkpoint, corrections: [favorite] });
+  api.postFeedback.mockRejectedValueOnce(new Error("still unavailable"));
+  openSaved();
+  expect(await screen.findByText(suggestion)).toBeVisible();
+  expect(api.postSession).toHaveBeenCalledTimes(2);
 });
 
 it("opens a history report without in-memory state and displays the saved score from a competing write", async () => {
@@ -113,7 +172,8 @@ it("opens a history report without in-memory state and displays the saved score 
   expect(await screen.findByRole("heading", {name: "已保存的评分"})).toBeVisible();
   expect(screen.getByText("0")).toBeVisible();
   expect(screen.queryByText("80")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", {name: "重练原句"})).toBeVisible();
+  expect(screen.getByText("已收藏")).toBeVisible();
+  expect(screen.queryByRole("button", {name: "重练原句"})).not.toBeInTheDocument();
   expect(screen.queryByText(/XP/)).not.toBeInTheDocument();
   expect(api.postSession).toHaveBeenCalledWith(expect.objectContaining({client_session_id: "history-rescore", corrections: [mark], overall: 80}));
 });
@@ -132,4 +192,23 @@ it("keeps an old report link from opening an unrelated active practice", () => {
   mount("some-other-practice");
   expect(screen.getByRole("link", {name: "查看练习历史"})).toHaveAttribute("href", "/progress");
   expect(api.postFeedback).not.toHaveBeenCalled();
+});
+
+it.each(["history", "live"])("uses the saved record identity to select a correction from a %s report", async source => {
+  const createdAt = "2026-11-25T01:02:03.123456";
+  const correction = { original: "latte", suggestion: "a latte", note: "加冠词", category: "articles", turn_index: 0 };
+  const record = { ...feedback, id: 18, created_at: createdAt, scenario_id: "cafe", corrections: [correction] };
+  api.setCorrectionPractice.mockResolvedValue([{ ...correction, marked: true }]);
+  const messages = [{ role: "user" as const, content: "I'd like latte, please." }];
+  if (source === "history") {
+    api.getSession.mockResolvedValue({ ...record, messages });
+    openSaved(`?${new URLSearchParams({ created_at: createdAt })}`);
+  } else {
+    useSession.getState().setSession("cafe", messages, `active-correction-${sequence}`);
+    api.postSession.mockResolvedValue(record);
+    mount();
+  }
+  await userEvent.click(await screen.findByRole("button", { name: "加入复练" }));
+  expect(api.setCorrectionPractice).toHaveBeenCalledWith(18, createdAt, correction, true, expect.any(AbortSignal));
+  if (source === "history") expect(api.getSession).toHaveBeenCalledWith(18, expect.any(AbortSignal), createdAt);
 });

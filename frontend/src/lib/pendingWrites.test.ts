@@ -326,6 +326,22 @@ it("replays a queued 204 delete without parsing a body", async () => {
   expect(JSON.parse(localStorage.getItem("spoken-owner-pending-writes") || "[]")).toHaveLength(0);
 });
 
+it("drops a queued history save when the matching practice was explicitly deleted", async () => {
+  const record = {
+    id: "deleted-practice-save", transitionId: "restore-test", guestId: "guest-deleted",
+    path: "/api/sessions", method: "POST", body: JSON.stringify(payload), headers: {}, createdAt: Date.now(),
+  };
+  localStorage.setItem("spoken-owner-pending-writes", JSON.stringify([record]));
+  localStorage.setItem("spoken-owner-transition-outcome", JSON.stringify({ id: "restore-test", status: "success", targetUserId: 91 }));
+  setToken(accountToken(91));
+  const fetcher = vi.fn(async () => Response.json({ detail: { code: "practice_record_deleted", message: "已删除" } }, { status: 409 }));
+  vi.stubGlobal("fetch", fetcher);
+  await retryPendingOwnerWrites();
+  await retryPendingOwnerWrites();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(localStorage.getItem("spoken-owner-pending-writes") || "[]")).toHaveLength(0);
+});
+
 it("retains a late 409 against the original guest after the page switches account", async () => {
   localStorage.setItem("spoken-client-id", "guest-late-a");
   let release!: (response: Response) => void;

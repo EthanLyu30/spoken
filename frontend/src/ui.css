@@ -452,13 +452,6 @@
 .insight-details ul {
   max-width: 780px;
 }
-.wordbag-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 305px;
-  gap: 48px;
-  border-top: 1px solid var(--border);
-  padding-top: 23px;
-}
 .wordbag-tabs {
   display: flex;
   gap: 6px;
@@ -503,56 +496,26 @@
   width: 15px;
   height: 15px;
 }
-.wordbag-layout ul.space-y-3 > li {
+.wordbag-library ul.space-y-3 > li {
   border: 0;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
   background: none;
   margin: 0;
 }
-.wordbag-layout ul.space-y-3 > li > button {
+.wordbag-library ul.space-y-3 > li > button {
   padding: 18px 4px;
 }
-.wordbag-layout ul.space-y-3 > li > button > span:first-child {
+.wordbag-library ul.space-y-3 > li > button > span:first-child {
   font:
     650 18px "Segoe UI",
     sans-serif;
 }
-.wordbag-layout ul.space-y-3 > li > div {
+.wordbag-library ul.space-y-3 > li > div {
   border-top: 0;
   border-radius: 12px;
   padding: 17px 20px;
   margin-bottom: 12px;
-}
-.wordbag-aside {
-  border-left: 1px solid var(--border);
-  padding-left: 28px;
-}
-.wordbag-aside h2 {
-  font-size: 19px;
-  margin-bottom: 16px;
-}
-.wordbag-aside p {
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.95;
-}
-.wordbag-aside > .ui-button {
-  margin: 22px 0;
-  width: 100%;
-}
-.wordbag-aside section {
-  padding-top: 24px;
-  border-top: 1px solid var(--border);
-}
-.wordbag-aside h3 {
-  font-size: 15px;
-  font-weight: 700;
-  margin-bottom: 12px;
-}
-.wordbag-aside .ui-link {
-  margin-top: 22px;
-  font-size: 13px;
 }
 .wordbag-state {
   min-height: 220px;
@@ -568,24 +531,6 @@
 .wordbag-state h2 {
   font-size: 20px;
   color: var(--ink);
-}
-.wordbag-layout > div > section.card {
-  min-height: 390px;
-  background: var(--surface);
-  padding: 35px;
-  border-radius: 18px;
-}
-.wordbag-layout > div > section.card > button {
-  background: none;
-  min-height: 140px;
-}
-.wordbag-layout > div > section.card > button > span {
-  font:
-    750 43px "Segoe UI",
-    sans-serif;
-}
-.wordbag-layout > div > section.card > div:last-child {
-  margin-top: 20px;
 }
 .daily-page {
   position: relative;
@@ -1994,10 +1939,6 @@
   .daily-quote-row > p:first-of-type {
     font-size: 19px;
   }
-  .wordbag-layout {
-    display: block;
-    padding-top: 17px;
-  }
   .wordbag-tabs {
     gap: 5px;
     margin-bottom: 15px;
@@ -2014,24 +1955,11 @@
     padding-inline: 12px;
     font-size: 11px;
   }
-  .wordbag-aside {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-    padding: 22px 0 0;
-    margin-top: 25px;
-  }
-  .wordbag-layout ul.space-y-3 > li > button > span:first-child {
+  .wordbag-library ul.space-y-3 > li > button > span:first-child {
     font-size: 16px;
   }
-  .wordbag-layout ul.space-y-3 > li > button {
+  .wordbag-library ul.space-y-3 > li > button {
     padding-block: 15px;
-  }
-  .wordbag-layout > div > section.card {
-    padding: 25px 16px;
-    min-height: 340px;
-  }
-  .wordbag-layout > div > section.card > button > span {
-    font-size: 34px;
   }
   .daily-filters {
     padding: 12px 0;

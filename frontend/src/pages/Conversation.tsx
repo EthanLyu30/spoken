@@ -17,6 +17,8 @@ import { getScenario } from "../data/scenarios";
 import { ConversationReferences } from "../components/ConversationReferences";
 import { scenarioIcons } from "../lib/icons";
 import { themeFor, type ScenarioTheme } from "../lib/theme";
+import { sceneWordOrigin } from "../lib/wordOrigin";
+import { DictionarySceneContext } from "../components/dictionary/DictionaryContext";
 import {
   postChat,
   postFeedback,
@@ -125,6 +127,10 @@ export default function Conversation() {
   const sidebar = useSyncExternalStore(subscribeLayout, hasSidebar, () => false);
   const [markedCorrections, setMarkedCorrections] = useState<Correction[]>([]);
   const marksRef = useRef<Correction[]>([]);
+  const favoriteWrites = useRef(new Set<Promise<void>>());
+  const waitingForFavorites = useRef(false);
+  const [savingFavorites, setSavingFavorites] = useState(false);
+
   const [canRetry, setCanRetry] = useState(false);
   const [callStarting, setCallStarting] = useState(false);
   const [inputMode, setInputMode] = useState<"voice" | "text">("voice");
@@ -185,15 +191,23 @@ export default function Conversation() {
     turnMetaRef.current = turnMeta;
   }, [turnMeta]);
 
-  function finish() {
-    if (!id || goingToReportRef.current || generation !== getAuthGeneration()) return;
+  async function finish() {
+    if (!id || goingToReportRef.current || waitingForFavorites.current || !isCurrent()) return;
+    if (favoriteWrites.current.size) {
+      waitingForFavorites.current = true;
+      setSavingFavorites(true);
+      while (favoriteWrites.current.size && isCurrent()) await Promise.all(favoriteWrites.current);
+      waitingForFavorites.current = false;
+      if (mountedRef.current) setSavingFavorites(false);
+      if (!isCurrent()) return;
+    }
     goingToReportRef.current = true; // the report page will save this session
     callRef.current?.end();
     requestControllerRef.current?.abort();
     callQueueRef.current?.stop();
     speakingRef.current?.stop();
     if (chime && !muted && messages.some(message => message.role === "user")) void playCafeChime();
-    setSession(id, messages, practiceIdRef.current, marksRef.current, customScene);
+    setSession(id, messagesRef.current, practiceIdRef.current, marksRef.current, customScene);
     navigate(`/report/${practiceIdRef.current}`);
   }
 
@@ -287,6 +301,7 @@ export default function Conversation() {
       callQueueRef.current?.stop();
     });
     const practiceId = practiceIdRef.current;
+    const pendingFavorites = favoriteWrites.current;
     return () => {
       mountedRef.current = false;
       unsubscribeIdentity();
@@ -305,9 +320,9 @@ export default function Conversation() {
         const msgs = messagesRef.current;
         if (msgs.some((m) => m.role === "user")) {
           const custom = isCustom ? (customScene ?? undefined) : undefined;
-          const marked = marksRef.current;
-          postFeedback(id, msgs, undefined, custom)
-            .then((f) => includeMarkedCorrections(f, marked), () => unscoredSession(marked))
+          const grade = postFeedback(id, msgs, undefined, custom).catch(() => undefined);
+          Promise.all([grade, ...pendingFavorites])
+            .then(([feedback]) => feedback ? includeMarkedCorrections(feedback, marksRef.current) : unscoredSession(marksRef.current))
             .then((result) => persistSessionOnce(id, msgs, result, practiceId, generation, custom))
             .catch(() => undefined);
         }
@@ -747,6 +762,21 @@ export default function Conversation() {
     setMarkedCorrections(next);
   }
 
+  function saveFavorite(turnIndex: number, original: string, confirmation: Promise<string | undefined>) {
+    if (!isCurrent() || goingToReportRef.current) return;
+    const pending = favoriteWrites.current;
+    const write = confirmation.then(suggestion => {
+      const turn = messagesRef.current[turnIndex];
+      if (!suggestion || generation !== getAuthGeneration() || turn?.role !== "user" || turn.content !== original) return;
+      const entry: Correction = { turn_index: turnIndex, original, suggestion, note: "", marked: true, self_marked: true };
+      const key = correctionKey(entry);
+      if (marksRef.current.some(mark => correctionKey(mark) === key)) return;
+      marksRef.current = [...marksRef.current, entry];
+      if (mountedRef.current) setMarkedCorrections(marksRef.current);
+    }, () => undefined).finally(() => { pending.delete(write); });
+    pending.add(write);
+  }
+
   const reference = <ConversationReferences scenarioId={id} custom={customScene} messages={messages}
     waiting={booting || loading || streaming || callPhase === "thinking" || callPhase === "speaking"}
     canInsert={!inCall && !recording && !transcribing && !callStarting && !booting && !loading}
@@ -781,7 +811,7 @@ export default function Conversation() {
     : "准备好了就开口，Pip 会陪你聊下去";
 
   return (
-    <div
+    <DictionarySceneContext.Provider value={sceneWordOrigin(id, customScene)}><div
       className="conversation-page flex h-screen flex-col"
       style={{ height: "100dvh" }}
     >
@@ -841,10 +871,11 @@ export default function Conversation() {
           {hasUserTurn && (
             <button
               type="button"
-              onClick={finish}
+              onClick={() => void finish()}
+              disabled={savingFavorites}
               className="shrink-0 rounded-full bg-coral px-4 py-2 text-sm font-bold text-primary-fg shadow-pop transition-transform active:translate-y-0.5"
             >
-              看小结
+              {savingFavorites ? "正在保存收藏…" : "看小结"}
             </button>
           )}
         </div>
@@ -932,9 +963,7 @@ export default function Conversation() {
                         meta: turnMeta[i] ?? { source: "typed" },
                         markedIssues: markedCorrections.filter((entry) => entry.turn_index === i),
                         onToggleMark: (issue) => toggleMark(i, issue),
-                        onToggleSentence: () => toggleCorrection({
-                          turn_index: i, original: m.content, suggestion: "", note: "", marked: true, self_marked: true,
-                        }),
+                        onSaveFavorite: (confirmation) => saveFavorite(i, m.content, confirmation),
                         onUseSuggestion: (suggestion) => {
                           setInput(suggestion);
                           setInputMode("text");
@@ -1147,7 +1176,7 @@ export default function Conversation() {
           <p>点击英文单词可以查释义、听发音并收藏。</p>
         </aside>
       </div>
-    </div>
+    </div></DictionarySceneContext.Provider>
   );
 }
 

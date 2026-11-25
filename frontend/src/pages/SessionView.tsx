@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { BottomNav } from "../components/BottomNav";
 import { Buddy } from "../components/Buddy";
 import { CorrectionReview } from "../components/CorrectionReview";
 import { InteractiveEnglishText } from "../components/dictionary/InteractiveEnglishText";
+import { DictionarySceneContext } from "../components/dictionary/DictionaryContext";
+import { sceneWordOrigin } from "../lib/wordOrigin";
 import { Button } from "../components/ui/Button";
 import { PracticeSummary } from "../components/PracticeSummary";
 import { ProgressBar } from "../components/ui/ProgressBar";
@@ -12,6 +14,7 @@ import { getSession, type SessionDetail } from "../lib/api";
 import { getScenario } from "../data/scenarios";
 import { cn } from "../lib/utils";
 import { correctionDrills, isCorrectionCategory } from "../lib/practiceCorrections";
+import { recordCreationQuery } from "../lib/practiceRecordStatus";
 import { getAuthGeneration } from "../lib/authToken";
 
 const SCORE_COLORS = ["#ff6f5e", "#ff9f45", "#41c08c", "#57b7e8"];
@@ -28,18 +31,26 @@ function formatTime(iso: string): string {
 
 export default function SessionView() {
   const { id } = useParams();
+  const { hash, search } = useLocation();
+  const createdAt = new URLSearchParams(search).get("created_at") ?? undefined;
+  return <SessionRecord key={`${id}:${createdAt ?? ""}`} id={id} createdAt={createdAt} hash={hash} />;
+}
+
+function SessionRecord({ id, createdAt, hash }: { id?: string; createdAt?: string; hash: string }) {
   const [generation] = useState(getAuthGeneration);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
     const num = Number(id);
+    setDetail(null);
     if (!num) {
       setStatus("error");
       return;
     }
+    setStatus("loading");
     const ctrl = new AbortController();
-    getSession(num, ctrl.signal)
+    getSession(num, ctrl.signal, createdAt)
       .then((d) => {
         if (!ctrl.signal.aborted && generation === getAuthGeneration()) {
           setDetail(d);
@@ -50,7 +61,14 @@ export default function SessionView() {
         if (!ctrl.signal.aborted) setStatus("error");
       });
     return () => ctrl.abort();
-  }, [id, generation]);
+  }, [id, createdAt, generation]);
+
+  useEffect(() => {
+    if (status !== "ready" || detail?.id !== Number(id) || !/^#correction-turn-\d+$/.test(hash)) return;
+    const turn = document.getElementById(hash.slice(1));
+    turn?.scrollIntoView?.({ block: "start" });
+    turn?.focus({ preventScroll: true });
+  }, [status, detail?.id, id, hash]);
 
   const scenario = detail?.scenario_id ? getScenario(detail.scenario_id) : undefined;
   const sceneLabel = scenario
@@ -61,14 +79,14 @@ export default function SessionView() {
   const tags = new Map<number, Set<string>>();
   for (const entry of detail?.corrections ?? []) {
     const category = entry.category ?? null;
-    if (entry.turn_index == null || (!entry.self_marked && !isCorrectionCategory(category))) continue;
+    if (entry.turn_index == null || entry.self_marked || !entry.marked) continue;
     const labels = tags.get(entry.turn_index) ?? new Set<string>();
-    labels.add(isCorrectionCategory(category) ? correctionDrills[category].label : "自己收藏");
+    labels.add(isCorrectionCategory(category) ? correctionDrills[category].label : "表达");
     tags.set(entry.turn_index, labels);
   }
 
   return (
-    <div className="min-h-screen pb-24">
+    <DictionarySceneContext.Provider value={sceneWordOrigin(detail?.scenario_id, detail?.custom)}><div className="min-h-screen pb-24">
 
       <header className="mx-auto w-full max-w-3xl px-5 pt-6">
         <Link to="/progress" className={backLink}>
@@ -77,7 +95,7 @@ export default function SessionView() {
       </header>
 
       <main className="mx-auto w-full max-w-3xl px-5 py-6">
-        {status === "loading" && (
+        {(status === "loading" || (status === "ready" && detail?.id !== Number(id))) && (
           <section className="card grid place-items-center p-10 text-center">
             <Buddy mood="idle" size={110} />
             <p className="mt-3 text-muted">正在加载这次练习…</p>
@@ -94,16 +112,16 @@ export default function SessionView() {
           </section>
         )}
 
-        {status === "ready" && detail && (
+        {status === "ready" && detail?.id === Number(id) && (
           <>
             <PracticeSummary scene={sceneLabel} summary={detail.summary || (detail.overall === null ? "这次练习的对话记录" : "这次练习的小结")} score={detail.overall}>
               {formatTime(detail.created_at)}
             </PracticeSummary>
             {detail.scenario_id === "custom" && detail.custom?.practice_exercises?.length === 2 && (
-              <Link className="coaching-secondary mt-4" to={`/prepare/custom?lesson=${detail.id}`}>再做这次的专项练习</Link>
+              <Link className="coaching-secondary mt-4" to={`/prepare/custom?${new URLSearchParams({ lesson: String(detail.id), created_at: detail.created_at })}`}>再做这次的专项练习</Link>
             )}
             {detail.overall === null && detail.client_session_id && (
-              <Link className="coaching-secondary mt-4" to={`/report/saved/${detail.id}`}>为这次对话生成小结</Link>
+              <Link className="coaching-secondary mt-4" to={`/report/saved/${detail.id}${recordCreationQuery(detail.created_at)}`}>为这次对话生成小结</Link>
             )}
 
             {detail.scores.length > 0 && (
@@ -135,7 +153,10 @@ export default function SessionView() {
             )}
 
             {detail.corrections && detail.corrections.length > 0 && (
-              <CorrectionReview corrections={detail.corrections} messages={detail.messages} scenarioId={detail.scenario_id} custom={detail.custom ?? undefined} className="mt-6" />
+              <CorrectionReview corrections={detail.corrections} messages={detail.messages} scenarioId={detail.scenario_id}
+                sessionId={detail.id} sessionCreatedAt={detail.created_at}
+                onCorrectionsChange={corrections => setDetail(current => current?.id === detail.id && current.created_at === detail.created_at ? { ...current, corrections } : current)}
+                custom={detail.custom ?? undefined} className="mt-6" />
             )}
 
             <section className="card mt-6 p-6">
@@ -181,6 +202,6 @@ export default function SessionView() {
         )}
       </main>
       <BottomNav />
-    </div>
+    </div></DictionarySceneContext.Provider>
   );
 }

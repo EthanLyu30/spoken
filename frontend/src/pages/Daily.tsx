@@ -98,7 +98,7 @@ export default function Daily() {
     }
     const src = sourceOf(q);
     const meaning = `${q.zh} —— ${q.author}${src ? `《${src}》` : ""}`;
-    collect({ text: q.text, meaning, kind: "sentence" });
+    collect({ text: q.text, meaning, kind: "sentence", source: { key: "daily" } });
   }
 
   function shuffle() {

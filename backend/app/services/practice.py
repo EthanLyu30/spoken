@@ -48,16 +48,22 @@ def create_record(db: Session, client_id: str, payload: PracticeCreate,
         request_receipts.remember(db, client_id, "practice", payload.client_request_id,
             fingerprint, event, PracticeRecordOut.model_validate(record).model_dump(mode="json"))
         progress.stats_and_awards(db, client_id, timezone)
+        _prune_records(db, client_id, PRACTICE_KEEP)
         db.commit()
     except Exception:
         db.rollback()
         raise
-    prune_records(db, client_id)
     return record
 
 
 def prune_records(db: Session, client_id: str, keep: int = PRACTICE_KEEP) -> None:
     """Delete this client's practice records older than its most recent ``keep``."""
+    progress.lock_owner(db, client_id)
+    _prune_records(db, client_id, keep)
+    db.commit()
+
+
+def _prune_records(db: Session, client_id: str, keep: int) -> None:
     stale_ids = list(
         db.scalars(
             select(PracticeRecord.id)
@@ -67,8 +73,8 @@ def prune_records(db: Session, client_id: str, keep: int = PRACTICE_KEEP) -> Non
         )
     )
     if stale_ids:
-        db.execute(delete(PracticeRecord).where(PracticeRecord.id.in_(stale_ids)))
-        db.commit()
+        db.execute(delete(PracticeRecord).where(PracticeRecord.client_id == client_id,
+                                               PracticeRecord.id.in_(stale_ids)))
 
 
 def list_records(

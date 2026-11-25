@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { TurnCorrectionCardProps } from "../components/TurnCorrectionCard";
-const mocks = vi.hoisted(() => ({ postChat: vi.fn(), postAsr: vi.fn(), streamChat: vi.fn(), speakText: vi.fn(), prepareSpeech: vi.fn(), createSpeechQueue: vi.fn(), postFeedback: vi.fn(), postSession: vi.fn(), startVoiceCall: vi.fn(), startRecording: vi.fn(), openAsrStream: vi.fn(), postTurnCorrection: vi.fn(), postHint: vi.fn(), request: vi.fn(), showCorrectionCards: false }));
+const mocks = vi.hoisted(() => ({ postChat: vi.fn(), postAsr: vi.fn(), streamChat: vi.fn(), speakText: vi.fn(), prepareSpeech: vi.fn(), createSpeechQueue: vi.fn(), postFeedback: vi.fn(), postSession: vi.fn(), startVoiceCall: vi.fn(), startRecording: vi.fn(), openAsrStream: vi.fn(), postTurnCorrection: vi.fn(), postHint: vi.fn(), request: vi.fn(), getWords: vi.fn(), postWord: vi.fn(), showCorrectionCards: false }));
 vi.mock("../lib/api", () => ({ ...mocks }));
 vi.mock("../lib/call", () => ({ startVoiceCall: mocks.startVoiceCall }));
 vi.mock("../lib/recorder", () => ({ startRecording: mocks.startRecording }));
@@ -23,9 +23,12 @@ import { MAX_AUDIO_BYTES } from "../lib/audioLimits";
 import { ASR_QUOTA_MESSAGE, AsrQuotaError } from "../lib/asrQuota";
 import { DictionaryProvider } from "../components/dictionary/DictionaryProvider";
 import { useSession } from "../store/session";
+import { useWords } from "../store/words";
 afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
   vi.clearAllMocks();
+  useWords.getState().reset();
+  mocks.getWords.mockResolvedValue([]);
   mocks.showCorrectionCards = false;
   Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
   mocks.prepareSpeech.mockImplementation(() => ({ dispose: vi.fn(), consume: vi.fn() }));
@@ -161,7 +164,7 @@ it("recovers an interrupted stream through the plain endpoint and speaks only th
   expect(screen.queryByRole("button", { name: "重试回复" })).not.toBeInTheDocument();
 });
 
-it("saves a whole sentence before any AI check and keeps its article fix in the report", async () => {
+it("saves a recommended sentence to the word bag and only marks the chosen article fix for practice", async () => {
   const user = userEvent.setup();
   mocks.showCorrectionCards = true;
   mocks.streamChat.mockImplementationOnce(async (_id, _history, onText) => {
@@ -173,6 +176,8 @@ it("saves a whole sentence before any AI check and keeps its article fix in the 
     issues: [{ kind: "grammar", category: "articles", original: "like latte", replacement: "like a latte", note: "单数可数名词前加 a。" }],
     explanation: "这里是在点一杯拿铁。",
   });
+  mocks.postWord.mockResolvedValueOnce({ id: 9, text: "I'd like a latte.", example: "I'd like a latte.",
+    meaning: "我想要一杯拿铁。", scenario_id: "cafe", kind: "sentence", mastered: false, created_at: "2026-11-25T08:00:00" });
   render(
     <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe?focus=articles"]}>
       <DictionaryProvider>
@@ -189,26 +194,86 @@ it("saves a whole sentence before any AI check and keeps its article fix in the 
   await user.type(screen.getByRole("textbox", { name: "英文回复" }), "I'd like latte.");
   await user.click(screen.getByRole("button", { name: /^发送$/ }));
   await screen.findByText("Would you like milk?");
-  await user.click(screen.getByRole("button", { name: "收藏这句" }));
-  expect(screen.getByRole("button", { name: "已收藏这句" })).toHaveAttribute("aria-pressed", "true");
   expect(mocks.postTurnCorrection).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "即时纠错" }));
+  await user.click(await screen.findByRole("button", { name: "收藏推荐表达" }));
+  await screen.findByRole("button", { name: "已收藏" });
+  expect(mocks.postWord).toHaveBeenCalledExactlyOnceWith({ text: "I'd like a latte.", example: "I'd like a latte.",
+    scenario_id: "cafe", kind: "sentence", previous_partner_message: "Hello" });
   const mark = await screen.findByRole("button", { name: "标记复练" });
   await user.click(mark);
   expect(mark).toHaveAttribute("aria-pressed", "true");
   await user.click(screen.getByRole("button", { name: "看小结" }));
   expect(await screen.findByRole("heading", { name: "练习小结" })).toBeInTheDocument();
   expect(useSession.getState().markedCorrections).toEqual([{
-    turn_index: 1, original: "I'd like latte.", suggestion: "", note: "", marked: true, self_marked: true,
+    turn_index: 1, marked: true, self_marked: true,
+    original: "I'd like latte.", suggestion: "I'd like a latte.", note: "",
   }, {
     turn_index: 1, category: "articles", marked: true,
     original: "like latte", suggestion: "like a latte", note: "单数可数名词前加 a。",
   }]);
 });
 
-it("saves the transcript and self-marked sentence when scoring times out after leaving", async () => {
+it.each(["summary", "leaving", "changing owner"] as const)("only keeps a confirmed natural-sentence favorite when %s", async (exit) => {
+  const sentence = "I really liked the talk on sales theory in the media.";
+  useSession.getState().clear();
+  const { setToken } = await import("../lib/authToken");
+  setToken(`favorite-test-${exit}`);
+  mocks.showCorrectionCards = true;
+  mocks.streamChat.mockResolvedValueOnce("What did you learn?");
+  mocks.postTurnCorrection.mockResolvedValueOnce({ original: sentence, suggestion: sentence, natural: true, issues: [] });
+  let confirm!: (value: object) => void;
+  mocks.postWord.mockRejectedValueOnce(new Error("offline"))
+    .mockReturnValueOnce(new Promise(resolve => { confirm = resolve; }));
+  const user = userEvent.setup();
+  const view = render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/practice/cafe"]}>
+    <DictionaryProvider><Routes>
+      <Route path="/practice/:scenarioId" element={<Conversation />} />
+      <Route path="/report/:scenarioId" element={<h1>练习小结</h1>} />
+    </Routes></DictionaryProvider>
+  </MemoryRouter>);
+  await screen.findByText("Hello");
+  await user.click(screen.getByRole("button", { name: "文字练习" }));
+  const field = screen.getByRole("textbox", { name: "英文回复" });
+  await user.click(field);
+  await user.paste(sentence);
+  await user.click(screen.getByRole("button", { name: /^发送$/ }));
+  await screen.findByText("What did you learn?");
+  await user.click(screen.getByRole("button", { name: "即时纠错" }));
+  await user.click(await screen.findByRole("button", { name: "收藏推荐表达" }));
+  expect(await screen.findByText("收藏失败，请重试。")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "收藏推荐表达" }));
+  const favorite = { turn_index: 1, marked: true, self_marked: true, original: sentence, suggestion: sentence, note: "" };
+  const collect = () => confirm({ id: 14, text: sentence, kind: "sentence", scenario_id: "cafe" });
+  if (exit !== "summary") {
+    mocks.postFeedback.mockRejectedValueOnce(new Error("unable to grade now"));
+    view.unmount();
+    expect(mocks.postSession).not.toHaveBeenCalled();
+    if (exit === "changing owner") setToken("favorite-test-other-owner");
+    await act(async () => collect());
+    if (exit === "leaving") {
+      await waitFor(() => expect(mocks.postSession).toHaveBeenCalledOnce());
+      expect(mocks.postSession).toHaveBeenCalledWith(expect.objectContaining({ overall: null, corrections: [favorite] }));
+    } else {
+      expect(mocks.postSession).not.toHaveBeenCalled();
+    }
+    return;
+  }
+  await user.click(screen.getByRole("button", { name: "看小结" }));
+  expect(screen.queryByRole("heading", { name: "练习小结" })).not.toBeInTheDocument();
+  await act(async () => collect());
+  expect(await screen.findByRole("heading", { name: "练习小结" })).toBeVisible();
+  expect(useSession.getState().markedCorrections).toEqual([favorite]);
+});
+
+it("saves the transcript and manually marked fix when scoring times out after leaving", async () => {
   mocks.showCorrectionCards = true;
   mocks.postFeedback.mockRejectedValueOnce(new DOMException("Timed out", "TimeoutError"));
+  mocks.postTurnCorrection.mockResolvedValueOnce({
+    original: "I'd like latte.", natural: false, suggestion: "I'd like a latte.",
+    issues: [{ kind: "grammar", category: "articles", original: "like latte", replacement: "like a latte", note: "单数可数名词前加 a。" }],
+    explanation: "这里是在点一杯拿铁。",
+  });
   mocks.streamChat.mockImplementationOnce(async (_id, _history, onText) => {
     onText("Would you like milk?");
     return "Would you like milk?";
@@ -226,7 +291,8 @@ it("saves the transcript and self-marked sentence when scoring times out after l
   await user.type(screen.getByRole("textbox", { name: "英文回复" }), "I'd like latte.");
   await user.click(screen.getByRole("button", { name: /^发送$/ }));
   await screen.findByText("Would you like milk?");
-  await user.click(screen.getByRole("button", { name: "收藏这句" }));
+  await user.click(screen.getByRole("button", { name: "即时纠错" }));
+  await user.click(await screen.findByRole("button", { name: "标记复练" }));
   unmount();
   await waitFor(() => expect(mocks.postSession).toHaveBeenCalledWith(expect.objectContaining({
     overall: null,
@@ -235,7 +301,7 @@ it("saves the transcript and self-marked sentence when scoring times out after l
       expect.objectContaining({role: "user", content: "I'd like latte."}),
       expect.objectContaining({role: "assistant", content: "Would you like milk?"}),
     ],
-    corrections: [expect.objectContaining({turn_index: 1, original: "I'd like latte.", marked: true, self_marked: true})],
+    corrections: [expect.objectContaining({turn_index: 1, original: "like latte", marked: true, category: "articles"})],
   })));
 });
 

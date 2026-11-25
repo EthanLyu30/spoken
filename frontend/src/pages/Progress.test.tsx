@@ -29,6 +29,9 @@ const record = (id: number, score: number, score_max?: number): PracticeRecord =
 function show() {
   render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><Progress /></MemoryRouter>);
 }
+function interviewRow(id: number) {
+  return screen.getByRole("button", { name: new RegExp(`访谈记录${id}.*主题访谈`) });
+}
 beforeEach(() => {
   mock.records = [];
   mock.sessions = [];
@@ -201,10 +204,11 @@ it("opens an AI coaching scene based on the learner's evidence", async () => {
 
 it("keeps sentence replay available when the saved edit cannot support a coaching plan", async () => {
   mock.sessions = [{ id: 10, scenario_id: "cafe", overall: 75, created_at: "2026-11-20T04:00:00Z" }];
-  const example = { session_id: 10, turn_index: 1, scenario_id: "cafe", original: "I every morning drink coffee.",
-    previous_partner_message: "What do you do in the morning?", corrections: [] };
+  const example = { session_id: 10, created_at: "2026-11-20T04:00:00.123456Z", turn_index: 1, scenario_id: "cafe", original: "I every morning drink coffee.",
+    previous_partner_message: "What do you do in the morning?", corrections: [{ original: "I every morning drink coffee",
+      suggestion: "I drink coffee every morning", note: "调整语序", marked: true }] };
   const focus = { kind: "word_order", category: "word_order", sessions: 1, sentences: 1, occurrences: 1 } as const;
-  const snapshot = { revision: "unsupported", examples: [example], patterns: [focus], can_generate_plan: false };
+  const snapshot = { revision: "unsupported", examples: [example], queued_examples: [example], patterns: [focus], can_generate_plan: false };
   vi.mocked(api.getCoaching).mockResolvedValue(snapshot);
   const generate = vi.spyOn(api, "postCoachingPlan");
 
@@ -214,7 +218,7 @@ it("keeps sentence replay available when the saved edit cannot support a coachin
   expect(panel).toHaveTextContent("语序");
   expect(within(panel).queryByRole("button", { name: "让 Pip 排训练计划" })).not.toBeInTheDocument();
   expect(panel).toHaveTextContent("这类错句适合先重说原句");
-  expect(within(panel).getByRole("link", { name: "重练原句" })).toHaveAttribute("href", "/prepare/cafe?review=10:1");
+  expect(within(panel).getByRole("link", { name: "复练所选错处" })).toHaveAttribute("href", "/session/10?created_at=2026-11-20T04%3A00%3A00.123456Z#correction-turn-1");
   expect(generate).not.toHaveBeenCalled();
 });
 
@@ -292,7 +296,7 @@ it("keeps available records and uses an empty state only for a filter whose sour
   mock.errors = ["sessions"];
   mock.records = [record(1, 4, 5)];
   show();
-  expect(screen.getByRole("button", { name: /访谈记录1/ })).toBeVisible();
+  expect(interviewRow(1)).toBeVisible();
 
   fireEvent.click(screen.getByRole("button", { name: "场景对话" }));
   expect(screen.getByRole("button", { name: "重试加载记录" })).toBeVisible();
@@ -309,8 +313,8 @@ it("shows mixed history in native scales while averaging only the new rubric", (
   expect(within(metric).getByText("4")).toBeVisible();
   expect(within(metric).getByText("/ 5")).toBeVisible();
   expect(within(metric).getByText(/旧版 1 次未混入/)).toBeVisible();
-  expect(within(screen.getByRole("button", { name: /访谈记录1/ })).getByText("/ 6")).toBeVisible();
-  expect(within(screen.getByRole("button", { name: /访谈记录2/ })).getByText("/ 5")).toBeVisible();
+  expect(within(interviewRow(1)).getByText("/ 6")).toBeVisible();
+  expect(within(interviewRow(2)).getByText("/ 5")).toBeVisible();
 });
 
 it("keeps an all-legacy average explicitly labelled six-point", () => {
@@ -330,7 +334,7 @@ it("keeps the most recently selected history when requests complete in reverse o
   mock.records=[record(1,4,5),record(2,4,5)];
   const first=deferred<api.PracticeDetail>();
   vi.spyOn(api,"getPracticeDetail").mockReturnValueOnce(first.promise).mockResolvedValueOnce(detail(2));
-  show();fireEvent.click(screen.getByRole("button",{name:/访谈记录1/}));fireEvent.click(screen.getByRole("button",{name:/访谈记录2/}));
+  show();fireEvent.click(interviewRow(1));fireEvent.click(interviewRow(2));
   await screen.findByText("detail-2");await act(async()=>{first.resolve(detail(1));});
   expect(screen.getByText("detail-2")).toBeVisible();expect(screen.queryByText("detail-1")).not.toBeInTheDocument();
 });
@@ -338,9 +342,9 @@ it("does not let an older failure clear the active history loading or show an er
   mock.records=[record(1,4,5),record(2,4,5)];
   const first=deferred<api.PracticeDetail>(),second=deferred<api.PracticeDetail>();
   vi.spyOn(api,"getPracticeDetail").mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
-  show();fireEvent.click(screen.getByRole("button",{name:/访谈记录1/}));fireEvent.click(screen.getByRole("button",{name:/访谈记录2/}));
+  show();fireEvent.click(interviewRow(1));fireEvent.click(interviewRow(2));
   await act(async()=>{first.reject(new Error("offline"));});
-  expect(screen.getByRole("button",{name:/访谈记录2/})).toBeDisabled();
+  expect(interviewRow(2)).toBeDisabled();
   expect(screen.queryByText(/这条旧记录/)).not.toBeInTheDocument();
   await act(async()=>{second.resolve(detail(2));});expect(screen.getByText("detail-2")).toBeVisible();
 });
@@ -348,7 +352,7 @@ it("cancels history work on owner change even when transport ignores cancellatio
   mock.records=[record(1,4,5)];const first=deferred<api.PracticeDetail>();
   const request=vi.spyOn(api,"getPracticeDetail").mockReturnValue(first.promise);
   const view=render(<MemoryRouter><Progress /></MemoryRouter>);
-  fireEvent.click(screen.getByRole("button",{name:/访谈记录1/}));
+  fireEvent.click(interviewRow(1));
   act(()=>useAuth.setState({user:{id:927,email:"changed@example.test",display_name:"",avatar_url:"",created_at:""}}));
   expect(request.mock.calls[0][1]?.aborted).toBe(true);
   await act(async()=>{first.reject(new Error("offline"));});

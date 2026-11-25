@@ -1,14 +1,17 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { postPronunciation, postTurnCorrection } from "../lib/api";
+import { getWords, postPronunciation, postTurnCorrection, postWord, type Word } from "../lib/api";
+import { useWords } from "../store/words";
 import { DictionaryProvider } from "./dictionary/DictionaryProvider";
 import { TurnCorrectionCard } from "./TurnCorrectionCard";
 
 vi.mock("../lib/api", () => ({
   postTurnCorrection: vi.fn(),
   postPronunciation: vi.fn(),
+  getWords: vi.fn(),
+  postWord: vi.fn(),
 }));
 
 vi.mock("../lib/speech", () => ({
@@ -51,6 +54,9 @@ function renderWithDictionary(ui: ReactNode) {
 
 describe("TurnCorrectionCard", () => {
   beforeEach(() => {
+    useWords.getState().reset();
+    vi.mocked(getWords).mockReset().mockResolvedValue([]);
+    vi.mocked(postWord).mockReset();
     vi.mocked(postTurnCorrection).mockReset();
     vi.mocked(postPronunciation).mockReset();
     vi.mocked(postTurnCorrection).mockResolvedValue(correction);
@@ -231,5 +237,74 @@ describe("TurnCorrectionCard", () => {
     expect(
       (await screen.findAllByRole("button", { name: "查询 really" })).length,
     ).toBeGreaterThan(0);
+  });
+
+  it("saves one complete corrected airport sentence and identifies it after reloading the word bag", async () => {
+    const original = "I'm flying to the united state.";
+    const suggestion = "I'm flying to the United States.";
+    const saved: Word = { id: 7, text: suggestion, example: suggestion, meaning: "我飞往美国。",
+      scenario_id: "airport", kind: "sentence", mastered: false, created_at: "2026-11-25T08:00:00" };
+    let complete!: (word: Word) => void;
+    vi.mocked(postWord).mockReturnValueOnce(new Promise(resolve => { complete = resolve; }));
+    vi.mocked(postTurnCorrection).mockResolvedValue({ ...correction, original, suggestion });
+    const card = <TurnCorrectionCard scenarioId="airport" text={original} previousPartnerMessage="Where are you flying today?"
+      meta={{ source: "typed" }} onUseSuggestion={vi.fn()} />;
+    const user = userEvent.setup();
+    const firstView = renderWithDictionary(card);
+    expect(screen.queryByRole("button", { name: /收藏/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "即时纠错" }));
+    const heading = await screen.findByText("推荐表达");
+    await user.dblClick(within(heading.parentElement!).getByRole("button", { name: "收藏推荐表达" }));
+    expect(postWord).toHaveBeenCalledExactlyOnceWith({ text: suggestion, example: suggestion, scenario_id: "airport", kind: "sentence",
+      previous_partner_message: "Where are you flying today?" });
+    expect(screen.getByRole("button", { name: "收藏中…" })).toBeDisabled();
+    await act(async () => complete(saved));
+    expect(screen.getByRole("button", { name: "已收藏" })).toBeDisabled();
+    expect(useWords.getState().words).toEqual([saved]);
+
+    firstView.unmount();
+    useWords.getState().reset();
+    vi.mocked(getWords).mockResolvedValueOnce([saved]);
+    renderWithDictionary(card);
+    await user.click(screen.getByRole("button", { name: "即时纠错" }));
+    expect(await screen.findByRole("button", { name: "已收藏" })).toBeDisabled();
+    expect(useWords.getState().words).toEqual([saved]);
+    expect(postWord).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the learner retry an unsaved natural expression", async () => {
+    vi.mocked(postTurnCorrection).mockResolvedValue({ ...correction, natural: true,
+      original: correction.suggestion, issues: [] });
+    vi.mocked(postWord).mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({
+      id: 4, text: correction.suggestion, example: correction.suggestion, meaning: "我很喜欢它。",
+      scenario_id: "cafe", kind: "sentence", mastered: false, created_at: "2026-11-25T08:00:00",
+    });
+    const user = userEvent.setup();
+    renderWithDictionary(<TurnCorrectionCard scenarioId="cafe" text={correction.suggestion} previousPartnerMessage=""
+      meta={{ source: "typed" }} onUseSuggestion={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "即时纠错" }));
+    await user.click(await screen.findByRole("button", { name: "收藏推荐表达" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("收藏失败");
+    await user.click(screen.getByRole("button", { name: "收藏推荐表达" }));
+    expect(await screen.findByRole("button", { name: "已收藏" })).toBeDisabled();
+    expect(postWord).toHaveBeenCalledTimes(2);
+  });
+
+  it("attaches an already collected sentence to this turn only when the learner chooses it", async () => {
+    const previous = { id: 23, text: correction.suggestion, example: correction.suggestion, meaning: "我很喜欢它。",
+      scenario_id: "airport", kind: "sentence" as const, mastered: false, created_at: "2026-11-25T08:00:00" };
+    vi.mocked(getWords).mockResolvedValueOnce([previous]);
+    const onSaveFavorite = vi.fn();
+    const user = userEvent.setup();
+    renderWithDictionary(<TurnCorrectionCard scenarioId="cafe" text={correction.original} previousPartnerMessage="Hello."
+      meta={{ source: "typed" }} onUseSuggestion={vi.fn()} onSaveFavorite={onSaveFavorite} />);
+    await user.click(screen.getByRole("button", { name: "即时纠错" }));
+    const attach = await screen.findByRole("button", { name: "在小结中收藏" });
+    expect(onSaveFavorite).not.toHaveBeenCalled();
+    await user.click(attach);
+    expect(onSaveFavorite).toHaveBeenCalledOnce();
+    await expect(onSaveFavorite.mock.calls[0][0]).resolves.toBe(correction.suggestion);
+    expect(postWord).not.toHaveBeenCalled();
+    expect(useWords.getState().words).toEqual([previous]);
   });
 });

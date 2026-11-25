@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Download,
@@ -13,6 +13,9 @@ import { PracticeFeedbackInvite } from "../components/FeedbackEntry";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { Button } from "../components/ui/Button";
 import { InteractiveEnglishText } from "../components/dictionary/InteractiveEnglishText";
+import { DictionarySceneContext } from "../components/dictionary/DictionaryContext";
+import { sceneWordOrigin } from "../lib/wordOrigin";
+import { isDeletedPractice, recordCreationQuery } from "../lib/practiceRecordStatus";
 import { useSession } from "../store/session";
 import { getSession, postFeedback, type FeedbackResponse, type SessionDetail } from "../lib/api";
 import { useAuth } from "../store/auth";
@@ -40,8 +43,10 @@ function reportFromSaved(scenarioId: string, saved: NonNullable<SavedAssessment>
 
 export default function Report() {
   const { sessionId, savedSessionId } = useParams();
+  const [search] = useSearchParams();
+  const createdAt = search.get("created_at") ?? undefined;
   const generation = useAuth(state => state.generation);
-  return savedSessionId ? <SavedReport key={`${generation}:${savedSessionId}`} id={savedSessionId} />
+  return savedSessionId ? <SavedReport key={`${generation}:${savedSessionId}:${createdAt ?? ""}`} id={savedSessionId} createdAt={createdAt} />
     : <ActiveReport key={`${generation}:${sessionId}`} id={sessionId} />;
 }
 
@@ -64,18 +69,18 @@ function EmptyReport() {
   </div>;
 }
 
-function SavedReport({id}: {id: string}) {
+function SavedReport({id, createdAt}: {id: string; createdAt?: string}) {
   const [detail, setDetail] = useState<SessionDetail | null>();
   useEffect(() => {
     const generation = getAuthGeneration();
     const controller = new AbortController();
     const current = () => !controller.signal.aborted && generation === getAuthGeneration();
     if (!/^\d{1,15}$/.test(id) || Number(id) < 1) { setDetail(null); return; }
-    void getSession(Number(id), controller.signal).then(result => {
+    void getSession(Number(id), controller.signal, createdAt).then(result => {
       if (current()) setDetail(result);
     }).catch(() => { if (current()) setDetail(null); });
     return () => controller.abort();
-  }, [id]);
+  }, [id, createdAt]);
   if (!detail) return <main className="mx-auto max-w-3xl px-5 py-10">
     <p role="status">{detail === null ? "暂时无法打开这次对话。" : "正在读取这次对话…"}</p>
     <Link to="/progress">返回练习历史</Link>
@@ -83,10 +88,10 @@ function SavedReport({id}: {id: string}) {
   return <ReportContent storedReport={reportFromSaved(detail.scenario_id, detail)} session={{
     practiceId: detail.client_session_id ?? null, scenarioId: detail.scenario_id, messages: detail.messages,
     markedCorrections: (detail.corrections ?? []).filter(correction => correction.marked), custom: detail.custom ?? null,
-  }} />;
+  }} storedDetail={detail} />;
 }
 
-function ReportContent({session, storedReport}: {session: ReportSession; storedReport?: FeedbackResponse | null}) {
+function ReportContent({session, storedReport, storedDetail}: {session: ReportSession; storedReport?: FeedbackResponse | null; storedDetail?: SessionDetail}) {
   const generation = useRef(getAuthGeneration()).current;
   const { scenarioId, practiceId, messages, markedCorrections: marked, custom: customScene } = session;
   const isCustom = scenarioId === "custom";
@@ -100,8 +105,12 @@ function ReportContent({session, storedReport}: {session: ReportSession; storedR
   const [loading, setLoading] = useState(hasSession && !storedReport);
   const [error, setError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState(false);
+  const [deleted, setDeleted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(Boolean(storedReport));
+  const [savedRecord, setSavedRecord] = useState(() => storedDetail && {
+    id: storedDetail.id, createdAt: storedDetail.created_at, corrections: storedDetail.corrections ?? [],
+  });
   const [attempt, setAttempt] = useState(0);
   // phrase index -> saved word id, so the chip can toggle collect / un-collect.
   const words = useWords((s) => s.words);
@@ -125,12 +134,18 @@ function ReportContent({session, storedReport}: {session: ReportSession; storedR
         const result = await persistSessionOnce(scenarioId, messages, candidate ?? unscoredSession(marked), practiceId, generation, customScene);
         if (!current()) return;
         const canonical = result ? reportFromSaved(scenarioId, result, candidate) : null;
+        if (result?.id && result.createdAt && result.corrections) {
+          setSavedRecord({ id: result.id, createdAt: result.createdAt, corrections: result.corrections });
+        }
         if (canonical) { setFeedback(canonical); setError(null); }
         else if (candidate) setFeedback(candidate);
         setSaved(true);
         setSaveError(Boolean(candidate && result?.overall === null));
-      } catch {
-        if (current()) { if (candidate) setFeedback(candidate); setSaveError(true); }
+      } catch (error) {
+        if (!current()) return;
+        if (isDeletedPractice(error)) { setDeleted(true); return; }
+        if (candidate) setFeedback(candidate);
+        setSaveError(true);
       }
     };
     setLoading(true);
@@ -165,21 +180,31 @@ function ReportContent({session, storedReport}: {session: ReportSession; storedR
       const result = await persistSessionOnce(scenarioId, messages, feedback ?? unscoredSession(marked), practiceId, generation, customScene);
       if (generation === getAuthGeneration()) {
         const canonical = result ? reportFromSaved(scenarioId, result, feedback ?? undefined) : null;
+        if (result?.id && result.createdAt && result.corrections) {
+          setSavedRecord({ id: result.id, createdAt: result.createdAt, corrections: result.corrections });
+        }
         if (canonical) { setFeedback(canonical); setError(null); }
         setSaveError(Boolean(feedback && result?.overall === null));
         setSaved(true);
       }
-    } catch {
-      if (generation === getAuthGeneration()) setSaveError(true);
+    } catch (error) {
+      if (generation === getAuthGeneration()) {
+        if (isDeletedPractice(error)) setDeleted(true);
+        else setSaveError(true);
+      }
     } finally {
       if (generation === getAuthGeneration()) setSaving(false);
     }
   }
 
   if (!hasSession) return <EmptyReport />;
+  if (deleted) return <main className="mx-auto max-w-3xl px-5 py-10">
+    <p role="status">这条练习记录已删除。</p>
+    <Link to="/progress" className="coaching-secondary">返回练习历史</Link>
+  </main>;
 
   return (
-    <div className="min-h-screen">
+    <DictionarySceneContext.Provider value={sceneWordOrigin(scenarioId, customScene)}><div className="min-h-screen">
 
       <header className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-5 pt-6 print:hidden">
         <Link to="/" className={backLink}>
@@ -203,7 +228,7 @@ function ReportContent({session, storedReport}: {session: ReportSession; storedR
             role="alert"
             className="mb-4 rounded-2xl border border-border bg-surface p-4 text-sm text-ink"
           >
-            {feedback ? "小结已生成，记录暂未保存。" : "对话和错句标记暂未保存。"}
+            {feedback ? "小结已生成，记录暂未保存。" : "对话和所选内容暂未保存。"}
             <button
               type="button"
               onClick={() => void retrySave()}
@@ -230,7 +255,8 @@ function ReportContent({session, storedReport}: {session: ReportSession; storedR
             <p role="alert" className="font-semibold text-ink">
               {error}
             </p>
-            {saved && <Link to="/progress" className="font-semibold text-coral-deep">对话和错句标记已保存为未评分 · 查看历史</Link>}
+            {saved && <Link to={savedRecord ? `/session/${savedRecord.id}${recordCreationQuery(savedRecord.createdAt)}` : "/progress"}
+              className="font-semibold text-coral-deep">对话已保存为未评分 · 查看记录</Link>}
             <div className="flex gap-3">
               <Button onClick={() => setAttempt((value) => value + 1)}>
                 重试生成
@@ -245,8 +271,10 @@ function ReportContent({session, storedReport}: {session: ReportSession; storedR
           </section>
         )}
 
-        {error && !loading && marked.length > 0 && (
-          <CorrectionReview className="mt-4" corrections={marked} messages={messages} scenarioId={scenarioId}
+        {error && !loading && (savedRecord?.corrections ?? marked).length > 0 && (
+          <CorrectionReview className="mt-4" corrections={savedRecord?.corrections ?? marked} messages={messages} scenarioId={scenarioId}
+            sessionId={savedRecord?.id} sessionCreatedAt={savedRecord?.createdAt}
+            onCorrectionsChange={corrections => setSavedRecord(record => record && { ...record, corrections })}
             custom={isCustom ? customScene ?? undefined : undefined} />
         )}
 
@@ -291,7 +319,11 @@ function ReportContent({session, storedReport}: {session: ReportSession; storedR
                 </div>
               </section>
 
-              <CorrectionReview corrections={feedback.corrections} messages={messages} scenarioId={scenarioId} custom={isCustom ? customScene ?? undefined : undefined} />
+              <CorrectionReview corrections={feedback.corrections} messages={messages} scenarioId={scenarioId} custom={isCustom ? customScene ?? undefined : undefined}
+                sessionId={savedRecord?.id} sessionCreatedAt={savedRecord?.createdAt} onCorrectionsChange={corrections => {
+                  setFeedback(current => current && { ...current, corrections });
+                  setSavedRecord(record => record && { ...record, corrections });
+                }} />
             </div>
 
             <div className="mt-6 grid gap-6 md:grid-cols-2">
@@ -333,7 +365,7 @@ function ReportContent({session, storedReport}: {session: ReportSession; storedR
                               collect({
                                 text: p.text,
                                 meaning: p.note,
-                                scenario_id: scenarioId ?? "",
+                                ...sceneWordOrigin(scenarioId, customScene),
                                 kind: "phrase",
                               });
                             }}
@@ -385,6 +417,6 @@ function ReportContent({session, storedReport}: {session: ReportSession; storedR
           </>
         )}
       </main>
-    </div>
+    </div></DictionarySceneContext.Provider>
   );
 }

@@ -9,10 +9,10 @@ from sqlalchemy import Date, case, cast, func, select
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_client_id
-from app.data.scenarios import SCENARIOS
 from app.db import get_db
-from app.models.progress import LearningEvent, RewardEntry
-from app.services.progress import DAILY_PRACTICE_GOAL, utcnow
+from app.models.progress import EarnedBadge, LearningEvent, RewardEntry
+from app.services.progress import (DAILY_PRACTICE_GOAL, REWARD_ACHIEVEMENT_BADGES,
+                                   REWARD_ACHIEVEMENT_TARGETS, reward_achievement_counts, utcnow)
 
 router = APIRouter(prefix="/practice-rewards", tags=["practice rewards"])
 CHECKIN_COINS = 5
@@ -60,9 +60,7 @@ def _snapshot(db: Session, owner: str, day: date) -> dict:
     expression = func.nullif(func.lower(func.trim(LearningEvent.word_text)), "")
     completed, practice_days, scenes, weekly_days, weekly_reviews = db.execute(select(
         func.count(case((speaking & (occurred >= start) & (occurred < start + timedelta(days=1)), 1))),
-        func.count(case((speaking, local_day)).distinct()),
-        func.count(case(((LearningEvent.event_type == "session") & LearningEvent.scenario_id.in_(
-            [scene.id for scene in SCENARIOS]), LearningEvent.scenario_id)).distinct()),
+        *reward_achievement_counts(db.get_bind().dialect.name),
         func.count(case((inside_week & speaking, local_day)).distinct()),
         func.count(case((inside_week & reviewed, expression)).distinct()),
     ).where(LearningEvent.client_id == owner, speaking | reviewed,
@@ -79,14 +77,18 @@ def _snapshot(db: Session, owner: str, day: date) -> dict:
          "coins": coins, "claimed": _weekly_key(goal, week) in entries}
         for goal, (target, coins) in WEEKLY_GOALS.items()
     ]}
+    earned_badges = set(db.scalars(select(EarnedBadge.badge_key).where(EarnedBadge.client_id == owner,
+        EarnedBadge.badge_key.in_(REWARD_ACHIEVEMENT_BADGES.values()))))
     return {"date": str(day), "coins": sum(entries.values()), "streak": streak, "checked_in": checked_in,
             "goal_count": completed, "goal_target": DAILY_PRACTICE_GOAL, "goal_claimed": f"goal:{day}" in entries,
             "wallpaper_unlocked": "wallpaper" in entries, "checkin_coins": CHECKIN_COINS,
             "goal_coins": GOAL_COINS, "wallpaper_price": WALLPAPER_PRICE,
             "items": [{"id": item, "price": price, "owned": f"item:{item}" in entries} for item, price in PRICES.items()],
             "equipment": _equipment(entries), "weekly": weekly,
-            "achievements": [{"id": key, "count": min(count, target), "target": target, "earned": count >= target}
-                             for key, count, target in (("seven-days", practice_days, 7), ("five-scenes", scenes, 5))]}
+            "achievements": [{"id": key, "count": min(count, target), "target": target,
+                              "earned": count >= target or REWARD_ACHIEVEMENT_BADGES[key] in earned_badges}
+                             for (key, target), count in zip(REWARD_ACHIEVEMENT_TARGETS.items(),
+                                                            (practice_days, scenes), strict=True)]}
 
 
 def _today() -> date:

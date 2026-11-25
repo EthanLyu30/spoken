@@ -3,7 +3,6 @@
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_client_id, get_optional_client_id
@@ -12,6 +11,7 @@ from app.db import get_db
 from app.models.scene_cues import ScenePreparation
 from app.schemas.scene_cues import AddHint, RemoveCue, SceneCue, SceneCueChange, SceneCueSnapshot
 from app.schemas.session import CustomSceneLookup, SessionScene
+from app.services import scene_bookmarks
 
 router = APIRouter(prefix="/scene-cues", tags=["scene preparation"])
 
@@ -49,14 +49,8 @@ def read(scenario_id: str, response: Response, owner: str = Depends(_reader),
 @router.get("")
 def saved_sentences(response: Response, owner: str = Depends(_reader), db: Session = Depends(get_db)):
     response.headers["Cache-Control"] = "private, no-store"
-    result = []
-    for row in db.scalars(select(ScenePreparation).where(ScenePreparation.client_id == owner)
-                          .order_by(ScenePreparation.title, ScenePreparation.scene_key)):
-        sentences = [cue for cue in row.cues if not cue["id"].startswith("default-")
-                     and cue["kind"] == "pattern" and _sentence_key(cue["keyword"]) == _sentence_key(cue["sentence"])]
-        if sentences:
-            result.append({"key": row.scene_key, "title": row.title, "sentences": sentences})
-    return result
+    return [{"key": row.scene_key, "title": row.title, "sentences": cues}
+            for row, cues in scene_bookmarks.saved_sentences(db, owner)]
 
 
 @router.post("/custom/lookup")
@@ -66,17 +60,13 @@ def read_custom(body: CustomSceneLookup, response: Response, owner: str = Depend
     return _snapshot(db.get(ScenePreparation, (owner, key)), response)
 
 
-def _sentence_key(sentence: str) -> str:
-    return " ".join(sentence.casefold().split())
-
-
 def _edit(items: list[SceneCue], change: SceneCueChange) -> list[SceneCue]:
     if isinstance(change, RemoveCue):
         return [item for item in items if item.id != change.id]
     if isinstance(change, AddHint):
-        line = _sentence_key(change.sentence)
+        line = scene_bookmarks.sentence_key(change.sentence)
         for index, item in enumerate(items):
-            if _sentence_key(item.sentence) == line:
+            if scene_bookmarks.sentence_key(item.sentence) == line:
                 if change.meaning and not item.meaning:
                     return [*items[:index], item.model_copy(update={"meaning": change.meaning}), *items[index + 1:]]
                 return items

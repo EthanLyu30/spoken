@@ -29,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.practice import PracticeRecord
-from app.models.progress import EarnedBadge, LearningEvent, RewardEntry
+from app.models.progress import DELETED_HISTORY_EVENTS, EarnedBadge, LearningEvent, RewardEntry
 from app.models.scene_cues import ScenePreparation
 from app.models.session import PracticeSession
 from app.models.user import User
@@ -99,6 +99,7 @@ def _words(db: Session, owner: str) -> list[dict[str, Any]]:
             "meaning": word.meaning or "",
             "example": word.example or "",
             "scenario_id": word.scenario_id or "",
+            "source": word.source,
             "topic": word.topic,
             "familiarity": word.familiarity,
             "kind": word.kind,
@@ -191,7 +192,7 @@ def _practice_detail(raw: str | None) -> object:
 def _learning_events(db: Session, owner: str) -> list[dict[str, Any]]:
     rows = db.scalars(
         select(LearningEvent)
-        .where(LearningEvent.client_id == owner)
+        .where(LearningEvent.client_id == owner, LearningEvent.event_type.not_in(DELETED_HISTORY_EVENTS))
         .order_by(LearningEvent.occurred_at, LearningEvent.event_key)
     ).all()
     return [

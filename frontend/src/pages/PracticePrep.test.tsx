@@ -1,9 +1,10 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import PracticePrep from "./PracticePrep";
-import { getCoaching, getSession, postTurnCorrection, request } from "../lib/api";
+import { CoachingExamples } from "../components/PersonalCoaching";
+import { getCoaching, getSession, postTurnCorrection, request, setCorrectionPractice } from "../lib/api";
 import SessionView from "./SessionView";
 import { useCustomScene } from "../store/custom";
 import { speakText } from "../lib/speech";
@@ -12,7 +13,7 @@ import { scenarios } from "../data/scenarios";
 import { practiceCues } from "../data/practiceCues";
 
 vi.mock("../components/dictionary/InteractiveEnglishText", () => ({ InteractiveEnglishText: ({ text }: { text: string }) => <span>{text}</span> }));
-vi.mock("../lib/api", () => ({ getCoaching: vi.fn(), getSession: vi.fn(), postTurnCorrection: vi.fn(), request: vi.fn() }));
+vi.mock("../lib/api", () => ({ getCoaching: vi.fn(), getSession: vi.fn(), postTurnCorrection: vi.fn(), request: vi.fn(), setCorrectionPractice: vi.fn() }));
 beforeEach(() => vi.mocked(request).mockResolvedValue({revision: 0, cues: null}));
 vi.mock("../lib/speech", async (original) => ({ ...await original<typeof import("../lib/speech")>(), speakText: vi.fn() }));
 beforeEach(() => vi.mocked(getCoaching).mockResolvedValue({ revision: "empty", examples: [], patterns: [] }));
@@ -204,10 +205,11 @@ it.each(["structured", "legacy", "fallback"])("chooses the right theme for a gen
 
 it("uses the learner's own airport sentence and correction for a personal warm-up", async () => {
   const user = userEvent.setup();
+  const createdAt = "2026-11-17T15:00:00.123456Z";
   const corrections = [{ original: "boarding pass", suggestion: "a boarding pass", note: "补冠词", category: "articles" as const, turn_index: 1 }];
-  vi.mocked(getCoaching).mockResolvedValue({ revision: "airport", patterns: [], examples: [{ session_id: 19, turn_index: 1, scenario_id: "airport",
+  vi.mocked(getCoaching).mockResolvedValue({ revision: "airport", patterns: [], examples: [{ session_id: 19, created_at: createdAt, turn_index: 1, scenario_id: "airport",
     original: "I need boarding pass.", previous_partner_message: "How can I help?", corrections }] });
-  vi.mocked(getSession).mockResolvedValue({ id: 19, scenario_id: "airport", overall: 75, created_at: "2026-11-17T15:00:00Z",
+  vi.mocked(getSession).mockResolvedValue({ id: 19, scenario_id: "airport", overall: 75, created_at: createdAt,
     summary: "", tip: "", scores: [], corrections,
     messages: [{ role: "assistant", content: "How can I help?" }, { role: "user", content: "I need boarding pass." }] });
   render(<MemoryRouter initialEntries={["/prepare/airport"]}><Routes>
@@ -219,7 +221,7 @@ it("uses the learner's own airport sentence and correction for a personal warm-u
   const replay = await screen.findByRole("region", { name: "重练原句" });
   expect(await within(replay).findByText("I need boarding pass.")).toBeVisible();
   expect(within(replay).getByText("How can I help?")).toBeVisible();
-  expect(getSession).toHaveBeenCalledWith(19, expect.any(AbortSignal));
+  expect(getSession).toHaveBeenCalledWith(19, expect.any(AbortSignal), createdAt);
 });
 
 it.each(["snapshot", "legacy"])("checks a custom-scene replay using its saved context (%s)", async (kind) => {
@@ -271,8 +273,48 @@ it("reopens saved coaching exercises from history without a local scene", async 
   </Routes></MemoryRouter>);
   await user.click(await screen.findByRole("link", {name: "再做这次的专项练习"}));
   expect(await screen.findByText(exercise.partner_line)).toBeVisible();
+  expect(getSession).toHaveBeenLastCalledWith(41, expect.any(AbortSignal), "2026-11-17T15:00:00Z");
   await user.click(screen.getByRole("button", {name: "下一句"}));
   expect(screen.getByText("Anything else?")).toBeVisible();
+});
+
+it("selects a correction using the timestamp of the loaded history record", async () => {
+  const createdAt = "2026-11-17T15:00:00.123456";
+  const fix = { original: "boarding pass", suggestion: "a boarding pass", note: "补冠词", category: "articles" as const, turn_index: 0 };
+  vi.mocked(getSession).mockResolvedValueOnce({ id: 45, scenario_id: "airport", overall: 75, created_at: createdAt,
+    scores: [], summary: "历史练习", tip: "", messages: [{ role: "user", content: "I need boarding pass." }], corrections: [fix] });
+  vi.mocked(setCorrectionPractice).mockResolvedValueOnce([{ ...fix, marked: true }]);
+  render(<MemoryRouter initialEntries={["/session/45"]}><Routes>
+    <Route path="/session/:id" element={<SessionView />} />
+  </Routes></MemoryRouter>);
+  await userEvent.click(await screen.findByRole("button", { name: "加入复练" }));
+  expect(await screen.findByText("已加入复练")).toBeVisible();
+  expect(setCorrectionPractice).toHaveBeenLastCalledWith(45, createdAt, fix, true, expect.any(AbortSignal));
+});
+
+it("opens the exact saved turn from the selected correction queue", async () => {
+  const createdAt = "2026-11-17T15:00:00.123456";
+  const fix = { original: "boarding pass", suggestion: "a boarding pass", note: "补冠词", category: "articles" as const, turn_index: 2, marked: true };
+  const example = { session_id: 47, created_at: createdAt, scenario_id: "airport", turn_index: 2,
+    original: "I need boarding pass.", previous_partner_message: "How can I help?", corrections: [fix] };
+  vi.mocked(getSession).mockResolvedValueOnce({ id: 47, scenario_id: "airport", overall: 75, created_at: createdAt,
+    scores: [], summary: "历史练习", tip: "", messages: [
+      { role: "user", content: "Hello." }, { role: "assistant", content: "How can I help?" },
+      { role: "user", content: example.original },
+    ], corrections: [fix] });
+  const user = userEvent.setup();
+  render(<MemoryRouter initialEntries={["/progress"]}><Routes>
+    <Route path="/progress" element={<CoachingExamples examples={[example]} repeatLabel="复练所选错处" selectedOnly />} />
+    <Route path="/session/:id" element={<SessionView />} />
+  </Routes></MemoryRouter>);
+  await user.click(screen.getByRole("link", { name: "复练所选错处" }));
+  const reviews = within(await screen.findByRole("region", { name: "句子纠错" }));
+  const turn = reviews.getByRole("listitem");
+  expect(turn).toHaveAttribute("id", "correction-turn-2");
+  await waitFor(() => expect(turn).toHaveFocus());
+  expect(getSession).toHaveBeenLastCalledWith(47, expect.any(AbortSignal), createdAt);
+  await user.click(within(turn).getByRole("button", { name: "填空" }));
+  expect(within(turn).getByRole("region", { name: "填空练习" })).toBeVisible();
 });
 
 it("lets the learner try a new situation before showing the answer and checks the target skill", async () => {

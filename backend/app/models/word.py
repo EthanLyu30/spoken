@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -23,6 +23,7 @@ class WordEntry(Base):
     meaning: Mapped[str] = mapped_column(Text, default="")
     example: Mapped[str] = mapped_column(Text, default="")
     scenario_id: Mapped[str] = mapped_column(String(64), default="")
+    source: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     topic: Mapped[str | None] = mapped_column(String(48), nullable=True)
     familiarity: Mapped[str | None] = mapped_column(String(16), nullable=True)
     kind: Mapped[str] = mapped_column(String(16), default="word", index=True)  # word | phrase | sentence

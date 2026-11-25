@@ -1,6 +1,7 @@
 """Practice history and personal coaching endpoints."""
 
 import asyncio
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
@@ -12,13 +13,15 @@ from app.db import get_db
 from app.models.session import PracticeSession
 from app.schemas.chat import ChatMessage
 from app.schemas.coaching import CoachingPlan, CoachingSnapshot, GrammarStatistics
-from app.schemas.feedback import SkillScore
-from app.schemas.session import CustomSceneLookup, ExpiredSessionReceipt, ProgressSessions, SaveSessionRequest, SessionDetail, SessionSummary
+from app.schemas.feedback import Correction, SkillScore
+from app.schemas.session import CorrectionPracticeSelection, CustomSceneLookup, ExpiredSessionReceipt, ProgressSessions, SaveSessionRequest, SessionDetail, SessionSummary
 from app.services import sessions as repo
 from app.services.coaching import UnsupportedPracticeTarget, coaching_snapshot, generate_plan, select_plan_targets
 from app.services.corrections import read_corrections
 from app.services.deepseek import DeepSeekClient, DeepSeekError
 from app.services.grammar_statistics import grammar_statistics
+from app.services.history_deletion import HistoryRecordChanged, delete_record
+from app.services.request_receipts import DeletedPracticeRecord
 
 router = APIRouter(tags=["sessions"])
 
@@ -49,32 +52,64 @@ def save_session(
     client_id: str = Depends(get_client_id),
     timezone: str = Depends(get_timezone),
 ) -> SessionDetail | ExpiredSessionReceipt:
-    saved = repo.create_session(db, client_id, payload, timezone)
+    try:
+        saved = repo.create_session(db, client_id, payload, timezone)
+    except DeletedPracticeRecord as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
     return saved if isinstance(saved, ExpiredSessionReceipt) else _detail(saved)
 
 
 @router.get("/sessions", response_model=list[SessionSummary])
 def list_sessions(
-    db: Session = Depends(get_db), client_id: str = Depends(get_client_id)
+    response: Response, db: Session = Depends(get_db), client_id: str = Depends(get_client_id)
 ) -> list[SessionSummary]:
+    response.headers["Cache-Control"] = "no-store"
     return [SessionSummary.model_validate(s) for s in repo.list_sessions(db, client_id)]
 
 
 @router.get("/sessions/{session_id}", response_model=SessionDetail)
 def get_session(
-    session_id: int, response: Response, db: Session = Depends(get_db), client_id: str = Depends(get_client_id)
+    session_id: int, response: Response, created_at: datetime | None = None,
+    db: Session = Depends(get_db), client_id: str = Depends(get_client_id),
 ) -> SessionDetail:
-    session = repo.get_session(db, client_id, session_id)
+    session = repo.get_session_detail(db, client_id, session_id, created_at)
     if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found", headers={"Cache-Control": "no-store"})
     response.headers["Cache-Control"] = "no-store"
     return _detail(session)
 
 
+@router.delete("/sessions/{session_id}", status_code=204)
+def delete_session(
+    session_id: int, created_at: datetime, db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+) -> Response:
+    try:
+        deleted = delete_record(db, client_id, PracticeSession, session_id, created_at)
+    except HistoryRecordChanged as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+
+@router.patch("/sessions/{session_id}/corrections/practice", response_model=list[Correction])
+def select_correction(session_id: int, body: CorrectionPracticeSelection,
+                      db: Session = Depends(get_db), client_id: str = Depends(get_client_id)) -> list[Correction]:
+    try:
+        corrections = repo.select_correction(db, client_id, session_id, body)
+    except repo.CorrectionSelectionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if corrections is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return corrections
+
+
 @router.get("/progress/sessions", response_model=ProgressSessions)
 def progress_sessions(
-    db: Session = Depends(get_db), client_id: str = Depends(get_client_id)
+    response: Response, db: Session = Depends(get_db), client_id: str = Depends(get_client_id)
 ) -> ProgressSessions:
+    response.headers["Cache-Control"] = "no-store"
     return ProgressSessions.model_validate(repo.progress_sessions(db, client_id))
 
 

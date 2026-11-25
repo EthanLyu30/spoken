@@ -160,7 +160,7 @@ def overview_client(engine):
 
 
 @pytest.mark.parametrize("count", [0, 12, 200])
-def test_overview_two_thin_queries_preserves_insights_and_latest_radar(engine, count):
+def test_overview_one_thin_query_preserves_insights_and_latest_radar(engine, count):
     seed_sessions(engine, count)
     with trace(engine) as (old_calls, old_checkouts):
         with Session(engine) as db:
@@ -181,15 +181,18 @@ def test_overview_two_thin_queries_preserves_insights_and_latest_radar(engine, c
     assert body["insights"] == old_insights
     assert len(body["sessions"]) == min(count, 50)
     assert all(set(row) == {"id", "scenario_id", "overall", "created_at"} for row in body["sessions"])
-    assert len(calls) == (2 if count else 1) and len(checkouts) == 1
+    assert len(calls) == 1 and len(checkouts) == 1
     for sql, _ in calls:
         assert not any(column in sql for column in ("sessions.summary", "sessions.tip", "turns", "client_session_id"))
+    with engine.connect() as connection:
+        sql, parameters = calls[0]
+        # Each of the 8 sampled sessions has one extra row for its second skill score.
+        assert len(connection.exec_driver_sql(sql, parameters).all()) == min(count, 50) + min(count, 8)
     if count:
         assert set(body["latest"]) == {"id", "scores"}
         assert body["latest"]["id"] == body["sessions"][0]["id"]
         assert [s["key"] for s in body["latest"]["scores"]] == ["grammar", "vocabulary"]
         assert body["latest"]["scores"][0]["score"] == 40 + (count - 1) % 12
-        assert "JOIN sessions" in calls[1][0] and "sessions.client_id" in calls[1][0]
         assert body["insights"]["sessions"] == 8
         if count == 12:
             assert body["insights"]["weakest"] == {"key": "grammar", "label_en": "Grammar",
@@ -214,21 +217,6 @@ def test_overview_counts_unscored_sessions_without_falling_back_to_older_radar(e
     assert body["insights"]["weakest"]["avg"] == 71
     assert body["insights"]["weakest"]["delta"] == 0
     assert body["latest"] == {"id": body["sessions"][0]["id"], "scores": []}
-
-
-def test_overview_rechecks_score_owner_after_metadata_read(engine):
-    seed_sessions(engine, 12)
-    def move_latest(conn, cursor, statement, parameters, context, executemany):
-        if statement.startswith("SELECT scores.session_id"):
-            conn.exec_driver_sql("UPDATE sessions SET client_id = 'other' WHERE id = 12")
-    event.listen(engine, "before_cursor_execute", move_latest)
-    try:
-        body = overview_client(engine).get("/api/progress/sessions").json()
-    finally:
-        event.remove(engine, "before_cursor_execute", move_latest)
-    assert body["latest"] == {"id": 12, "scores": []}
-    assert body["insights"]["sessions"] == 8
-    assert body["insights"]["weakest"]["samples"] == 7
 
 
 @pytest.mark.parametrize("headers, status", [({"X-Client-Id": ""}, 400),

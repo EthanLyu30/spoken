@@ -8,16 +8,16 @@ from datetime import datetime, timedelta
 from unicodedata import normalize
 
 from pydantic import BaseModel, StrictBool, ValidationError
-from sqlalchemy import asc, desc, select
+from sqlalchemy import asc, desc, or_, select
 from sqlalchemy.orm import Session
 
 from app.data.scenarios import get_scenario
-from app.models.progress import GuestClaim
+from app.models.progress import GuestClaim, LearningEvent
 from app.models.word import WordEntry
 from app.services.deepseek import DeepSeekClient, DeepSeekError
 from app.services import progress, request_receipts
 from app.services.users import GuestAlreadyClaimed
-from app.schemas.word import Word, WordTranslationGrade
+from app.schemas.word import Word, WordSource, WordTranslationGrade
 
 # Leitner intervals (days) by box level; remembering bumps the box up.
 SRS_INTERVALS_DAYS = [0, 1, 2, 4, 8, 16, 30]
@@ -136,6 +136,7 @@ def create_word(
     *,
     claim_aware: bool = False,
     topic: str | None = None,
+    source: WordSource | None = None,
 ) -> WordEntry:
     progress.lock_owner(db, client_id)
     if claim_aware and not client_id.startswith("u:") and db.get(GuestClaim, client_id) is not None:
@@ -149,22 +150,27 @@ def create_word(
         client_id=client_id,
         text=text,
         scenario_id=scenario_id,
+        source=source.model_dump() if source is not None else None,
         meaning=meaning,
         example=example,
         kind=kind,
         topic=topic.strip() or None if topic else None,
     )
-    db.add(entry)
     try:
-        db.flush()
-        progress.record_event(db, client_id, "word_collected", source_id=entry.id,
-                              occurred_at=entry.created_at, word_text=entry.text)
+        record_collection(db, entry)
         progress.stats_and_awards(db, client_id, timezone)
         db.commit()
     except Exception:
         db.rollback()
         raise
     return entry
+
+
+def record_collection(db: Session, entry: WordEntry) -> None:
+    db.add(entry)
+    db.flush()
+    progress.record_event(db, entry.client_id, "word_collected", source_id=entry.id,
+                          occurred_at=entry.created_at, word_text=entry.text)
 
 
 def list_words(db: Session, client_id: str) -> list[WordEntry]:
@@ -203,36 +209,57 @@ def get_word(db: Session, client_id: str, word_id: int) -> WordEntry | None:
 
 
 def list_due(db: Session, client_id: str, kind: str | None = None) -> list[WordEntry]:
-    """Words whose review is due (not yet mastered), soonest first."""
+    """Previously rated expressions whose review is due, soonest first."""
     now = datetime.utcnow()
     stmt = select(WordEntry).where(
         WordEntry.client_id == client_id,
-        WordEntry.due_at <= now,
+        or_(WordEntry.due_at.is_(None), WordEntry.due_at <= now),
         WordEntry.mastered.is_(False),
+        or_(WordEntry.last_reviewed.is_not(None), WordEntry.familiarity.is_not(None), WordEntry.box > 0),
     )
     if kind:
         stmt = stmt.where(WordEntry.kind == kind)
-    return list(db.scalars(stmt.order_by(asc(WordEntry.due_at))))
+    return list(db.scalars(stmt.order_by(asc(WordEntry.due_at).nulls_first(), WordEntry.id)))
+
+
+class WordChanged(ValueError):
+    """The request does not identify the current incarnation of the word."""
 
 
 def review_word(db: Session, entry: WordEntry, remembered: bool,
                 timezone: str | None = None, client_request_id: str | None = None) -> WordEntry | Word:
     """Apply a Leitner review: remembered -> longer interval, forgot -> reset."""
-    entry = _lock_owner_word(db, entry.client_id, entry.id)
-    return _review_locked(db, entry, remembered, timezone, client_request_id)
+    return review_word_by_id(db, entry.client_id, entry.id, remembered, timezone,
+                             client_request_id, created_at=entry.created_at.isoformat())
 
 
 def review_word_by_id(db: Session, client_id: str, word_id: int, remembered: bool,
                       timezone: str | None = None,
-                      client_request_id: str | None = None, *, uncertain: bool = False) -> WordEntry | Word:
+                      client_request_id: str | None = None, *, uncertain: bool = False,
+                      created_at: str | None = None) -> WordEntry | Word:
     """Lock and review in one owner-scoped read instead of pre-reading the row."""
     entry = _lock_owner_word(db, client_id, word_id)
-    return _review_locked(db, entry, remembered, timezone, client_request_id, uncertain=uncertain)
+    if created_at is not None:
+        matches = created_at == entry.created_at.isoformat()
+    else:
+        # Legacy requests can still address a row with no known recycled id.
+        # Collection events survive deletion, including same-text re-collections.
+        prior_collection = db.scalar(select(LearningEvent.event_key).where(
+            LearningEvent.client_id == client_id, LearningEvent.source_id == word_id,
+            LearningEvent.event_type == "word_collected",
+            or_(LearningEvent.occurred_at.is_distinct_from(entry.created_at),
+                LearningEvent.word_text.is_distinct_from(entry.text)),
+        ).limit(1))
+        matches = prior_collection is None
+    if not matches:
+        db.rollback()
+        raise WordChanged("这条收藏已更新，请返回列表重新打开。")
+    return apply_locked_review(db, entry, remembered, timezone, client_request_id, uncertain=uncertain)
 
 
-def _review_locked(db: Session, entry: WordEntry, remembered: bool,
+def apply_locked_review(db: Session, entry: WordEntry, remembered: bool,
                    timezone: str | None = None,
-                   client_request_id: str | None = None, *, uncertain: bool = False) -> WordEntry | Word:
+                   client_request_id: str | None = None, *, uncertain: bool = False, commit: bool = True) -> WordEntry | Word:
     # A deleted word's numeric ID can be recycled by SQLite. Bind the key to
     # this incarnation so an old review cannot replay onto a replacement.
     identity = {"word_id": entry.id, "remembered": remembered,
@@ -247,7 +274,8 @@ def _review_locked(db: Session, entry: WordEntry, remembered: bool,
             # its schedule. Replay acknowledges the old operation while returning
             # the current owner-locked state, never historical scheduling.
             result = Word.model_validate(entry)
-            db.commit()
+            if commit:
+                db.commit()
             return result
     except Exception:
         db.rollback()
@@ -272,7 +300,8 @@ def _review_locked(db: Session, entry: WordEntry, remembered: bool,
         request_receipts.remember(db, entry.client_id, "word_review", client_request_id,
             fingerprint, event, {})
         progress.stats_and_awards(db, entry.client_id, timezone)
-        db.commit()
+        if commit:
+            db.commit()
     except Exception:
         db.rollback()
         raise

@@ -4,7 +4,8 @@ import { Link } from "react-router-dom";
 import { useCoachingSnapshot } from "../hooks/useCoachingSnapshot";
 import { ApiError, postCoachingPlan, type CoachingExample, type CoachingPlan, type CoachingSnapshot } from "../lib/api";
 import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
-import { coachingPatternLabel, replayHref, replayReference } from "../lib/practiceCorrections";
+import { coachingPatternLabel, correctionKey, replayHref, replayReference } from "../lib/practiceCorrections";
+import { recordCreationQuery } from "../lib/practiceRecordStatus";
 import { useCustomScene } from "../store/custom";
 import { getScenario } from "../data/scenarios";
 import { progressGeneration } from "../lib/progressCache";
@@ -14,23 +15,28 @@ import "../coaching.css";
 let lastPlan: CoachingPlan | null = null;
 subscribeAuthGeneration(() => { lastPlan = null; });
 
-export function CoachingExamples({ examples, repeatLabel = "重练", showReference = false }: {
+export function CoachingExamples({ examples, repeatLabel = "重练", showReference = false, selectedOnly = false }: {
   examples: CoachingExample[];
   repeatLabel?: string;
   showReference?: boolean;
+  selectedOnly?: boolean;
 }) {
   return <ul className="coaching-examples">
     {examples.map((example) => {
       const line = (showReference && replayReference(example)) || example.original;
-      const fix = example.corrections.find((item) => item.suggestion && item.suggestion.length <= 160);
+      const fixes = selectedOnly ? example.corrections : example.corrections.filter((item) => item.suggestion && item.suggestion.length <= 160).slice(0, 1);
       return (
-        <li key={`${example.session_id}:${example.turn_index}`}>
+        <li key={`${example.session_id}:${example.created_at ?? ""}:${example.turn_index}`}>
           <div>
             <p className="coaching-example-source">{getScenario(example.scenario_id)?.titleZh ?? "自定义练习"}</p>
             <p className="coaching-example-line" lang="en">{line}</p>
-            {fix && <p className="coaching-phrase-pair" lang="en"><del>{fix.original}</del><ArrowRight size={12} /><strong>{fix.suggestion}</strong></p>}
+            {fixes.map(fix => <p key={correctionKey(fix)} className="coaching-phrase-pair" lang="en">
+              <del>{fix.original}</del>{fix.suggestion && <><ArrowRight size={12} aria-hidden="true" /><strong>{fix.suggestion}</strong></>}
+            </p>)}
           </div>
-          <Link className="coaching-example-link" to={replayHref(example)}>
+          <Link className="coaching-example-link" to={selectedOnly
+            ? `/session/${example.session_id}${recordCreationQuery(example.created_at ?? undefined)}#correction-turn-${example.turn_index}`
+            : replayHref(example)}>
             <RotateCcw size={15} aria-hidden="true" /> {repeatLabel}
           </Link>
         </li>
@@ -41,7 +47,7 @@ export function CoachingExamples({ examples, repeatLabel = "重练", showReferen
 
 export function PersonalCoaching({ fallback }: { fallback?: ReactNode }) {
   const { snapshot, error, retry } = useCoachingSnapshot();
-  if (!snapshot?.examples.length) return <>
+  if (!snapshot || (!snapshot.examples.length && !snapshot.queued_examples?.length)) return <>
     {fallback}
     {error && <p className="learning-notice">暂时无法读取个人复练。 <button className="underline" type="button" onClick={retry}>重试</button></p>}
   </>;
@@ -93,8 +99,7 @@ function CoachingForRevision({ snapshot, refresh }: { snapshot: CoachingSnapshot
     }
   }
 
-  const examples = snapshot.examples.filter((example) => !plan?.evidence.some((source) =>
-    source.session_id === example.session_id && source.turn_index === example.turn_index)).slice(0, 3);
+  const queue = snapshot.queued_examples ?? [];
   const patterns = snapshot.patterns.slice(0, 3);
   const citedSessions = new Set(plan?.evidence.map((source) => source.session_id)).size;
   return (
@@ -102,7 +107,7 @@ function CoachingForRevision({ snapshot, refresh }: { snapshot: CoachingSnapshot
       <header className="coaching-panel-top">
         <div>
           <p className="coaching-kicker"><Target size={16} /> 个人复练</p>
-          <h2>下次开口，先练这几句</h2>
+          <h2>下次开口，先练哪一处？</h2>
         </div>
         <Buddy size={96} />
       </header>
@@ -128,9 +133,13 @@ function CoachingForRevision({ snapshot, refresh }: { snapshot: CoachingSnapshot
         </section>
       )}
       <div className="coaching-panel-grid">
-        {examples.length > 0 && <section className="coaching-queue" aria-label="值得重说的原句">
-          <h3><BookOpen size={17} /> 值得重说的原句</h3>
-          <CoachingExamples examples={examples} repeatLabel="重练原句" />
+        {queue.length > 0 && <section className="coaching-queue" aria-label="我选的错处">
+          <h3><BookOpen size={17} /> 我选的错处</h3>
+          <CoachingExamples examples={queue.slice(0, 3)} repeatLabel="复练所选错处" selectedOnly />
+          {queue.length > 3 && <details className="mt-3">
+            <summary className="text-sm font-semibold text-coral-deep">查看其余 {queue.length - 3} 句</summary>
+            <CoachingExamples examples={queue.slice(3)} repeatLabel="复练所选错处" selectedOnly />
+          </details>}
         </section>}
         <section className="coaching-insight" aria-label="易错点和训练计划">
           <h3>最近的易错点</h3>
@@ -139,7 +148,7 @@ function CoachingForRevision({ snapshot, refresh }: { snapshot: CoachingSnapshot
               <strong>{coachingPatternLabel(pattern)}</strong>
               <span>{pattern.sessions >= 2 ? "反复出现 · " : "单次练习发现 · "}{pattern.sessions} 次练习 · {pattern.occurrences} 处</span>
             </li>)}
-          </ul> : <p>先重说一条收藏的原句。完成带纠错的练习后，Pip 可以帮你找规律。</p>}
+          </ul> : <p>完成带语法纠错的练习后，Pip 可以帮你找规律。</p>}
           {snapshot.can_generate_plan && !plan && <button type="button" className="coaching-primary" onClick={() => void generate()} disabled={planning}>
             <Sparkles size={16} /> {planning ? "正在分析你的错句…" : "让 Pip 排训练计划"}
           </button>}

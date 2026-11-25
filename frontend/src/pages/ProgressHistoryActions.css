@@ -1,0 +1,140 @@
+.history-record {
+  display: flex;
+  align-items: center;
+  gap: clamp(4px, 1.4vw, 14px);
+}
+
+.history-record .learning-history-row {
+  flex: 1;
+  min-width: 0;
+  border-radius: 12px;
+}
+
+.history-actions {
+  position: relative;
+  flex: none;
+}
+
+.history-actions-trigger {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: var(--muted);
+}
+
+.history-actions-trigger:hover,
+.history-actions-trigger[aria-expanded="true"] {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.history-actions-menu {
+  position: absolute;
+  z-index: 5;
+  inset-block-start: calc(100% + 4px);
+  inset-inline-end: 0;
+  width: max-content;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 8px 22px #42281a1a;
+}
+
+.history-actions-menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  color: var(--coral-deep);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.history-actions-menu button:hover,
+.history-actions-menu button:focus-visible {
+  background: #fcefe9;
+}
+
+.history-delete-dialog {
+  width: min(440px, calc(100vw - 32px));
+  margin: auto;
+  padding: clamp(20px, 5vw, 30px);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 20px 60px #34201933;
+}
+
+.history-delete-dialog::backdrop {
+  background: #34201966;
+}
+
+.history-delete-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 12px;
+  border-radius: 13px;
+  background: #fcefe9;
+  color: var(--coral-deep);
+}
+
+.history-delete-dialog h2 {
+  font-size: clamp(20px, 5vw, 25px);
+  font-weight: 750;
+}
+
+.history-delete-record {
+  display: grid;
+  gap: 3px;
+  margin-block: 14px;
+  padding: 10px 13px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+}
+
+.history-delete-record span,
+.history-delete-copy,
+.history-delete-pending:not(:empty) {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.history-delete-error {
+  margin-top: 10px;
+  color: var(--coral-deep);
+  font-size: 13px;
+}
+
+.history-delete-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 19px;
+}
+
+.history-delete-buttons [aria-disabled="true"] {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.history-delete-pending {
+  margin-top: 8px;
+  text-align: right;
+}
+
+.learning-history .history-delete-status {
+  margin-block: 12px 0;
+}

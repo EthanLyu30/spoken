@@ -17,6 +17,7 @@ import { assertAudioWithinLimit } from "./audioLimits";
 import { hasSustainedAudio } from "./incrementalPcm";
 import { AsrQuotaError, asrProviderError, isAsrQuotaCooling, isAsrQuotaError } from "./asrQuota";
 import { asrFailure, asrFallbackReason, type AsrFallbackReason } from "./asrDiagnostics";
+import { isDeletedPractice, recordCreationQuery } from "./practiceRecordStatus";
 export { withTimeout } from "./requestTimeout";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -482,14 +483,7 @@ async function sendStoredWrite<T>(record: StoredOwnerWrite, token: string): Prom
     body: record.body,
     signal: withTimeout(undefined, DEFAULT_TIMEOUT),
   });
-  if (!response.ok) {
-    let detail = "";
-    try {
-      const data = await response.json();
-      if (data && typeof data.detail === "string") detail = data.detail;
-    } catch { /* non-JSON error body */ }
-    throw new ApiError(detail || `${record.method} ${record.path} failed: ${response.status}`, response.status);
-  }
+  if (!response.ok) throw await requestError(response, record.path, record.method);
   if (response.status === 204) {
     if (/^\/api\/(sessions|practice|words)(\/|$)/.test(record.path)) invalidateProgress();
     return undefined as T;
@@ -552,7 +546,12 @@ async function sendOnce<T>(record: StoredOwnerWrite, token: string): Promise<Sen
     const result = await withRecordSendLock(record.id, async (): Promise<SendResult<T>> => {
       loadQueuedWrites();
       if (!queuedWrites.has(record.id)) return { status: "already-confirmed" };
-      const data = await sendStoredWrite<T>(record, token);
+      let data: T;
+      try { data = await sendStoredWrite<T>(record, token); }
+      catch (error) {
+        if (isDeletedPractice(error)) await removeQueuedWrite(record.id);
+        throw error;
+      }
       await removeQueuedWrite(record.id);
       return { status: "sent", data, counted: true };
     });
@@ -627,6 +626,15 @@ function isOwnerWrite(path: string, init?: RequestInit): boolean {
   if (path.startsWith("/api/scene-cues/")) return init?.method === "PATCH";
   if (/^\/api\/words\/\d+\/translation$/.test(path)) return false;
   return Boolean(init?.method && init.method !== "GET" && /^\/api\/(sessions|practice|words|practice-rewards)(\/|$)/.test(path));
+}
+
+function bindsHistoryIdentity(path: string, init?: RequestInit): boolean {
+  if (init?.method === "DELETE" && /^\/api\/(sessions|practice)\/\d+\?/.test(path)) return true;
+  if (init?.method !== "POST" || (path !== "/api/sessions" && path !== "/api/practice") || typeof init.body !== "string") return false;
+  try {
+    const body = JSON.parse(init.body);
+    return Boolean(body?.client_session_id || body?.client_request_id);
+  } catch { return false; }
 }
 
 /**
@@ -765,7 +773,8 @@ export async function request<T>(path: string, init?: RequestInit, timeoutMs = D
         checkGeneration();
         // Without a proven transition, these writes must not be retried
         // against a guest space that may have been reused since the claim.
-        if (path === "/api/words/topics" || path.startsWith("/api/scene-cues/") || path.startsWith("/api/practice-rewards/")) throw error;
+        if (path === "/api/words/topics" || path.startsWith("/api/words/retest") || path.startsWith("/api/scene-cues/") ||
+          path.startsWith("/api/practice-rewards/") || bindsHistoryIdentity(path, init)) throw error;
         const headers = new Headers(requestInit.headers);
         headers.delete("X-Claim-Protocol");
         headers.delete("Authorization");
@@ -792,7 +801,7 @@ export async function request<T>(path: string, init?: RequestInit, timeoutMs = D
     settlePending?.();
     return data;
   } catch (error) {
-    settlePending?.(error);
+    settlePending?.(isDeletedPractice(error) ? undefined : error);
     throw error;
   }
 }
@@ -976,6 +985,7 @@ export interface Correction {
 
 export interface CoachingExample {
   session_id: number;
+  created_at?: string | null;
   turn_index: number;
   scenario_id: string;
   original: string;
@@ -994,6 +1004,7 @@ export interface CoachingPattern {
 export interface CoachingSnapshot {
   revision: string;
   examples: CoachingExample[];
+  queued_examples?: CoachingExample[];
   patterns: CoachingPattern[];
   can_generate_plan?: boolean;
 }
@@ -1108,10 +1119,13 @@ export interface SaveSessionPayload {
 export function postSession(
   payload: SaveSessionPayload,
   signal?: AbortSignal,
+  leaving = false,
 ): Promise<SessionDetail> {
+  const body = JSON.stringify(payload);
   return request<SessionDetail>("/api/sessions", {
     method: "POST",
-    body: JSON.stringify(payload),
+    body,
+    ...(leaving && new TextEncoder().encode(body).byteLength <= 48 * 1024 ? {keepalive:true} : {}),
     signal,
   });
 }
@@ -1121,8 +1135,15 @@ export function getSessions(signal?: AbortSignal, force = false): Promise<Sessio
   return readMetadata<SessionSummary[]>("/api/sessions", signal, force);
 }
 
-export function getSession(id: number, signal?: AbortSignal): Promise<SessionDetail> {
-  return request<SessionDetail>(`/api/sessions/${id}`, { signal });
+export function getSession(id: number, signal?: AbortSignal, createdAt?: string): Promise<SessionDetail> {
+  return request<SessionDetail>(`/api/sessions/${id}${recordCreationQuery(createdAt)}`, { signal });
+}
+
+export function setCorrectionPractice(id: number, createdAt: string, correction: Correction, marked: boolean, signal?: AbortSignal): Promise<Correction[]> {
+  const { original, suggestion, category = null, turn_index = null } = correction;
+  return request<Correction[]>(`/api/sessions/${id}/corrections/practice`, {
+    method: "PATCH", body: JSON.stringify({ created_at: createdAt, original, suggestion, category, turn_index, marked }), signal,
+  });
 }
 
 /** Transcribe 16 kHz mono PCM via the backend (iFlytek ASR). */
@@ -1400,8 +1421,8 @@ export interface PracticeRecord {
 }
 
 export interface PracticeDetail extends PracticeRecord { detail: string; }
-export function getPracticeDetail(id: number, signal?: AbortSignal): Promise<PracticeDetail> {
-  return request<PracticeDetail>(`/api/practice/${id}`, { signal });
+export function getPracticeDetail(id: number, signal?: AbortSignal, createdAt?: string): Promise<PracticeDetail> {
+  return request<PracticeDetail>(`/api/practice/${id}${recordCreationQuery(createdAt)}`, { signal });
 }
 
 export interface Stats {
@@ -1480,12 +1501,34 @@ export function getProgressSessions(signal?: AbortSignal, force = false): Promis
   return readMetadata<ProgressSessions>("/api/progress/sessions", signal, force);
 }
 
+export interface WordSource {
+  key: string;
+  title?: string;
+  previous_partner_message?: string;
+}
+
+export interface WordCollectionOrigin {
+  scenario_id?: string;
+  source?: WordSource | null;
+  custom_scene?: CustomScene;
+  previous_partner_message?: string;
+}
+
+export interface WordCreate extends WordCollectionOrigin {
+  text: string;
+  topic?: string | null;
+  meaning?: string;
+  example?: string;
+  kind?: string;
+}
+
 export interface Word {
   id: number;
   text: string;
   meaning: string;
   example: string;
   scenario_id: string;
+  source?: WordSource | null;
   topic?: string | null;
   familiarity?: "familiar" | "uncertain" | "forgot" | null;
   kind: string; // "word" | "sentence"
@@ -1520,17 +1563,7 @@ export async function readGuestHistory(guestId: string, signal: AbortSignal) {
   return { sessions, practice, words };
 }
 
-export function postWord(
-  payload: {
-    text: string;
-    scenario_id?: string;
-    topic?: string;
-    meaning?: string;
-    example?: string;
-    kind?: string;
-  },
-  signal?: AbortSignal,
-): Promise<Word> {
+export function postWord(payload: WordCreate, signal?: AbortSignal): Promise<Word> {
   return request<Word>("/api/words", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -1538,7 +1571,7 @@ export function postWord(
   });
 }
 
-/** Words whose spaced-repetition review is due (not yet mastered). */
+/** Previously rated expressions whose spaced-repetition review is due. */
 export function getDueWords(kind?: string, signal?: AbortSignal): Promise<Word[]> {
   const q = kind ? `?kind=${kind}` : "";
   return request<Word[]>(`/api/words/due${q}`, { signal });
@@ -1547,10 +1580,45 @@ export function getDueWords(kind?: string, signal?: AbortSignal): Promise<Word[]
 /** Record an SRS review: remembered pushes the next review out, forgot resets it. */
 export type ReviewChoice = boolean | "uncertain";
 
-export function reviewWord(id: number, choice: ReviewChoice, signal?: AbortSignal, clientRequestId?: string): Promise<Word> {
+export interface WordRetestRound {
+  id: string;
+  words: number;
+  sentences: number;
+  familiar: number;
+  uncertain: number;
+  forgot: number;
+  skipped: number;
+  next_item: { position: number; word: Word } | null;
+}
+
+export interface WordRetestState {
+  words: number;
+  sentences: number;
+  unadded_scene: number;
+  round: WordRetestRound | null;
+}
+
+export function getWordRetest(signal?: AbortSignal): Promise<WordRetestState> {
+  return request("/api/words/retest", { signal, cache: "no-store" });
+}
+
+export function startWordRetest(includeScene: boolean, replaceId?: string): Promise<WordRetestRound> {
+  return request("/api/words/retest", {
+    method: "POST", body: JSON.stringify({ include_scene: includeScene, replace_id: replaceId }),
+  });
+}
+
+export function rateWordRetest(id: string, position: number, choice: ReviewChoice): Promise<WordRetestRound> {
+  const rating = choice === "uncertain" ? "uncertain" : choice ? "familiar" : "forgot";
+  return request(`/api/words/retest/${encodeURIComponent(id)}/items/${position}`, {
+    method: "PATCH", body: JSON.stringify({ rating }),
+  });
+}
+
+export function reviewWord(id: number, choice: ReviewChoice, signal?: AbortSignal, clientRequestId?: string, createdAt?: string): Promise<Word> {
   return request<Word>(`/api/words/${id}/review`, {
     method: "POST",
-    body: JSON.stringify({ remembered: choice === true, client_request_id: clientRequestId,
+    body: JSON.stringify({ remembered: choice === true, client_request_id: clientRequestId, created_at: createdAt,
       ...(choice === "uncertain" ? { uncertain: true } : {}) }),
     signal,
   });

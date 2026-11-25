@@ -8,6 +8,7 @@ import {
 import { normalizeDictionaryQuery } from "../../lib/dictionary";
 import {
   DictionaryContext,
+  dictionaryTextOrigins,
   type DictionaryOpenRequest,
 } from "./DictionaryContext";
 import { DictionaryOverlay } from "./DictionaryOverlay";
@@ -33,14 +34,17 @@ export function DictionaryProvider({ children }: { children: ReactNode }) {
           return;
         }
         const node = selection.anchorNode;
-        const element = node instanceof Element ? node : node?.parentElement;
-        if (!element?.closest("[data-dictionary-text]")) return;
+        const target = selection.focusNode;
+        const element = (node instanceof Element ? node : node?.parentElement)?.closest<HTMLElement>("[data-dictionary-text]");
+        const end = (target instanceof Element ? target : target?.parentElement)?.closest<HTMLElement>("[data-dictionary-text]");
+        if (!element) return;
         const query = normalizeDictionaryQuery(selection.toString());
         if (!query) return;
         openDictionary({
           query,
           rect: selection.getRangeAt(0).getBoundingClientRect(),
-          trigger: element.closest("[data-dictionary-text]") as HTMLElement,
+          trigger: element,
+          origin: end === element ? dictionaryTextOrigins.get(element) : undefined,
         });
       }, 0);
     };

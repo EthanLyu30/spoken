@@ -1,26 +1,20 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { getAuthGeneration, getToken, tokenCacheIdentity } from "../lib/authToken";
+import { getClientId } from "../lib/clientId";
 import { resilientStorage } from "../lib/resilientStorage";
-import { createPracticeId } from "../lib/sessionSave";
-import { deleteWord, getWords, patchWord, patchWordTopic, patchWordTopicGroup, postWord, reviewWord, type ReviewChoice, type Word } from "../lib/api";
+import { deleteWord, getWords, patchWord, patchWordTopic, patchWordTopicGroup, postWord, rateWordRetest, reviewWord, type ReviewChoice, type Word, type WordCreate, type WordRetestRound } from "../lib/api";
 let tempSeq = -1;
 let ownerGeneration = 0;
 let revision = 0;
 let refreshRevision = 0;
 let topicWrites: Promise<unknown> = Promise.resolve();
-interface CollectPayload {
-  text: string;
-  meaning?: string;
-  example?: string;
-  scenario_id?: string;
-  topic?: string;
-  kind?: string;
-}
 interface CollectionIntent {
   desired: boolean;
   row: Word;
-  payload: CollectPayload;
+  payload: WordCreate;
   running: boolean;
+  request?: Promise<Word | undefined>;
 }
 const collections = new Map<string, CollectionIntent>();
 const mutations = new Map<string, {
@@ -34,18 +28,89 @@ const mastery = new Map<number, {
   confirmed: boolean;
   pending: number;
 }>();
-const reviews = new Map<number, {
-  row: Word;
+type WordIdentity = Pick<Word, "id" | "created_at" | "text">;
+type ReviewIntent = WordIdentity & {
   remembered: ReviewChoice;
   key: string;
-  pending?: Promise<void>;
-}>();
-function sameWord(left: Word, right?: Word): boolean {
+  order: number;
+};
+type ReviewScope = { owner: string; generation: number; auth: number };
+type ReviewReceipt = { intent: ReviewIntent; scope: ReviewScope };
+const recentReviewReceiptLimit = 256;
+
+function sameWord(left: WordIdentity, right?: WordIdentity): boolean {
   return !!right && left.id === right.id && left.created_at === right.created_at && left.text === right.text;
 }
-function retireWord(row: Word) {
-  if (sameWord(row, reviews.get(row.id)?.row)) reviews.delete(row.id);
-  if (sameWord(row, mastery.get(row.id)?.row)) mastery.delete(row.id);
+function reviewOwner(): string | null {
+  const token = getToken();
+  if (!token) return `guest:${getClientId()}`;
+  const claims = tokenCacheIdentity(token);
+  // Include account version so a reused numeric user id cannot load an old queue.
+  return claims ? `account:${claims.subject}:${claims.version}` : null;
+}
+function reviewScope(): ReviewScope | null {
+  const owner = reviewOwner();
+  return owner ? { owner, generation: ownerGeneration, auth: getAuthGeneration() } : null;
+}
+function scopeIsCurrent(scope: ReviewScope): boolean {
+  const owner = reviewOwner();
+  return scope.owner === owner && scope.generation === ownerGeneration && scope.auth === getAuthGeneration();
+}
+function assertReviewScope(scope: ReviewScope) {
+  if (!scopeIsCurrent(scope)) throw new DOMException("Owner changed", "AbortError");
+}
+const reviewStoragePrefix = (owner: string) => `spoken-word-rating:${encodeURIComponent(owner)}:`;
+const reviewStorageKey = (owner: string, key: string) => reviewStoragePrefix(owner) + encodeURIComponent(key);
+const knownReviewStorageKeys = new Set<string>();
+function readReviewIntents(owner: string): ReviewIntent[] {
+  const prefix = reviewStoragePrefix(owner);
+  const keys = new Set([...knownReviewStorageKeys].filter(key => key.startsWith(prefix)));
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(prefix)) keys.add(key);
+    }
+  } catch { /* Keep the current page functional when durable storage is unavailable. */ }
+  const intents: ReviewIntent[] = [];
+  for (const key of keys) {
+    try {
+      const raw = resilientStorage.getItem(key);
+      if (!raw) { knownReviewStorageKeys.delete(key); continue; }
+      const item = JSON.parse(raw) as Partial<ReviewIntent> | null;
+      if (item && typeof item.id === "number" && Number.isSafeInteger(item.id) && item.id > 0 &&
+          typeof item.created_at === "string" && typeof item.text === "string" &&
+          typeof item.key === "string" && reviewStorageKey(owner, item.key) === key &&
+          typeof item.order === "number" && Number.isFinite(item.order) &&
+          (typeof item.remembered === "boolean" || item.remembered === "uncertain")) {
+        knownReviewStorageKeys.add(key);
+        intents.push(item as ReviewIntent);
+      }
+    } catch { /* A malformed entry must not block another pending rating. */ }
+  }
+  return intents.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key));
+}
+function writeReviewIntent(owner: string, intent: ReviewIntent) {
+  // Acknowledging an older receipt must not overwrite a new choice another
+  // tab just selected. Store and remove each immutable intent separately.
+  const key = reviewStorageKey(owner, intent.key);
+  knownReviewStorageKeys.add(key);
+  resilientStorage.setItem(key, JSON.stringify(intent));
+}
+function removeReviewIntents(owner: string, remove: (intent: ReviewIntent) => boolean) {
+  const matches = readReviewIntents(owner).filter(remove);
+  for (const intent of matches) {
+    const key = reviewStorageKey(owner, intent.key);
+    resilientStorage.removeItem(key);
+    knownReviewStorageKeys.delete(key);
+  }
+  return matches.length > 0;
+}
+function wordChanged() {
+  return Object.assign(new Error("这条收藏已更新，请返回列表重新打开。"), { code: "word_changed" });
+}
+export function isWordReviewStale(error: unknown): boolean {
+  return !!error && typeof error === "object" && (
+    ("code" in error && error.code === "word_changed") || ("status" in error && error.status === 404));
 }
 function mutation(text: string, delta: number) {
   const previous = mutations.get(text);
@@ -77,15 +142,17 @@ function enqueueTopic<T>(generation: number, action: () => Promise<T>): Promise<
 }
 interface WordsState {
   words: Word[];
+  confirmedReviewReceipts: ReadonlyMap<string, ReviewReceipt>;
   fetchedOnce: boolean;
   refreshing: boolean;
   error: boolean;
   ensureLoaded: () => void;
   refresh: (signal?: AbortSignal) => Promise<void>;
-  collect: (payload: CollectPayload) => void;
+  collect: (payload: WordCreate) => Promise<Word | undefined> | undefined;
   remove: (id: number) => void;
   toggleMaster: (id: number) => void;
-  review: (id: number, remembered: ReviewChoice) => Promise<void>;
+  review: (word: Word, remembered: ReviewChoice, intentId: string) => Promise<void>;
+  rateRetest: (word: Word, roundId: string, position: number, choice: ReviewChoice) => Promise<WordRetestRound>;
   setTopic: (id: number, topic: string | null) => Promise<void>;
   editTopic: (source: string, target: string | null) => Promise<number>;
   reset: () => void;
@@ -96,6 +163,64 @@ export const useWords = create<WordsState>()(persist((set, get) => {
       ? [row, ...s.words.filter(w => w.text !== text && w.id !== row.id)]
       : s.words.filter(w => w.text !== text)
   }));
+  const liveWord = (word: WordIdentity) => get().words.find(candidate => sameWord(word, candidate));
+  function enqueueReview<T>(target: WordIdentity, scope: ReviewScope, action: () => Promise<T>): Promise<T> {
+    mutation(target.text, 1);
+    return enqueue(target.id, scope.generation, async () => {
+      assertReviewScope(scope);
+      return action();
+    }).finally(() => {
+      if (scope.generation === ownerGeneration) mutation(target.text, -1);
+    });
+  }
+  async function settleReviewIntents(intents: ReviewIntent[], scope: ReviewScope, requireCachedWord: boolean) {
+    for (const intent of intents) {
+      assertReviewScope(scope);
+      if (requireCachedWord && !liveWord(intent)) throw wordChanged();
+      const { id, key, remembered, created_at } = intent;
+      // Another tab may already have acknowledged the same durable receipt.
+      if (!readReviewIntents(scope.owner).some(item => item.key === key)) continue;
+      // Confirm the older receipt before issuing the next decision. A failed
+      // attempt leaves every unsent decision on disk with its original key.
+      let row: Word;
+      try {
+        row = await reviewWord(id, remembered, undefined, key, created_at);
+        assertReviewScope(scope);
+        if (!sameWord(intent, row)) throw wordChanged();
+      } catch (error) {
+        if (scopeIsCurrent(scope) && isWordReviewStale(error))
+          removeReviewIntents(scope.owner, item => sameWord(intent, item));
+        throw error;
+      }
+      // Another tab may have already advanced the schedule. Confirm the exact
+      // receipt, but don't replace the cache from an out-of-date response.
+      const acknowledgedHere = removeReviewIntents(scope.owner, item => item.key === key);
+      set(s => {
+        const confirmedReviewReceipts = new Map(s.confirmedReviewReceipts).set(key, { intent, scope });
+        if (confirmedReviewReceipts.size > recentReviewReceiptLimit) {
+          const oldest = confirmedReviewReceipts.keys().next().value;
+          if (oldest !== undefined) confirmedReviewReceipts.delete(oldest);
+        }
+        return { confirmedReviewReceipts, ...(acknowledgedHere ? { words: s.words.map(word => sameWord(intent, word) ? {
+          ...word, box: row.box, due_at: row.due_at, last_reviewed: row.last_reviewed, familiarity: row.familiarity,
+        } : word) } : {}) };
+      });
+    }
+  }
+  function replayReviews(target: WordIdentity, scope: ReviewScope, until?: string): Promise<void> {
+    const intents = readReviewIntents(scope.owner).filter(item => sameWord(target, item));
+    const end = until ? intents.findIndex(item => item.key === until) + 1 : intents.length;
+    if (!end) return Promise.resolve();
+    return enqueueReview(target, scope, () => settleReviewIntents(intents.slice(0, end), scope, true));
+  }
+  function resumeReviews() {
+    const scope = reviewScope();
+    if (!scope) return;
+    const rows = new Map<number, ReviewIntent>();
+    for (const item of readReviewIntents(scope.owner))
+      if (liveWord(item)) rows.set(item.id, item);
+    for (const row of rows.values()) void replayReviews(row, scope).catch(() => undefined);
+  }
   async function syncCollection(text: string, intent: CollectionIntent, generation: number) {
     if (intent.running)
       return;
@@ -112,10 +237,12 @@ export const useWords = create<WordsState>()(persist((set, get) => {
             replace(text, real);
         }
         else if (!intent.desired && intent.row.id > 0) {
+          const scope = reviewScope();
           await enqueue(intent.row.id, generation, () => deleteWord(intent.row.id));
           if (generation !== ownerGeneration)
             return;
-          retireWord(intent.row);
+          if (scope && scopeIsCurrent(scope)) removeReviewIntents(scope.owner, item => sameWord(intent.row, item));
+          if (sameWord(intent.row, mastery.get(intent.row.id)?.row)) mastery.delete(intent.row.id);
           intent.row = { ...intent.row, id: tempSeq-- };
           if (intent.desired)
             replace(text, intent.row);
@@ -123,6 +250,8 @@ export const useWords = create<WordsState>()(persist((set, get) => {
         else
           break;
       }
+      if (generation === ownerGeneration && intent.desired && intent.row.id > 0)
+        return intent.row;
     }
     catch {
       if (generation !== ownerGeneration)
@@ -143,33 +272,34 @@ export const useWords = create<WordsState>()(persist((set, get) => {
     }
   }
   return {
-    words: [], fetchedOnce: false, refreshing: false, error: false,
+    words: [], confirmedReviewReceipts: new Map(), fetchedOnce: false, refreshing: false, error: false,
     ensureLoaded: () => {
       if (!get().fetchedOnce && !get().refreshing)
         void get().refresh();
+      else if (!get().refreshing) resumeReviews();
     },
     refresh: async (signal) => {
-      const generation = ownerGeneration, started = revision, request = ++refreshRevision;
+      const scope = reviewScope(), generation = ownerGeneration, started = revision, request = ++refreshRevision;
       set({ refreshing: true, error: false });
       try {
         const rows = await getWords(signal);
-        if (generation !== ownerGeneration || request !== refreshRevision)
+        if ((scope && !scopeIsCurrent(scope)) || generation !== ownerGeneration || request !== refreshRevision)
           return;
         set(s => {
           const protectedTexts = new Set([...mutations].filter(([, m]) => m.pending > 0 || m.revision > started).map(([text]) => text));
           const local = s.words.filter(w => protectedTexts.has(w.text));
           const protectedIds = new Set(local.map(w => w.id));
           const words = [...local, ...rows.filter(w => !protectedTexts.has(w.text) && !protectedIds.has(w.id))];
-          // An authoritative row can replace an old SQLite id. Failed receipts
-          // belong to the original incarnation, while same-row retries survive.
-          for (const [id, operation] of reviews) {
-            if (!protectedTexts.has(operation.row.text) && !sameWord(operation.row, words.find(w => w.id === id))) reviews.delete(id);
-          }
+          // An authoritative row can replace an old SQLite id. Retire only
+          // missing incarnations, never pending receipts for the live row.
+          if (scope) removeReviewIntents(scope.owner, item =>
+            !protectedTexts.has(item.text) && !words.some(word => sameWord(item, word)));
           for (const [id, status] of mastery) {
             if (!status.pending && !protectedTexts.has(status.row.text)) mastery.delete(id);
           }
           return { words, fetchedOnce: true, refreshing: false };
         });
+        if (scope && scopeIsCurrent(scope)) resumeReviews();
       }
       catch {
         if (generation === ownerGeneration && request === refreshRevision)
@@ -185,13 +315,14 @@ export const useWords = create<WordsState>()(persist((set, get) => {
         existing.desired = true;
         mutation(text, 0);
         replace(text, existing.row);
-        return;
+        return existing.request;
       }
-      const row: Word = { id: tempSeq--, text, meaning: payload.meaning ?? "", example: payload.example ?? "", scenario_id: payload.scenario_id ?? "", topic: payload.topic, kind: payload.kind ?? "word", mastered: false, created_at: new Date().toISOString() };
-      const intent = { desired: true, row, payload, running: false };
+      const row: Word = { id: tempSeq--, text, meaning: payload.meaning ?? "", example: payload.example ?? "", scenario_id: payload.scenario_id ?? "",
+        source: payload.source, topic: payload.topic, kind: payload.kind ?? "word", mastered: false, created_at: new Date().toISOString() };
+      const intent: CollectionIntent = { desired: true, row, payload, running: false };
       collections.set(text, intent);
       replace(text, row);
-      void syncCollection(text, intent, ownerGeneration);
+      return intent.request = syncCollection(text, intent, ownerGeneration);
     },
     remove: id => {
       const row = get().words.find(w => w.id === id);
@@ -204,9 +335,10 @@ export const useWords = create<WordsState>()(persist((set, get) => {
         mutation(row.text, 0);
         return;
       }
-      const intent = { desired: false, row, payload: { text: row.text, meaning: row.meaning, example: row.example, kind: row.kind, scenario_id: row.scenario_id }, running: false };
+      const { text, meaning, example, kind, scenario_id, source, topic } = row;
+      const intent: CollectionIntent = { desired: false, row, payload: { text, meaning, example, kind, scenario_id, source, topic }, running: false };
       collections.set(row.text, intent);
-      void syncCollection(row.text, intent, ownerGeneration);
+      intent.request = syncCollection(row.text, intent, ownerGeneration);
     },
     toggleMaster: id => {
       const generation = ownerGeneration, target = get().words.find(w => w.id === id);
@@ -271,42 +403,44 @@ export const useWords = create<WordsState>()(persist((set, get) => {
         return updated.length;
       });
     },
-    review: async (id, remembered) => {
-      if (id < 0)
+    review: async (word, remembered, intentId) => {
+      if (word.id < 0)
         throw new Error("请等待单词保存后再复习。");
-      const target = get().words.find(w => w.id === id), generation = ownerGeneration;
-      if (!target)
-        throw new Error("单词已移除。");
-      let operation = reviews.get(id);
-      if (operation && !sameWord(target, operation.row)) {
-        reviews.delete(id);
-        operation = undefined;
+      const scope = reviewScope();
+      if (!scope) throw new Error("账号还未确认，请刷新后重试。");
+      if (!liveWord(word)) throw wordChanged();
+      const confirmed = get().confirmedReviewReceipts.get(intentId);
+      const intents = readReviewIntents(scope.owner);
+      const existing = intents.find(item => item.key === intentId);
+      const acknowledged = confirmed && scopeIsCurrent(confirmed.scope) ? confirmed.intent : undefined;
+      const prior = existing ?? acknowledged;
+      if (prior && (!sameWord(word, prior) || prior.remembered !== remembered))
+        throw new Error("这次保存的熟悉度和先前选择不同。");
+      if (acknowledged) return;
+      if (!existing) {
+        const { id, created_at, text } = word;
+        const order = Math.max(Date.now(), (intents.at(-1)?.order ?? 0) + 1);
+        writeReviewIntent(scope.owner, { id, created_at, text, remembered, key: intentId, order });
       }
-      if (operation && operation.remembered !== remembered)
-        throw Object.assign(new Error("请先重试上次复习保存。"), { remembered: operation.remembered });
-      if (operation?.pending)
-        return operation.pending;
-      operation ??= { row: target, remembered, key: createPracticeId() };
-      reviews.set(id, operation);
-      const attempt = operation;
-      mutation(target.text, 1);
-      attempt.pending = enqueue(id, generation, () => {
-        if (!sameWord(target, get().words.find(w => w.id === id))) throw new DOMException("Word changed", "AbortError");
-        return reviewWord(id, remembered, undefined, attempt.key);
-      }).then(row => {
-        if (generation !== ownerGeneration || reviews.get(id) !== attempt || !sameWord(target, get().words.find(w => w.id === id)))
-          throw new DOMException("Owner changed", "AbortError");
-        set(s => ({ words: s.words.map(w => w.id === id ? {
-          ...w, box: row.box, due_at: row.due_at, last_reviewed: row.last_reviewed, familiarity: row.familiarity,
-        } : w) }));
-        if (reviews.get(id) === attempt) reviews.delete(id);
-      }).finally(() => {
-        if (generation === ownerGeneration) {
-          attempt.pending = undefined;
-          mutation(target.text, -1);
+      await replayReviews(word, scope, intentId);
+    },
+    rateRetest: async (word, roundId, position, choice) => {
+      const scope = reviewScope();
+      if (!scope) throw new Error("账号还未确认，请刷新后重试。");
+      const earlier = readReviewIntents(scope.owner).filter(intent => sameWord(word, intent));
+      return enqueueReview(word, scope, async () => {
+        try {
+          // The retest can contain server-added rows that aren't cached yet.
+          await settleReviewIntents(earlier, scope, false);
+        } catch (error) {
+          assertReviewScope(scope);
+          // Let the retest endpoint handle a deleted/changed incarnation. A
+          // transient receipt failure must instead leave this retest retryable.
+          if (!isWordReviewStale(error)) throw Object.assign(new Error("上一次复习还未确认保存。"), { cause: error });
         }
+        assertReviewScope(scope);
+        return rateWordRetest(roundId, position, choice);
       });
-      return attempt.pending;
     },
     reset: () => {
       ownerGeneration++;
@@ -316,8 +450,7 @@ export const useWords = create<WordsState>()(persist((set, get) => {
       queues.clear();
       topicWrites = Promise.resolve();
       mastery.clear();
-      reviews.clear();
-      set({ words: [], fetchedOnce: false, refreshing: false, error: false });
+      set({ words: [], confirmedReviewReceipts: new Map(), fetchedOnce: false, refreshing: false, error: false });
     },
   };
 }, { name: "spoken-words", skipHydration: true, storage: createJSONStorage(() => resilientStorage), partialize: s => ({ words: s.words.filter(w => w.id > 0) }) }));

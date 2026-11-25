@@ -15,9 +15,10 @@ import { getAuthGeneration } from "../lib/authToken";
 import { scenarioIcons } from "../lib/icons";
 import { correctionDrills, isCorrectionCategory, sentenceForReplay, type ReplaySentence } from "../lib/practiceCorrections";
 import { useCustomScene } from "../store/custom";
+import { recordCreationQuery } from "../lib/practiceRecordStatus";
 import "../coaching.css";
 
-function SavedSentence({ review }: { review: string }) {
+function SavedSentence({ review, createdAt }: { review: string; createdAt?: string }) {
   const [data, setData] = useState<{ example: ReplaySentence; scenarioId: string; title?: string; custom?: CustomScene } | null>();
   const generation = getAuthGeneration();
   const section = useRef<HTMLElement>(null);
@@ -29,9 +30,9 @@ function SavedSentence({ review }: { review: string }) {
     const match = /^(\d{1,15}):(\d{1,3})$/.exec(review);
     if (!match) return;
     const controller = new AbortController();
-    getSession(Number(match[1]), controller.signal).then(({ messages, corrections, scenario_id, custom }) => {
+    getSession(Number(match[1]), controller.signal, createdAt).then(({ messages, corrections, scenario_id, custom }) => {
       if (!controller.signal.aborted && generation === getAuthGeneration()) {
-        const sentence = sentenceForReplay(messages, corrections ?? [], Number(match[2]));
+        const sentence = sentenceForReplay(messages, (corrections ?? []).filter(fix => !fix.self_marked), Number(match[2]));
         const scenario = getScenario(scenario_id);
         setData(sentence?.corrections.length ? {
           example: sentence, scenarioId: scenario?.id ?? "custom",
@@ -42,7 +43,7 @@ function SavedSentence({ review }: { review: string }) {
       if (!controller.signal.aborted && generation === getAuthGeneration()) setData(null);
     });
     return () => controller.abort();
-  }, [generation, review]);
+  }, [generation, review, createdAt]);
   const invalid = !/^\d{1,15}:\d{1,3}$/.test(review);
   return <div className="prep-page">
     <main id="spoken-main" tabIndex={-1} className="prep-shell">
@@ -62,7 +63,7 @@ function SavedSentence({ review }: { review: string }) {
   </div>;
 }
 
-function SavedLesson({ sessionId }: { sessionId: string }) {
+function SavedLesson({ sessionId, createdAt }: { sessionId: string; createdAt?: string }) {
   const [scene, setScene] = useState<CustomScene | null>();
   const generation = getAuthGeneration();
   const valid = /^\d{1,15}$/.test(sessionId) && Number(sessionId) > 0;
@@ -70,16 +71,16 @@ function SavedLesson({ sessionId }: { sessionId: string }) {
     if (!valid) return;
     const controller = new AbortController();
     const current = () => !controller.signal.aborted && generation === getAuthGeneration();
-    getSession(Number(sessionId), controller.signal).then(detail => {
+    getSession(Number(sessionId), controller.signal, createdAt).then(detail => {
       if (current()) setScene(detail.scenario_id === "custom" && detail.custom?.practice_exercises?.length === 2 ? detail.custom : null);
     }).catch(() => {
       if (current()) setScene(null);
     });
     return () => controller.abort();
-  }, [generation, sessionId, valid]);
+  }, [generation, sessionId, valid, createdAt]);
   if (scene?.practice_exercises) return <GuidedPrep scene={scene} exercises={scene.practice_exercises} />;
   return <div className="prep-page"><main id="spoken-main" tabIndex={-1} className="prep-shell">
-    <Link className="prep-back" to={valid ? `/session/${sessionId}` : "/progress"}><ArrowLeft size={17} /> 返回练习记录</Link>
+    <Link className="prep-back" to={valid ? `/session/${sessionId}${recordCreationQuery(createdAt)}` : "/progress"}><ArrowLeft size={17} /> 返回练习记录</Link>
     <p role="status">{!valid || scene === null ? "这次训练题暂时无法读取。" : "正在加载这次训练的题目…"}</p>
   </main></div>;
 }
@@ -90,10 +91,11 @@ export default function PracticePrep() {
   const focusId = search.get("focus");
   const review = search.get("review");
   const lesson = search.get("lesson");
+  const createdAt = search.get("created_at") ?? undefined;
   const customScene = useCustomScene((state) => state.scene);
-  if (review !== null) return <SavedSentence key={`${getAuthGeneration()}:${review}`} review={review} />;
+  if (review !== null) return <SavedSentence key={`${getAuthGeneration()}:${review}:${createdAt ?? ""}`} review={review} createdAt={createdAt} />;
   if (scenarioId === "custom" && lesson !== null)
-    return <SavedLesson key={`${getAuthGeneration()}:${lesson}`} sessionId={lesson} />;
+    return <SavedLesson key={`${getAuthGeneration()}:${lesson}:${createdAt ?? ""}`} sessionId={lesson} createdAt={createdAt} />;
   const scenario = getScenario(scenarioId);
   const custom = scenarioId === "custom" ? customScene : null;
   if (!scenario && !custom) return <Navigate to={scenarioId === "custom" ? "/custom" : "/scenes"} replace />;

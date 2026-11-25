@@ -3,6 +3,7 @@ from app.models.scene_cues import ScenePreparation
 from app.models.session import PracticeSession, SkillScore, Turn
 from app.models.user import User
 from app.models.word import WordEntry
+from app.models.word_retest import WordRetest, WordRetestItem
 from app.models.telemetry import AdminAccount, AdminBootstrap, TelemetryRecord
 from app.models.monitoring import MonitoringState, SiteVisit
 from app.models.progress import EarnedBadge, GuestClaim, LearningEvent, ProgressMigration, ProgressOwner

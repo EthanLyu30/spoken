@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
@@ -8,6 +9,7 @@ from app.schemas.feedback import Correction, CorrectionCategory
 
 class CoachingExample(BaseModel):
     session_id: int
+    created_at: datetime | None = None
     turn_index: int
     scenario_id: str
     original: str
@@ -26,6 +28,7 @@ class CoachingPattern(BaseModel):
 class CoachingSnapshot(BaseModel):
     revision: str
     examples: list[CoachingExample]
+    queued_examples: list[CoachingExample] = Field(default_factory=list)
     patterns: list[CoachingPattern]
     can_generate_plan: bool = False
     plan_examples: list[CoachingExample] = Field(default_factory=list, exclude=True)

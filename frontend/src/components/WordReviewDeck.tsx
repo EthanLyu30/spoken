@@ -1,34 +1,44 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Volume2 } from "lucide-react";
 import { checkWordTranslation, type ReviewChoice, type TranslationGrade, type Word } from "../lib/api";
 import { getAuthGeneration } from "../lib/authToken";
-import { matchesReviewAnswer, reviewDueAt, reviewPrompt, type ReviewMode } from "../lib/wordReview";
+import { familiarityOf, matchesReviewAnswer, reviewDueAt, reviewPrompt, type ReviewMode } from "../lib/wordReview";
 import { playCafeChime, useRewardEquipped } from "../lib/rewards";
+import { createPracticeId } from "../lib/sessionSave";
 import { speakText } from "../lib/speech";
-import { useWords } from "../store/words";
+import { isWordReviewStale, useWords } from "../store/words";
 import { Buddy } from "./Buddy";
 import { Button } from "./ui/Button";
+import { WordReviewContext } from "./WordReviewContext";
+import { WordBagArtwork } from "./WordBagArtwork";
 
 const choiceText = (choice: ReviewChoice) => choice === "uncertain" ? "模糊" : choice ? "熟悉" : "遗忘";
 const dateLabel = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 export function ReviewDue({ word }: { word: Word }) {
+  if (familiarityOf(word) === "new") return <p className="wordbag-due">待学习 · 定级后安排复习</p>;
   const due = reviewDueAt(word.due_at);
   const label = word.mastered ? "已掌握" : !due || due.getTime() <= Date.now() ? "现在可练" : dateLabel.format(due);
   return <p className="wordbag-due">下次复习 · {label}</p>;
 }
 
-type SavedChoice = { id: number; choice: ReviewChoice };
+type SavedChoice = { word: Word; choice: ReviewChoice; intentId: string; unavailable?: boolean };
+type Repetition = { sourceIndex: number; total: 2 | 3 };
 type Feedback = { title: string; detail?: string };
 const gradeTitles: Record<TranslationGrade["verdict"], string> = { equivalent: "合理改写", partial: "意思接近，可以再改一处", different: "和题意有出入" };
 
-export function WordReviewDeck({ deck, mode, review, onDone }: {
-  deck: Word[]; mode: ReviewMode; review: (id: number, choice: ReviewChoice) => Promise<void>; onDone: () => void;
+export function WordReviewDeck({ deck, mode, activity = "review", review, onDone }: {
+  deck: Word[]; mode: ReviewMode; activity?: "learn" | "review" | "retest";
+  review: (word: Word, choice: ReviewChoice, intentId: string) => Promise<void>; onDone: () => void;
 }) {
+  const learning = activity === "learn";
+  const singleRating = activity !== "review";
   const savedWords = useWords(s => s.words);
+  const confirmedReceipts = useWords(s => s.confirmedReviewReceipts);
   const chime = useRewardEquipped("cafe-chime");
   const [i, setI] = useState(0);
-  const [repeats, setRepeats] = useState<Word[]>([]);
+  const [seen, setSeen] = useState<number | null>(null);
+  const [repeats, setRepeats] = useState<Repetition[]>([]);
   const [flipped, setFlipped] = useState(false);
   const [input, setInput] = useState("");
   const [checking, setChecking] = useState(false);
@@ -39,15 +49,35 @@ export function WordReviewDeck({ deck, mode, review, onDone }: {
   const [retrying, setRetrying] = useState<number | null>(null);
   const locked = useRef(false);
   const mounted = useRef(true);
+  const deckGeneration = useRef(getAuthGeneration());
+  const stepLabel = useRef<HTMLParagraphElement>(null);
+  const completionTitle = useRef<HTMLHeadingElement>(null);
+  const revealedAnswer = useRef<HTMLElement | null>(null);
   const checkRequest = useRef<AbortController | null>(null);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; checkRequest.current?.abort(); };
   }, []);
-  useEffect(() => { locked.current = false; }, [i]);
-  const repeated = i >= deck.length;
-  const word = repeated ? repeats[i - deck.length] : deck[i];
+  useEffect(() => {
+    locked.current = false;
+    (stepLabel.current ?? completionTitle.current)?.focus({ preventScroll: true });
+  }, [i, seen]);
+  useEffect(() => {
+    if (flipped) revealedAnswer.current?.focus();
+  }, [flipped]);
+  // Finish everyone's second pass before returning to the forgotten expressions for their third.
+  const followups = useMemo(() => [
+    ...repeats.map(item => ({ ...item, pass: 2 })),
+    ...repeats.filter(item => item.total === 3).map(item => ({ ...item, pass: 3 })),
+  ], [repeats]);
+  const repeat = i >= deck.length ? followups[i - deck.length] : undefined;
+  const sourceIndex = repeat?.sourceIndex ?? i;
+  const word = deck[sourceIndex];
   const prompt = word && reviewPrompt(word, mode);
+  const preview = learning && seen !== i;
+  const practiceOnly = repeat?.pass === 2 && repeat.total === 3;
+  const waitForSave = !!word && (pending.has(word.id) || failed.some(item => item.word.id === word.id));
+  const canAdvance = !!word && !preview && !waitForSave && (flipped || (!singleRating && !prompt && !repeat));
 
   function finishCheck(next: Feedback) {
     setFeedback(next);
@@ -55,12 +85,11 @@ export function WordReviewDeck({ deck, mode, review, onDone }: {
   }
 
   async function checkAnswer() {
-    if (!word || !prompt || !input.trim() || checkRequest.current) return;
+    if (!word || !prompt || !input.trim() || checkRequest.current || deckGeneration.current !== getAuthGeneration()) return;
     if (matchesReviewAnswer(input, prompt.answer)) return finishCheck({ title: "与参考一致" });
     if (mode !== "translate") return finishCheck({ title: "与参考填法不同", detail: "可以结合句意判断其他填法。" });
     const controller = new AbortController();
-    const generation = getAuthGeneration();
-    const current = () => mounted.current && !controller.signal.aborted && generation === getAuthGeneration();
+    const current = () => mounted.current && !controller.signal.aborted && deckGeneration.current === getAuthGeneration();
     checkRequest.current = controller;
     setChecking(true);
     try {
@@ -81,25 +110,56 @@ export function WordReviewDeck({ deck, mode, review, onDone }: {
     finishCheck({ title: "参考答案" });
   }
 
-  function answer(choice: ReviewChoice) {
-    if (!word || locked.current || pending.has(word.id) || failed.some(item => item.id === word.id)) return;
-    locked.current = true;
-    const generation = getAuthGeneration();
-    const current = () => mounted.current && generation === getAuthGeneration();
-    const again = choice === false && !repeated;
-    if (again) setRepeats(items => [...items, word]);
-    setChoices(items => new Map(items).set(word.id, choice));
-    setPending(items => new Set(items).add(word.id));
+  const nextCard = useCallback(() => {
     setFlipped(false);
     setFeedback(null);
     setInput("");
     setI(i + 1);
-    if (chime && !again && i + 1 === deck.length + repeats.length) void playCafeChime();
-    void Promise.resolve(review(word.id, choice)).catch((error: unknown) => {
-      if (!current()) return;
-      const prior = error && typeof error === "object" && "remembered" in error ? error.remembered : undefined;
-      const choiceToSave = typeof prior === "boolean" || prior === "uncertain" ? prior : choice;
-      setFailed(items => [...items, { id: word.id, choice: choiceToSave }]);
+  }, [i]);
+
+  function advance() {
+    if (locked.current || !canAdvance) return false;
+    locked.current = true;
+    nextCard();
+    return true;
+  }
+
+  const finishSavedRating = useCallback((id: number, choice: ReviewChoice) => {
+    setChoices(items => new Map(items).set(id, choice));
+    if (chime && i + 1 === deck.length) void playCafeChime();
+    nextCard();
+  }, [chime, deck.length, i, nextCard]);
+
+  useEffect(() => {
+    if (activity === "retest" || deckGeneration.current !== getAuthGeneration()) return;
+    const recovered = failed.filter(entry => !entry.unavailable && entry.word.id !== retrying
+      && confirmedReceipts.has(entry.intentId));
+    if (!recovered.length) return;
+    setFailed(items => items.filter(item => !recovered.some(entry => entry.intentId === item.intentId)));
+    const current = recovered.find(entry => entry.word.id === word?.id && entry.word.created_at === word?.created_at);
+    if (singleRating && current) finishSavedRating(current.word.id, current.choice);
+  }, [activity, confirmedReceipts, failed, finishSavedRating, retrying, singleRating, word]);
+
+  function recordFailedRating(target: SavedChoice, error: unknown) {
+    setFailed(items => [...items.filter(item => item.word.id !== target.word.id),
+      { ...target, unavailable: activity !== "retest" && isWordReviewStale(error) }]);
+  }
+
+  function answer(choice: ReviewChoice) {
+    if (!word || practiceOnly || !canAdvance || locked.current || deckGeneration.current !== getAuthGeneration()) return;
+    if (singleRating) locked.current = true;
+    else advance();
+    const current = () => mounted.current && deckGeneration.current === getAuthGeneration();
+    const intentId = createPracticeId();
+    const needsMore = !singleRating && !repeat && choice !== true;
+    if (needsMore) setRepeats(items => [...items, { sourceIndex, total: choice === false ? 3 : 2 }]);
+    if (!singleRating) setChoices(items => new Map(items).set(word.id, choice));
+    setPending(items => new Set(items).add(word.id));
+    if (!singleRating && chime && !needsMore && i + 1 === deck.length + followups.length) void playCafeChime();
+    void Promise.resolve(review(word, choice, intentId)).then(() => {
+      if (current() && singleRating) finishSavedRating(word.id, choice);
+    }).catch((error: unknown) => {
+      if (current()) recordFailedRating({ word, choice, intentId }, error);
     }).finally(() => {
       if (current()) setPending(items => {
         const remaining = new Set(items);
@@ -110,22 +170,29 @@ export function WordReviewDeck({ deck, mode, review, onDone }: {
   }
 
   async function retrySave(target: SavedChoice) {
-    if (retrying !== null) return;
-    const generation = getAuthGeneration();
-    const current = () => mounted.current && generation === getAuthGeneration();
-    setRetrying(target.id);
+    if (retrying !== null || deckGeneration.current !== getAuthGeneration()) return;
+    const current = () => mounted.current && deckGeneration.current === getAuthGeneration();
+    setRetrying(target.word.id);
     try {
-      await review(target.id, target.choice);
-      if (current()) setFailed(items => items.filter(item => item.id !== target.id));
-    } catch { /* The original receipt remains retryable. */ }
+      await review(target.word, target.choice, target.intentId);
+      if (current()) {
+        setFailed(items => items.filter(item => item.word.id !== target.word.id));
+        if (singleRating) finishSavedRating(target.word.id, target.choice);
+      }
+    } catch (error) { if (current()) recordFailedRating(target, error); }
     finally { if (current()) setRetrying(null); }
   }
 
   const saveStatus = <>
-    {pending.size > 0 && <p role="status">正在后台保存复习…</p>}
-    {failed.map(item => <div key={item.id} role="alert" className="wordbag-save-error">
-      <span>「{deck.find(entry => entry.id === item.id)?.text}」的{choiceText(item.choice)}标记尚未确认保存。</span>
-      <Button disabled={retrying !== null} onClick={() => void retrySave(item)}>重试保存</Button>
+    {pending.size > 0 && <p role="status">{singleRating ? "正在保存熟悉度…" : "正在后台保存复习…"}</p>}
+    {failed.map(item => <div key={item.word.id} role="alert" className="wordbag-save-error">
+      {item.unavailable ? <>
+        <span>「{item.word.text}」已更新，原卡片的标记不能保存。</span>
+        {word?.id === item.word.id && <Button onClick={nextCard}>跳过这条</Button>}
+      </> : <>
+        <span>「{item.word.text}」的{choiceText(item.choice)}标记尚未确认保存。</span>
+        <Button disabled={retrying !== null} onClick={() => void retrySave(item)}>重试保存</Button>
+      </>}
     </div>)}
   </>;
   if (!word) {
@@ -133,12 +200,12 @@ export function WordReviewDeck({ deck, mode, review, onDone }: {
     const uncertain = [...choices.values()].filter(choice => choice === "uncertain").length;
     return <section className="card grid place-items-center gap-3 p-8 text-center">
       <Buddy mood="cheer" size={120} />
-      <h3 className="font-display text-xl font-semibold text-ink">复习完成！</h3>
+      <h3 className="font-display text-xl font-semibold text-ink" ref={completionTitle} tabIndex={-1}>{learning ? "学习完成！" : "复习完成！"}</h3>
       <p className="text-sm text-muted">记得 {remembered} · 待加强 {choices.size - remembered}</p>
       <p className="text-xs text-muted">熟悉 {remembered} · 模糊 {uncertain} · 遗忘 {choices.size - remembered - uncertain}</p>
       <ul className="wordbag-review-dates">{deck.map(entry => {
-        const stored = savedWords.find(candidate => candidate.id === entry.id);
-        return stored && !pending.has(entry.id) && !failed.some(item => item.id === entry.id) &&
+        const stored = savedWords.find(candidate => candidate.id === entry.id && candidate.created_at === entry.created_at && candidate.text === entry.text);
+        return stored && !pending.has(entry.id) && !failed.some(item => item.word.id === entry.id) &&
           <li key={entry.id}><strong lang="en">{entry.text}</strong><ReviewDue word={stored} /></li>;
       })}</ul>
       {saveStatus}
@@ -146,10 +213,33 @@ export function WordReviewDeck({ deck, mode, review, onDone }: {
     </section>;
   }
 
-  const waitForSave = pending.has(word.id) || failed.some(item => item.id === word.id);
-  return <section className="card grid place-items-center gap-4 p-8 text-center">
-    <p className="text-xs font-bold tracking-wide text-muted">{i + 1} / {deck.length + repeats.length}</p>
-    {repeated && <p className="wordbag-repeat">刚才忘记的表达，再练一次</p>}
+  const step = (
+    <p className="wordbag-attempt" ref={stepLabel} tabIndex={-1}>
+      {singleRating && <strong>{preview ? "先学这条" : "回忆与定级"}</strong>}
+      {activity !== "retest" && <span>第 {sourceIndex + 1} / {deck.length} 条</span>}
+      {repeat && <span className="wordbag-repeat">{repeat.total === 3 ? "遗忘巩固" : "模糊巩固"} · 第 {repeat.pass} / {repeat.total} 遍</span>}
+    </p>
+  );
+  if (preview) return <section className="card wordbag-learn" aria-label="学习新收藏">
+    {step}
+    <WordBagArtwork scenarioId={word.scenario_id} compact />
+    <WordReviewContext word={word} showConversation />
+    <div className="wordbag-learn-expression">
+      <h3 lang="en">{word.text}</h3>
+      {word.meaning && <p>{word.meaning}</p>}
+      {word.example.trim() && word.example.trim() !== word.text.trim() && <p className="wordbag-learn-example" lang="en">{word.example}</p>}
+    </div>
+    <div className="wordbag-learn-controls">
+      <Button variant="soft" onClick={() => speakText(word.text, word.scenario_id)}><Volume2 size={16} /> 朗读</Button>
+      <Button onClick={() => setSeen(i)}>试着回忆</Button>
+    </div>
+  </section>;
+
+  return <section className="card wordbag-question grid place-items-center gap-4 p-8 text-center">
+    {step}
+    <WordBagArtwork scenarioId={word.scenario_id} compact />
+    <WordReviewContext key={i} word={word} showConversation={flipped}
+      hiddenAnswers={flipped ? [] : [word.text, prompt?.answer ?? ""]} />
     {prompt ? <form className="wordbag-review-output" onSubmit={event => { event.preventDefault(); if (!flipped) void checkAnswer(); }}>
       <p lang={mode === "cloze" ? "en" : "zh-CN"}>{prompt.prompt}</p>
       <label>输入英文<input value={input} readOnly={flipped || checking} onChange={event => setInput(event.target.value)} lang="en" maxLength={1200} /></label>
@@ -157,23 +247,28 @@ export function WordReviewDeck({ deck, mode, review, onDone }: {
         <Button type="button" variant="soft" onClick={revealReference}>查看参考</Button></div>}
       {checking && <p role="status">正在判断表达是否和题意一致…</p>}
       {feedback && <div role="status"><strong>{feedback.title}</strong>{feedback.detail && <p>{feedback.detail}</p>}
-        <p className="wordbag-reference" lang="en">{prompt.answer}</p></div>}
-    </form> : <button type="button" onClick={() => setFlipped(value => !value)}
+        <p className="wordbag-reference" ref={element => { revealedAnswer.current = element; }} tabIndex={-1} lang="en">{prompt.answer}</p></div>}
+    </form> : singleRating ? <div className="wordbag-learn-recall">
+      <p>{word.meaning || (learning ? "想一想刚学的英文，再核对原文。" : "回忆这条收藏，再核对原文。")}</p>
+      {flipped ? <strong ref={revealedAnswer} tabIndex={-1} lang="en">{word.text}</strong> : <Button variant="soft" onClick={revealReference}>显示原文</Button>}
+    </div> : <button type="button" onClick={() => setFlipped(value => !value)}
       className="grid min-h-[9rem] w-full place-items-center rounded-3xl bg-surface-2 px-6 py-8">
       {!flipped ? <span className="font-display text-2xl font-bold text-ink">{word.text}</span> : <div>
         <p className="text-lg text-ink">{word.meaning || "（暂无释义）"}</p>
         {word.example && <p className="mt-2 text-sm text-muted">{word.example}</p>}
       </div>}
     </button>}
-    {(!prompt || flipped) && <>
+    {(flipped || (!singleRating && !prompt)) && <>
       <div className="flex items-center gap-3"><button type="button" onClick={() => speakText(word.text)}
         className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-ink">
         <Volume2 className="h-3.5 w-3.5" /> 朗读</button>
-        {!prompt && <span className="text-xs text-muted">点卡片翻面看释义</span>}</div>
+        {!singleRating && !prompt && <span className="text-xs text-muted">点卡片翻面看释义</span>}</div>
       <div className="flex flex-wrap justify-center gap-2">
-        <Button variant="soft" disabled={waitForSave} onClick={() => answer(false)}>遗忘（忘了）</Button>
-        <Button variant="soft" disabled={waitForSave} onClick={() => answer("uncertain")}>模糊</Button>
-        <Button disabled={waitForSave} onClick={() => answer(true)}>熟悉（记得）</Button>
+        {practiceOnly ? <Button disabled={!canAdvance} onClick={advance}>完成这遍</Button> : <>
+          <Button variant="soft" disabled={!canAdvance} onClick={() => answer(false)}>遗忘（忘了）</Button>
+          <Button variant="soft" disabled={!canAdvance} onClick={() => answer("uncertain")}>模糊</Button>
+          <Button disabled={!canAdvance} onClick={() => answer(true)}>熟悉（记得）</Button>
+        </>}
       </div>
     </>}
     {saveStatus}

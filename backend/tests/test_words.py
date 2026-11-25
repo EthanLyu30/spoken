@@ -10,7 +10,8 @@ from app.api.chat import get_client
 from app.db import SessionLocal
 from app.main import app
 from app.models.progress import LearningEvent
-from app.services import progress
+from app.models.word import WordEntry
+from app.services import progress, words
 
 client = TestClient(app, headers={"X-Client-Id": "test-word-device"})
 
@@ -72,6 +73,31 @@ def test_word_topic_and_uncertain_review_keep_existing_mastery():
 
 def test_delete_missing_404():
     assert client.delete("/api/words/999999").status_code == 404
+
+
+def test_word_source_stays_with_the_original_scene_after_topic_merge_and_retries():
+    owner = {"X-Client-Id": uuid4().hex}
+    scene = {"title": "Planning a handover", "title_zh": "交接会议", "partner_role": "Client",
+             "goal": "确认第一天的工作安排", "persona": "Project lead", "opening_line": "When can you start?"}
+    item = {"text": "We could begin within a week of signing.", "meaning": "我们可以在签署后一周内开始。",
+            "example": "We could begin within a week of signing.", "kind": "sentence", "scenario_id": "custom",
+            "topic": "旧话题", "custom_scene": scene, "previous_partner_message": "How soon can you start?"}
+    one = client.post("/api/words", headers=owner, json=item).json()
+    other_scene = {**scene, "goal": "确认钥匙的交接地点"}
+    two = client.post("/api/words", headers=owner, json={**item, "text": "Let's meet at the front desk.",
+                      "custom_scene": other_scene, "previous_partner_message": "Where should we meet?"}).json()
+    assert one["source"]["title"] == two["source"]["title"] == "交接会议"
+    assert one["source"]["key"] != two["source"]["key"]
+    assert one["source"]["previous_partner_message"] == "How soon can you start?"
+    repeated = client.post("/api/words", headers=owner, json={**item, "custom_scene": other_scene}).json()
+    assert repeated["id"] == one["id"] and repeated["source"] == one["source"]
+    assert client.patch("/api/words/topics", headers=owner, json={"source": "旧话题", "target": "新话题"}).is_success
+    updated = {row["id"]: row for row in client.get("/api/words", headers=owner).json()}
+    assert len(updated) == 2
+    for row in (one, two):
+        assert updated[row["id"]]["topic"] == "新话题"
+        assert updated[row["id"]]["source"] == row["source"]
+    assert client.get("/api/words", headers={"X-Client-Id": uuid4().hex}).json() == []
 
 
 def test_rename_topic_moves_all_kinds_including_builtin_default_for_owner_only():
@@ -274,9 +300,9 @@ def test_srs_review_updates_box_and_due():
     wid = r.json()["id"]
     assert r.json()["box"] == 0  # new word starts in box 0
 
-    # New words are due immediately.
+    # A saved expression joins scheduled review only after its first rating.
     due = client.get("/api/words/due?kind=word").json()
-    assert any(w["id"] == wid for w in due)
+    assert not any(w["id"] == wid for w in due)
 
     # Remembering it bumps the box and pushes the due date out (no longer due).
     rv = client.post(f"/api/words/{wid}/review", json={"remembered": True})
@@ -321,6 +347,36 @@ def test_recall_after_forgetting_has_one_progress_item_and_preserves_saved_due_d
 
 def test_review_missing_404():
     assert client.post("/api/words/999999/review", json={"remembered": True}).status_code == 404
+
+
+def test_stale_word_rating_cannot_attach_to_a_reused_id():
+    owner = uuid4().hex
+    headers = {"X-Client-Id": owner}
+    item = {"text": "in another lifetime", "meaning": "在另一个时间", "example": "In another lifetime."}
+    original = client.post("/api/words", headers=headers, json=item).json()
+    path = f"/api/words/{original['id']}"
+    assert client.delete(path, headers=headers).status_code == 204
+    # Force id recycling on both SQLite and Postgres, and keep the same text.
+    with SessionLocal() as db:
+        replacement_time = datetime.fromisoformat(original["created_at"]) + timedelta(microseconds=1)
+        replacement = WordEntry(id=original["id"], client_id=owner, created_at=replacement_time, **item)
+        words.record_collection(db, replacement)
+        db.commit()
+
+    before, = client.get("/api/words", headers=headers).json()
+    body = {"remembered": True, "client_request_id": "first-delivery-old-card"}
+    assert client.post(path + "/review", headers=headers, json={**body, "created_at": original["created_at"]}).status_code == 409
+    assert client.post(path + "/review", headers=headers, json=body).status_code == 409
+    assert client.get("/api/words", headers=headers).json() == [before]
+    with SessionLocal() as db:
+        assert db.scalar(select(LearningEvent).where(LearningEvent.client_id == owner, LearningEvent.event_type == "word_reviewed")) is None
+
+    fresh = {**body, "created_at": before["created_at"]}
+    applied = client.post(path + "/review", headers=headers, json=fresh)
+    assert applied.status_code == 200 and applied.json()["box"] == 1
+    assert client.post(path + "/review", headers=headers, json=fresh).json() == applied.json()
+    with SessionLocal() as db:
+        assert len(db.scalars(select(LearningEvent).where(LearningEvent.client_id == owner, LearningEvent.event_type == "word_reviewed")).all()) == 1
 
 
 def test_add_is_idempotent_and_stores_kind():
