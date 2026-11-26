@@ -1,8 +1,7 @@
 import { Check, Search, SlidersHorizontal } from "lucide-react";
 import { useId, useRef, useState } from "react";
-import type { ReviewMode } from "../lib/wordReview";
+import { reviewModeLabels, type ReviewMode } from "../lib/wordReview";
 
-const modes: Record<ReviewMode, string> = { flip: "翻卡回忆", translate: "看中文写英文", cloze: "关键词填空" };
 const levels = { "": "全部熟悉度", new: "待学习", familiar: "熟悉", uncertain: "模糊", forgot: "遗忘" };
 
 export function WordBagFilters({ topics, topic, familiarity, mode, onTopic, onFamiliarity, onMode }: {
@@ -59,8 +58,8 @@ export function WordBagFilters({ topics, topic, familiarity, mode, onTopic, onFa
       <div className="wordbag-filter-group" role="group" aria-label="复习方式">
         <span>复习方式</span>
         <div className="wordbag-choice-strip">
-          {(Object.keys(modes) as ReviewMode[]).map(key => <button key={key} type="button" aria-pressed={key === mode}
-            onClick={() => onMode(key)}>{modes[key]}</button>)}
+          {(Object.entries(reviewModeLabels) as [ReviewMode, string][]).map(([key, label]) => <button key={key} type="button" aria-pressed={key === mode}
+            onClick={() => onMode(key)}>{label}</button>)}
         </div>
       </div>
     </div>}

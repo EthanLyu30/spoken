@@ -52,11 +52,18 @@ _VOICE_PREFIXES = ("/api/asr", "/api/pronunciation")
 _AUTH_PREFIXES = ("/api/auth/login", "/api/auth/register", "/api/auth/password-reset", "/api/auth/email-verification")
 
 
+def bucket_for(path: str) -> str:
+    if path.startswith("/api/words/") and path.endswith("/translation-prompt"):
+        return "words:translation-prompt"
+    parts = path.split("/")
+    return parts[2] if len(parts) >= 3 else "api"
+
+
 def limit_for(path: str) -> tuple[int, int] | None:
     """Return (requests, window seconds) for a costly path."""
     if path == "/api/progress/coaching/plan":
         return 6, 60
-    if path.startswith("/api/words/") and path.endswith("/translation"):
+    if path.startswith("/api/words/") and path.endswith(("/translation", "/translation-prompt")):
         return 30, 60
     if path.startswith(_AUTH_PREFIXES):
         return 20, 60

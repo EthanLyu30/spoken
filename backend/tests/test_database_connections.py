@@ -65,8 +65,8 @@ def test_legacy_word_bag_migration_preserves_scheduling_and_scenario(monkeypatch
         database._migrate_sqlite()
         with legacy.connect() as connection:
             assert connection.exec_driver_sql(
-                "SELECT scenario_id, due_at, box, topic, familiarity, source FROM words"
-            ).one() == ("negotiation", "2026-11-28", 3, "签约", "familiar", None)
+                "SELECT scenario_id, due_at, box, topic, familiarity, source, review_translation FROM words"
+            ).one() == ("negotiation", "2026-11-28", 3, "签约", "familiar", None, None)
     finally:
         legacy.dispose()
 
@@ -98,8 +98,10 @@ def test_postgres_word_source_migration_preserves_legacy_rows_on_concurrent_star
         events = {column["name"]: column["type"] for column in inspector.get_columns("learning_events")}
         assert words["text"].length == events["word_text"].length == 600
         with legacy.begin() as connection:
-            assert connection.exec_driver_sql("""SELECT scenario_id, due_at::text, box, topic, familiarity, source
-                FROM words WHERE id = 1""").one() == ("negotiation", "2026-11-28 09:00:00", 3, "签约", "familiar", None)
+            assert connection.exec_driver_sql("""SELECT scenario_id, due_at::text, box, topic, familiarity, source,
+                review_translation FROM words WHERE id = 1""").one() == (
+                    "negotiation", "2026-11-28 09:00:00", 3, "签约", "familiar", None, None,
+                )
             connection.exec_driver_sql("""UPDATE words SET source = '{"key":"negotiation"}' WHERE id = 1""")
             assert connection.exec_driver_sql("SELECT source FROM words WHERE id = 1").scalar_one() == {"key": "negotiation"}
     finally:

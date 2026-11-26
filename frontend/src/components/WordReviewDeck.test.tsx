@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
-import { getWords, reviewWord, type Word } from "../lib/api";
+import { checkWordTranslation, getWords, reviewWord, type Word } from "../lib/api";
 import { clearToken } from "../lib/authToken";
 import { rotateClientId } from "../lib/clientId";
 import { useWords } from "../store/words";
@@ -9,6 +9,7 @@ import { WordReviewDeck } from "./WordReviewDeck";
 
 vi.mock("../lib/api", async importOriginal => ({
   ...await importOriginal<typeof import("../lib/api")>(), getWords: vi.fn(), reviewWord: vi.fn(),
+  checkWordTranslation: vi.fn(),
 }));
 vi.mock("../lib/rewards", () => ({ playCafeChime: vi.fn(), useRewardEquipped: () => false }));
 
@@ -33,6 +34,45 @@ it("moves keyboard focus to the original answer when the reveal button is replac
   screen.getByRole("button", { name: "显示原文" }).focus();
   await user.keyboard("{Enter}");
   expect(screen.getByText(word.text, { exact: true })).toHaveFocus();
+});
+
+it("requires a submitted answer after closing the reference and lets the learner rate a nonmatching answer", async () => {
+  const user = userEvent.setup();
+  const review = vi.fn().mockResolvedValue(undefined);
+  vi.mocked(checkWordTranslation).mockResolvedValue({ verdict: "different", feedback: "保留原句的行业。" });
+  render(<WordReviewDeck deck={[word]} mode="translate" review={review} onDone={vi.fn()} />);
+
+  const input = screen.getByRole("textbox", { name: "输入英文" });
+  await user.type(input, "something");
+  await user.click(screen.getByRole("button", { name: "查看参考" }));
+  expect(screen.getByText(word.text)).toHaveFocus();
+  expect(screen.queryByRole("button", { name: /熟悉/ })).not.toBeInTheDocument();
+  expect(checkWordTranslation).not.toHaveBeenCalled();
+  await user.keyboard("{Escape}");
+  expect(input).toHaveFocus();
+  expect(input).toHaveValue("something");
+  expect(screen.queryByText(word.text)).not.toBeInTheDocument();
+  await user.clear(input);
+  await user.type(input, "   {Enter}");
+  expect(screen.getByRole("button", { name: "检查答案" })).toBeDisabled();
+  expect(review).not.toHaveBeenCalled();
+  await user.type(input, "a different expression{Enter}");
+  expect(await screen.findByText("和题意有出入")).toBeVisible();
+  expect(checkWordTranslation).toHaveBeenCalledExactlyOnceWith(word.id, "a different expression", expect.any(AbortSignal), word.created_at);
+  expect(screen.getByText(word.text)).toHaveFocus();
+  await user.click(screen.getByRole("button", { name: /熟悉/ }));
+  expect(review).toHaveBeenCalledExactlyOnceWith(word, true, expect.any(String));
+});
+
+it("allows self-rating when grading fails after a submitted English answer", async () => {
+  const user = userEvent.setup();
+  const review = vi.fn().mockResolvedValue(undefined);
+  vi.mocked(checkWordTranslation).mockRejectedValue(new Error("offline"));
+  render(<WordReviewDeck deck={[word]} mode="translate" review={review} onDone={vi.fn()} />);
+  await user.type(screen.getByRole("textbox", { name: "输入英文" }), "brand new{Enter}");
+  expect(await screen.findByText("暂时无法判断改写")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: /熟悉/ }));
+  expect(review).toHaveBeenCalledExactlyOnceWith(word, true, expect.any(String));
 });
 
 it("clears the save error and finishes learning when background replay confirms the exact receipt", async () => {

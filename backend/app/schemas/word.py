@@ -62,6 +62,15 @@ class WordTopicChange(BaseModel):
 
 class WordTranslation(BaseModel):
     answer: str = Field(min_length=1, max_length=1200)
+    created_at: str | None = Field(default=None, min_length=1, max_length=40)
+
+
+class WordTranslationPromptRequest(BaseModel):
+    created_at: str = Field(min_length=1, max_length=40)
+
+
+class WordTranslationPrompt(BaseModel):
+    translation: str | None = Field(max_length=1200)
 
 
 class WordTranslationGrade(BaseModel):
@@ -83,6 +92,7 @@ class Word(BaseModel):
     id: int
     text: str
     meaning: str
+    review_translation: str | None = None
     example: str
     scenario_id: str
     source: WordSource | None = None

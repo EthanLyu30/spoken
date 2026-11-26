@@ -199,6 +199,129 @@ def test_translation_only_sends_owned_prompt_and_accepts_paraphrases(monkeypatch
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize(("reference", "note", "translation", "answer", "kind"), [
+    ("I've been in sales for three years.", "简洁说明工作年限。", "我做销售已经三年了。",
+     "I have worked in sales for three years.", "sentence"),
+    ("I'll have the draft ready by Friday.", "用于承诺截止日期（use it to promise a deadline）。", "我最迟会在周五准备好草稿。",
+     "I'll get the draft ready by Friday.", "word"),
+])
+def test_prepared_translation_preserves_the_note_and_drives_grading(monkeypatch, reference, note, translation, answer, kind):
+    calls = []
+
+    class Translator:
+        async def chat(self, messages, **_kwargs):
+            exercise = json.loads(messages[-1]["content"])
+            calls.append(exercise)
+            if "answer" in exercise:
+                assert exercise == {"meaning": translation, "reference": reference, "answer": answer}
+                return '{"verdict":"equivalent","feedback":"意思一致。"}'
+            if "translation" in exercise:
+                assert exercise == {"reference": reference, "translation": translation}
+                return '{"equivalent":true}'
+            assert exercise == {"reference": reference, "saved_meaning": note}
+            return json.dumps({"translation": translation})
+
+    monkeypatch.setitem(app.dependency_overrides, get_client, Translator)
+    owner = {"X-Client-Id": uuid4().hex}
+    saved = client.post("/api/words", headers=owner, json={
+        "text": reference, "meaning": note, "example": reference, "kind": kind,
+    }).json()
+    path = f"/api/words/{saved['id']}"
+    identity = {"created_at": saved["created_at"]}
+    prepared = client.post(path + "/translation-prompt", headers=owner, json=identity)
+    assert prepared.status_code == 200
+    assert prepared.headers["cache-control"] == "private, no-store"
+    assert prepared.json() == {"translation": translation}
+    assert client.post(path + "/translation-prompt", headers=owner, json=identity).json() == prepared.json()
+    assert len(calls) == 2
+    [stored] = client.get("/api/words", headers=owner).json()
+    assert (stored["meaning"], stored["review_translation"]) == (note, translation)
+    grade = client.post(path + "/translation", headers=owner, json={**identity, "answer": answer})
+    assert grade.status_code == 200 and grade.json()["verdict"] == "equivalent"
+
+
+@pytest.mark.parametrize("unavailable_at", ["generation", "verification", "rejected", "malformed"])
+def test_unavailable_translation_returns_null_without_changing_the_word(monkeypatch, unavailable_at):
+    from app.services.deepseek import DeepSeekError
+
+    class Translator:
+        async def chat(self, messages, **_kwargs):
+            exercise = json.loads(messages[-1]["content"])
+            if "translation" in exercise:
+                if unavailable_at == "verification":
+                    raise DeepSeekError("unavailable")
+                if unavailable_at == "malformed":
+                    return '{"equivalent":"yes"}'
+                return '{"equivalent":false}'
+            if unavailable_at == "generation":
+                raise DeepSeekError("unavailable")
+            return '{"translation":"用于表达工作经历。"}'
+
+    monkeypatch.setitem(app.dependency_overrides, get_client, Translator)
+    owner = {"X-Client-Id": uuid4().hex}
+    saved = client.post("/api/words", headers=owner, json={
+        "text": "I've been in sales for three years.", "meaning": "简洁说明工作年限。",
+        "example": "I've been in sales for three years.", "kind": "sentence",
+    }).json()
+    result = client.post(f"/api/words/{saved['id']}/translation-prompt", headers=owner,
+                         json={"created_at": saved["created_at"]})
+    assert result.status_code == 200 and result.json() == {"translation": None}
+    assert client.get("/api/words", headers=owner).json() == [saved]
+
+
+def test_translation_prompt_checks_owner_and_creation_before_calling_provider(monkeypatch):
+    class UnexpectedProvider:
+        async def chat(self, **_kwargs):
+            pytest.fail("The provider received an exercise for an absent word identity")
+
+    monkeypatch.setitem(app.dependency_overrides, get_client, UnexpectedProvider)
+    owner = {"X-Client-Id": uuid4().hex}
+    saved = client.post("/api/words", headers=owner, json={
+        "text": "See you next week.", "meaning": "用于道别。", "example": "See you next week.", "kind": "sentence",
+    }).json()
+    path = f"/api/words/{saved['id']}"
+    for headers, timestamp in [(owner, "2000-01-01T00:00:00"), ({"X-Client-Id": uuid4().hex}, saved["created_at"])]:
+        identity = {"created_at": timestamp}
+        result = client.post(path + "/translation-prompt", headers=headers, json=identity)
+        assert result.status_code == 200 and result.json() == {"translation": None}
+        assert client.post(path + "/translation", headers=headers, json={**identity, "answer": "Bye"}).status_code == 404
+
+
+@pytest.mark.parametrize("change", ["moved", "recycled"])
+def test_translation_preparation_cannot_write_after_the_identity_changes(monkeypatch, change):
+    owner, other_owner = uuid4().hex, uuid4().hex
+    headers = {"X-Client-Id": owner}
+    saved = client.post("/api/words", headers=headers, json={
+        "text": "See you next week.", "meaning": "用于道别。", "example": "See you next week.", "kind": "sentence",
+    }).json()
+
+    class Translator:
+        async def chat(self, messages, **_kwargs):
+            exercise = json.loads(messages[-1]["content"])
+            if "translation" not in exercise:
+                return '{"translation":"下周见。"}'
+            with SessionLocal() as other_session:
+                progress.lock_owner(other_session, owner)
+                original = other_session.get(WordEntry, saved["id"])
+                if change == "moved":
+                    original.client_id = other_owner
+                else:
+                    later = original.created_at + timedelta(microseconds=1)
+                    other_session.delete(original)
+                    other_session.flush()
+                    other_session.add(WordEntry(id=saved["id"], client_id=owner, text="See you next week.",
+                                                meaning="用于道别。", kind="sentence", created_at=later))
+                other_session.commit()
+            return '{"equivalent":true}'
+
+    monkeypatch.setitem(app.dependency_overrides, get_client, Translator)
+    result = client.post(f"/api/words/{saved['id']}/translation-prompt", headers=headers,
+                         json={"created_at": saved["created_at"]})
+    assert result.status_code == 200 and result.json() == {"translation": None}
+    with SessionLocal() as db:
+        assert db.get(WordEntry, saved["id"]).review_translation is None
+
+
 @pytest.mark.parametrize(("meaning", "reference", "answer"), [
     ("如果我们调整交期，就可以调整价格。", "We can adjust the price if we change the delivery date.",
      "We can adjust the price due to changing the delivery date."),

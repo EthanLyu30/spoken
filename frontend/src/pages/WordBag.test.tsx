@@ -3,8 +3,14 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
 import WordBag from "./WordBag";
+import { checkWordTranslation, prepareWordTranslation } from "../lib/api";
 import { useWords } from "../store/words";
 vi.mock("../lib/speech", () => ({ speakText: vi.fn() }));
+vi.mock("../lib/api", async importOriginal => ({
+  ...await importOriginal<typeof import("../lib/api")>(),
+  checkWordTranslation: vi.fn(),
+  prepareWordTranslation: vi.fn(),
+}));
 const collect = vi.fn();
 const review = vi.fn();
 const last_reviewed = "2026-10-01";
@@ -27,6 +33,8 @@ async function pickTopic(user: ReturnType<typeof userEvent.setup>, name: string)
 beforeEach(() => {
   collect.mockReset();
   review.mockReset();
+  vi.mocked(checkWordTranslation).mockReset();
+  vi.mocked(prepareWordTranslation).mockReset();
   useWords.setState({
     words: [],
     fetchedOnce: true,
@@ -141,7 +149,8 @@ it("reviews due words and keeps remember/forget and completion reachable", async
 it("shows the original negotiation context before a translation and during immediate repetition", async () => {
   const sentence = "We could begin within a week of signing.";
   useWords.setState({ words: [{ id: 1, text: sentence, meaning: "我们可以在签署后一周内开始。",
-    example: sentence, scenario_id: "negotiation", topic: "新话题", kind: "sentence", mastered: false, created_at: "", last_reviewed }] });
+    review_translation: "我们可以在签署后一周内开始。", example: sentence, scenario_id: "negotiation", topic: "新话题",
+    kind: "sentence", mastered: false, created_at: "", last_reviewed }] });
   const user = userEvent.setup();
   render(<MemoryRouter><WordBag /></MemoryRouter>);
   await user.click(screen.getByRole("button", { name: "收藏句子 1" }));
@@ -150,7 +159,7 @@ it("shows the original negotiation context before a translation and during immed
   expect(screen.getByText("商务谈判")).toBeVisible();
   expect(screen.getByText(/交期与条款/)).toBeVisible();
   expect(screen.queryByText(sentence)).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "查看参考" }));
+  await user.type(screen.getByLabelText("输入英文"), sentence + "{Enter}");
   await user.click(screen.getByRole("button", { name: "模糊" }));
   expect(screen.getByText("模糊巩固 · 第 2 / 2 遍")).toBeVisible();
   expect(screen.getByText("商务谈判")).toBeVisible();
@@ -193,9 +202,84 @@ it("uses a topic label for manual entries and leaves unlabeled old entries alone
   expect(provenance).toHaveTextContent("话题");
   expect(provenance).toHaveTextContent("谈价格");
   expect(within(provenance).queryByText("场景")).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "查看参考" }));
+  await user.type(screen.getByLabelText("输入英文"), "meet in the middle{Enter}");
   await user.click(screen.getByRole("button", { name: "熟悉（记得）" }));
   expect(screen.queryByRole("group", { name: "收藏来源" })).not.toBeInTheDocument();
+});
+
+it.each([
+  ["I've been in sales for three years.", "简洁说明工作年限。", "我做销售已经三年了。", "sentence", "收藏句子 1"],
+  ["I'll have the draft ready by Friday.", "have sth ready by... 表示截止前完成，很自然。", "我最迟会在周五把草稿准备好。", "sentence", "收藏句子 1"],
+  ["I'll have the draft ready by Friday.", "have sth ready by... 表示截止前完成，很自然。", "我最迟会在周五把草稿准备好。", "word", "单词与短语 1"],
+] as const)("uses a full Chinese prompt for %s in place of %s", async (sentence, note, translation, kind, tab) => {
+  const word = { id: 1, text: sentence, meaning: note, example: sentence, scenario_id: "", kind, mastered: false,
+    created_at: "2026-11-25T10:11:12.000456", last_reviewed };
+  useWords.setState({ words: [word] });
+  vi.mocked(prepareWordTranslation).mockResolvedValue({ translation });
+  vi.mocked(checkWordTranslation).mockResolvedValue({ verdict: "different", feedback: "请保留原句中的关键信息。" });
+  const user = userEvent.setup();
+  render(<MemoryRouter><WordBag /></MemoryRouter>);
+  await user.click(screen.getByRole("button", { name: tab }));
+  await user.click(screen.getByRole("button", { name: "复习到期表达 1" }));
+  expect(await screen.findByText(translation)).toBeVisible();
+  expect(screen.queryByText(note)).not.toBeInTheDocument();
+  expect(screen.queryByText(sentence)).not.toBeInTheDocument();
+  expect(prepareWordTranslation).toHaveBeenCalledExactlyOnceWith(word.id, word.created_at, expect.any(AbortSignal));
+  if (sentence.includes("sales")) {
+    await user.type(screen.getByLabelText("输入英文"), "i've had with software company for three years{Enter}");
+    expect(await screen.findByText("和题意有出入")).toBeVisible();
+  }
+  await user.click(screen.getByRole("button", { name: "返回列表" }));
+  await user.click(screen.getByRole("button", { name: name => name.startsWith(sentence) }));
+  expect(screen.getAllByText(note).some(element => element.closest("p"))).toBe(true);
+  expect(useWords.getState().words[0].meaning).toBe(note);
+});
+
+it.each(["unavailable", "offline"] as const)("requires a fresh fill-in on every pass when Chinese preparation is %s", async failure => {
+  const word = { id: 1, text: "I'll have the draft ready by Friday.", meaning: "", example: "", scenario_id: "",
+    kind: "sentence", mastered: false, created_at: "2026-11-25T10:11:12.000456", last_reviewed };
+  useWords.setState({ words: [word] });
+  if (failure === "offline") vi.mocked(prepareWordTranslation).mockRejectedValue(new Error("offline"));
+  else vi.mocked(prepareWordTranslation).mockResolvedValue({ translation: null });
+  const user = userEvent.setup();
+  render(<MemoryRouter><WordBag /></MemoryRouter>);
+  await user.click(screen.getByRole("button", { name: "收藏句子 1" }));
+  await openFilters(user);
+  expect(within(screen.getByRole("group", { name: "复习方式" })).getByRole("button", { name: modeLabels.translate }))
+    .toHaveAttribute("aria-pressed", "true");
+  await user.click(screen.getByRole("button", { name: "复习到期表达 1" }));
+  expect(await screen.findByText("I'll have the draft ready by ____.")).toBeVisible();
+  expect(screen.getByText(modeLabels.cloze)).toBeVisible();
+  await user.type(screen.getByLabelText("输入英文"), "Friday{Enter}");
+  await user.click(screen.getByRole("button", { name: /遗忘/ }));
+  expect(screen.getByText("遗忘巩固 · 第 2 / 3 遍")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "查看参考" }));
+  expect(screen.queryByRole("button", { name: "完成这遍" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "关闭参考" }));
+  await user.type(screen.getByLabelText("输入英文"), "Thursday{Enter}");
+  expect(screen.getByText("与参考填法不同")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "完成这遍" }));
+  expect(screen.getByText("遗忘巩固 · 第 3 / 3 遍")).toBeVisible();
+  expect(screen.getByLabelText("输入英文")).toHaveValue("");
+  expect(rated()).toEqual([[1, false]]);
+  await user.type(screen.getByLabelText("输入英文"), "Friday{Enter}");
+  await user.click(screen.getByRole("button", { name: /熟悉/ }));
+  expect(rated()).toEqual([[1, false], [1, true]]);
+  expect(prepareWordTranslation).toHaveBeenCalledTimes(1);
+});
+
+it("uses flip and an ordinary self-rating when translation preparation returns no prompt and no blank is possible", async () => {
+  useWords.setState({ words: [{ id: 1, text: "OK.", meaning: "", example: "", scenario_id: "",
+    kind: "sentence", mastered: false, created_at: "2026-11-25", last_reviewed }] });
+  vi.mocked(prepareWordTranslation).mockResolvedValue({ translation: null });
+  const user = userEvent.setup();
+  render(<MemoryRouter><WordBag /></MemoryRouter>);
+  await user.click(screen.getByRole("button", { name: "收藏句子 1" }));
+  await user.click(screen.getByRole("button", { name: "复习到期表达 1" }));
+  expect(await screen.findByText(modeLabels.flip)).toBeVisible();
+  expect(screen.queryByLabelText("输入英文")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /熟悉/ }));
+  expect(rated()).toEqual([[1, true]]);
 });
 
 it("starts a fresh review deck from the current due group after returning to the list", async () => {
@@ -288,7 +372,8 @@ it("keeps a repetition blocked while the selected rating awaits confirmation", a
 it("lets the learner select a saved topic, translate its sentence, and save uncertain", async () => {
   review.mockResolvedValue(undefined);
   useWords.setState({ words: [
-    { id: 1, text: "I will look into it.", meaning: "我会调查这件事。", example: "", scenario_id: "cafe", topic: "工作沟通", kind: "sentence", mastered: false, created_at: "", last_reviewed },
+    { id: 1, text: "I will look into it.", meaning: "我会调查这件事。", review_translation: "我会调查这件事。", example: "",
+      scenario_id: "cafe", topic: "工作沟通", kind: "sentence", mastered: false, created_at: "", last_reviewed },
     { id: 2, text: "Could I have it iced?", meaning: "能做成冰的吗？", example: "", scenario_id: "cafe", kind: "sentence", mastered: false, created_at: "" },
   ] });
   const user = userEvent.setup();

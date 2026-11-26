@@ -60,6 +60,7 @@ def _migrate_sqlite() -> None:
             "topic": "ALTER TABLE words ADD COLUMN topic VARCHAR(48)",
             "familiarity": "ALTER TABLE words ADD COLUMN familiarity VARCHAR(16)",
             "source": "ALTER TABLE words ADD COLUMN source JSON",
+            "review_translation": "ALTER TABLE words ADD COLUMN review_translation TEXT",
         },
         "sessions": {"client_id": f"ALTER TABLE sessions {_CID}"},
         "practice_records": {"client_id": f"ALTER TABLE practice_records {_CID}"},
@@ -132,6 +133,8 @@ def _migrate_word_topics() -> None:
             conn.exec_driver_sql("ALTER TABLE words ADD COLUMN IF NOT EXISTS familiarity VARCHAR(16)")
         if "source" not in words:
             conn.exec_driver_sql("ALTER TABLE words ADD COLUMN IF NOT EXISTS source JSON")
+        if "review_translation" not in words:
+            conn.exec_driver_sql("ALTER TABLE words ADD COLUMN IF NOT EXISTS review_translation TEXT")
         if getattr(words["text"], "length", None) == 128:
             conn.exec_driver_sql("ALTER TABLE words ALTER COLUMN text TYPE VARCHAR(600)")
         if getattr(events["word_text"], "length", None) == 128:

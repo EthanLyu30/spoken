@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.middleware import SelectiveGZipMiddleware
-from app.core.ratelimit import limiter, limit_for
+from app.core.ratelimit import bucket_for, limiter, limit_for
 from app.core.observability import TelemetryMiddleware
 from app.services.telemetry import TelemetrySink, RetentionWorker, configured_bootstrap_admin
 from app.services.feedback_notifications import recover_notifications
@@ -162,7 +162,7 @@ async def protect_costly_endpoints(request: Request, call_next):
         if rule is not None:
             limit, window = rule
             client = request.client.host if request.client else "unknown"
-            key = f"{client}:{request.url.path.split('/')[2] if request.url.path.count('/') >= 2 else 'api'}"
+            key = f"{client}:{bucket_for(request.url.path)}"
             if not limiter.allow(key, limit=limit, window_seconds=window):
                 origin = request.headers.get("origin")
                 headers = {"Retry-After": str(window)}

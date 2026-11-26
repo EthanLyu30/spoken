@@ -129,13 +129,38 @@
 .wordbag-scene-bookmarks .ui-secondary { padding: 4px 12px; min-height: 34px; }
 .wordbag-review-output {
   display: grid;
-  gap: 16px;
+  gap: 14px;
   justify-items: center;
   width: min(100%, 520px);
+  min-width: 0;
   overflow-wrap: anywhere;
 }
-.wordbag-review-output > p { font-size: clamp(19px, 3vw, 28px); font-weight: 700; }
+.wordbag-question .wordbag-card-mode p { font-size: .8125rem; color: var(--muted); }
+.wordbag-question .wordbag-card-mode p:first-child { color: var(--coral-deep); font-weight: 750; }
+.wordbag-review-output .wordbag-review-prompt { color: var(--ink); font-size: clamp(19px, 3vw, 28px); font-weight: 750; line-height: 1.45; }
 .wordbag-review-output label { width: 100%; text-align: left; }
+.wordbag-review-output input { width: 100%; min-width: 0; min-height: 46px; font-size: 1rem; }
+.wordbag-review-output input:disabled { opacity: .65; }
+.wordbag-output-actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; }
+.wordbag-reference-panel:not([hidden]) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  width: 100%;
+  text-align: start;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.wordbag-reference-panel strong { color: var(--muted); font-size: .8125rem; }
+@media (max-width: 900px) {
+  .wordbag-reference-panel { scroll-margin-block-end: calc(76px + env(safe-area-inset-bottom)); }
+}
+.wordbag-question .wordbag-review-status,
+.wordbag-review-output > [role="status"],
 .wordbag-review-output [role="status"] p,
 .wordbag-save-error { font-size: 13px; color: var(--muted); }
 .wordbag-save-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
@@ -171,7 +196,7 @@
 .wordbag-repeat { padding-inline-start: 10px; border-inline-start: 1px solid var(--border); color: var(--coral-deep); font-weight: 700; }
 .wordbag-review-dates { width: min(100%, 520px); text-align: left; overflow-wrap: anywhere; }
 .wordbag-review-dates li { padding: 8px 0; border-top: 1px solid var(--border); }
-.wordbag-review-output .wordbag-reference { color: var(--ink); font-size: 16px; margin-top: 8px; }
+.wordbag-review-output .wordbag-reference { color: var(--ink); font-size: 16px; margin-top: 4px; }
 .wordbag-origin {
   width: min(100%, 520px);
   padding-block: 8px;
@@ -217,7 +242,6 @@
 .wordbag-retest-result dt { color: var(--muted); font-size: .8125rem; }
 .wordbag-retest .wordbag-retest-error { margin-block: 10px; color: var(--coral-deep); }
 .wordbag-retest > .card { margin-top: 18px; border: 1px solid var(--border); background: var(--surface); border-radius: 18px; }
-.wordbag-retest > .card .wordbag-review-output > p { color: var(--ink); font-size: clamp(19px, 3vw, 28px); }
 .wordbag-retest-prep { display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(0, 1fr); align-items: center; gap: 18px 30px; }
 .wordbag-retest-prep .wordbag-artwork { border-radius: 16px; }
 .wordbag-retest-prep .wordbag-art-image { background-size: contain; }

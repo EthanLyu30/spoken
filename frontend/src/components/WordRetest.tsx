@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, getWordRetest, startWordRetest, type ReviewChoice, type WordRetestState } from "../lib/api";
 import { getAuthGeneration } from "../lib/authToken";
-import { reviewPrompt } from "../lib/wordReview";
 import { useWords } from "../store/words";
 import { WordReviewDeck } from "./WordReviewDeck";
 import { WordBagArtwork, WordBagMotionProvider } from "./WordBagArtwork";
@@ -125,7 +124,7 @@ function WordRetestContent({ onClose, onFocus }: RetestProps) {
         </div>
       </div>}
       {round && item && running ? <WordReviewDeck key={`${round.id}:${item.position}`} deck={[item.word]} activity="retest"
-        mode={reviewPrompt(item.word, "translate") ? "translate" : reviewPrompt(item.word, "cloze") ? "cloze" : "flip"}
+        mode="translate"
         review={(_word, choice) => rate(choice)} onDone={onClose} /> : <div className="wordbag-retest-prep">
           <div className="wordbag-retest-options">
             {continueRound ? <p>沿用本轮已选的收藏。后来加入的表达会进下一轮。</p>

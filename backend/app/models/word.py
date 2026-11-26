@@ -21,6 +21,7 @@ class WordEntry(Base):
     client_id: Mapped[str] = mapped_column(String(64), default="anon", index=True)
     text: Mapped[str] = mapped_column(String(600), index=True)
     meaning: Mapped[str] = mapped_column(Text, default="")
+    review_translation: Mapped[str | None] = mapped_column(Text, nullable=True)
     example: Mapped[str] = mapped_column(Text, default="")
     scenario_id: Mapped[str] = mapped_column(String(64), default="")
     source: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)

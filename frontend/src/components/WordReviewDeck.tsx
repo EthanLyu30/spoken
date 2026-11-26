@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Volume2 } from "lucide-react";
-import { checkWordTranslation, type ReviewChoice, type TranslationGrade, type Word } from "../lib/api";
+import { checkWordTranslation, prepareWordTranslation, type ReviewChoice, type TranslationGrade, type Word } from "../lib/api";
 import { getAuthGeneration } from "../lib/authToken";
-import { familiarityOf, matchesReviewAnswer, reviewDueAt, reviewPrompt, type ReviewMode } from "../lib/wordReview";
+import { familiarityOf, matchesReviewAnswer, reviewDueAt, reviewModeForWord, reviewModeLabels, reviewPrompt, type ReviewMode } from "../lib/wordReview";
 import { playCafeChime, useRewardEquipped } from "../lib/rewards";
 import { createPracticeId } from "../lib/sessionSave";
 import { speakText } from "../lib/speech";
@@ -40,9 +40,11 @@ export function WordReviewDeck({ deck, mode, activity = "review", review, onDone
   const [seen, setSeen] = useState<number | null>(null);
   const [repeats, setRepeats] = useState<Repetition[]>([]);
   const [flipped, setFlipped] = useState(false);
+  const [referenceOpen, setReferenceOpen] = useState(false);
   const [input, setInput] = useState("");
   const [checking, setChecking] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [translations, setTranslations] = useState<Map<string, string | null>>(() => new Map());
   const [choices, setChoices] = useState<Map<number, ReviewChoice>>(() => new Map());
   const [pending, setPending] = useState<Set<number>>(() => new Set());
   const [failed, setFailed] = useState<SavedChoice[]>([]);
@@ -53,7 +55,11 @@ export function WordReviewDeck({ deck, mode, activity = "review", review, onDone
   const stepLabel = useRef<HTMLParagraphElement>(null);
   const completionTitle = useRef<HTMLHeadingElement>(null);
   const revealedAnswer = useRef<HTMLElement | null>(null);
+  const referencePanel = useRef<HTMLDivElement>(null);
+  const answerInput = useRef<HTMLInputElement>(null);
+  const returnToInput = useRef(false);
   const checkRequest = useRef<AbortController | null>(null);
+  const referenceId = useId();
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; checkRequest.current?.abort(); };
@@ -63,8 +69,15 @@ export function WordReviewDeck({ deck, mode, activity = "review", review, onDone
     (stepLabel.current ?? completionTitle.current)?.focus({ preventScroll: true });
   }, [i, seen]);
   useEffect(() => {
-    if (flipped) revealedAnswer.current?.focus();
-  }, [flipped]);
+    if (referenceOpen) {
+      revealedAnswer.current?.focus({ preventScroll: true });
+      referencePanel.current?.scrollIntoView?.({ block: "nearest" });
+    } else if (flipped || feedback) revealedAnswer.current?.focus();
+    else if (returnToInput.current) {
+      returnToInput.current = false;
+      answerInput.current?.focus();
+    }
+  }, [flipped, referenceOpen, feedback]);
   // Finish everyone's second pass before returning to the forgotten expressions for their third.
   const followups = useMemo(() => [
     ...repeats.map(item => ({ ...item, pass: 2 })),
@@ -73,45 +86,71 @@ export function WordReviewDeck({ deck, mode, activity = "review", review, onDone
   const repeat = i >= deck.length ? followups[i - deck.length] : undefined;
   const sourceIndex = repeat?.sourceIndex ?? i;
   const word = deck[sourceIndex];
-  const prompt = word && reviewPrompt(word, mode);
+  const wordId = word?.id;
+  const createdAt = word?.created_at;
+  const translationKey = word && JSON.stringify([word.id, word.created_at, word.text]);
+  const translation = translationKey === undefined ? undefined : translations.get(translationKey);
+  const translationUnavailable = mode === "translate" && translation === null;
+  const cardMode = word ? reviewModeForWord(word, translationUnavailable ? "cloze" : mode) : mode;
+  const prompt = word && reviewPrompt(translation ? { ...word, review_translation: translation } : word, cardMode);
+  const preparing = !!word && cardMode === "translate" && !prompt;
   const preview = learning && seen !== i;
   const practiceOnly = repeat?.pass === 2 && repeat.total === 3;
   const waitForSave = !!word && (pending.has(word.id) || failed.some(item => item.word.id === word.id));
-  const canAdvance = !!word && !preview && !waitForSave && (flipped || (!singleRating && !prompt && !repeat));
+  const showRatings = !preparing && (prompt ? !!feedback : flipped || !singleRating);
+  const canAdvance = !!word && !preview && !waitForSave && showRatings && (!repeat || !!prompt || flipped);
 
-  function finishCheck(next: Feedback) {
-    setFeedback(next);
-    setFlipped(true);
-  }
+  useEffect(() => {
+    if (preview || !preparing || wordId === undefined || createdAt === undefined || !translationKey ||
+      deckGeneration.current !== getAuthGeneration()) return;
+    const controller = new AbortController();
+    const prepare = async () => {
+      let translation: string | null = null;
+      try {
+        const result = await prepareWordTranslation(wordId, createdAt, controller.signal);
+        const candidate = result.translation?.trim();
+        if (candidate && /\p{Script=Han}/u.test(candidate)) translation = candidate;
+      } catch { /* A saved expression can still be practiced with a different prompt. */ }
+      if (!controller.signal.aborted && deckGeneration.current === getAuthGeneration()) {
+        setTranslations(items => new Map(items).set(translationKey, translation));
+      }
+    };
+    void prepare();
+    return () => controller.abort();
+  }, [createdAt, preparing, preview, translationKey, wordId]);
 
   async function checkAnswer() {
-    if (!word || !prompt || !input.trim() || checkRequest.current || deckGeneration.current !== getAuthGeneration()) return;
-    if (matchesReviewAnswer(input, prompt.answer)) return finishCheck({ title: "与参考一致" });
-    if (mode !== "translate") return finishCheck({ title: "与参考填法不同", detail: "可以结合句意判断其他填法。" });
+    const answer = input.trim();
+    if (!word || !prompt || !answer || referenceOpen || feedback || checkRequest.current ||
+      deckGeneration.current !== getAuthGeneration()) return;
+    if (matchesReviewAnswer(answer, prompt.answer)) return setFeedback({ title: "与参考一致" });
+    if (cardMode === "cloze") return setFeedback({ title: "与参考填法不同", detail: "可以结合句意判断其他填法。" });
     const controller = new AbortController();
     const current = () => mounted.current && !controller.signal.aborted && deckGeneration.current === getAuthGeneration();
     checkRequest.current = controller;
     setChecking(true);
     try {
-      const result = await checkWordTranslation(word.id, input.trim(), controller.signal);
-      if (current()) finishCheck({ title: gradeTitles[result.verdict], detail: result.feedback });
+      const result = await checkWordTranslation(word.id, answer, controller.signal, word.created_at || undefined);
+      if (current()) setFeedback({ title: gradeTitles[result.verdict], detail: result.feedback });
     } catch {
-      if (current()) finishCheck({ title: "暂时无法判断改写", detail: "可对照参考答案自行标记熟悉度。" });
+      if (current()) setFeedback({ title: "暂时无法判断改写", detail: "可对照参考答案自行标记熟悉度。" });
     } finally {
       if (checkRequest.current === controller) checkRequest.current = null;
       if (current()) setChecking(false);
     }
   }
 
-  function revealReference() {
-    checkRequest.current?.abort();
-    checkRequest.current = null;
-    setChecking(false);
-    finishCheck({ title: "参考答案" });
+  function closeReference() {
+    returnToInput.current = true;
+    setReferenceOpen(false);
   }
 
   const nextCard = useCallback(() => {
+    checkRequest.current?.abort();
+    checkRequest.current = null;
+    setChecking(false);
     setFlipped(false);
+    setReferenceOpen(false);
     setFeedback(null);
     setInput("");
     setI(i + 1);
@@ -235,22 +274,45 @@ export function WordReviewDeck({ deck, mode, activity = "review", review, onDone
     </div>
   </section>;
 
-  return <section className="card wordbag-question grid place-items-center gap-4 p-8 text-center">
+  return <section className="card wordbag-question grid place-items-center gap-4 p-8 text-center"
+    onKeyDown={event => {
+      if (referenceOpen && event.key === "Escape") {
+        event.preventDefault();
+        closeReference();
+      }
+    }}>
     {step}
     <WordBagArtwork scenarioId={word.scenario_id} compact />
-    <WordReviewContext key={i} word={word} showConversation={flipped}
-      hiddenAnswers={flipped ? [] : [word.text, prompt?.answer ?? ""]} />
-    {prompt ? <form className="wordbag-review-output" onSubmit={event => { event.preventDefault(); if (!flipped) void checkAnswer(); }}>
-      <p lang={mode === "cloze" ? "en" : "zh-CN"}>{prompt.prompt}</p>
-      <label>输入英文<input value={input} readOnly={flipped || checking} onChange={event => setInput(event.target.value)} lang="en" maxLength={1200} /></label>
-      {!flipped && <div><Button type="submit" disabled={!input.trim() || checking}>检查答案</Button>{" "}
-        <Button type="button" variant="soft" onClick={revealReference}>查看参考</Button></div>}
+    <WordReviewContext key={i} word={word} showConversation={flipped || referenceOpen || !!feedback}
+      hiddenAnswers={flipped || referenceOpen || feedback ? [] : [word.text, prompt?.answer ?? ""]} />
+    <div className="wordbag-card-mode">
+      <p>{reviewModeLabels[cardMode]}</p>
+      {translationUnavailable && <p>这次未能准备中文题面。</p>}
+    </div>
+    {preparing ? <p className="wordbag-review-status" role="status">正在准备中文题面…</p> :
+      prompt ? <form className="wordbag-review-output" onSubmit={event => { event.preventDefault(); void checkAnswer(); }}>
+      <p className="wordbag-review-prompt" lang={cardMode === "cloze" ? "en" : "zh-CN"}>{prompt.prompt}</p>
+      <label>输入英文<input ref={answerInput} value={input} disabled={referenceOpen} readOnly={!!feedback || checking}
+        onChange={event => setInput(event.target.value)} lang="en" maxLength={1200} enterKeyHint="done" autoComplete="off" spellCheck={false} /></label>
+      {!feedback && !referenceOpen && <div className="wordbag-output-actions">
+        <Button type="submit" disabled={!input.trim() || checking}>检查答案</Button>
+        <Button type="button" variant="ghost" aria-expanded={false} aria-controls={referenceId}
+          disabled={checking} onClick={() => setReferenceOpen(true)}>查看参考</Button>
+      </div>}
+      <div ref={referencePanel} id={referenceId} hidden={!referenceOpen} className="wordbag-reference-panel">
+        {referenceOpen && <>
+          <div><strong>参考答案</strong><p className="wordbag-reference" ref={element => { revealedAnswer.current = element; }}
+            tabIndex={-1} lang="en">{prompt.answer}</p></div>
+          <Button type="button" variant="soft" onClick={closeReference}>关闭参考</Button>
+        </>}
+      </div>
       {checking && <p role="status">正在判断表达是否和题意一致…</p>}
       {feedback && <div role="status"><strong>{feedback.title}</strong>{feedback.detail && <p>{feedback.detail}</p>}
-        <p className="wordbag-reference" ref={element => { revealedAnswer.current = element; }} tabIndex={-1} lang="en">{prompt.answer}</p></div>}
+        <p className="wordbag-reference" ref={element => { revealedAnswer.current = element; }} tabIndex={-1} lang="en">{prompt.answer}</p>
+      </div>}
     </form> : singleRating ? <div className="wordbag-learn-recall">
       <p>{word.meaning || (learning ? "想一想刚学的英文，再核对原文。" : "回忆这条收藏，再核对原文。")}</p>
-      {flipped ? <strong ref={revealedAnswer} tabIndex={-1} lang="en">{word.text}</strong> : <Button variant="soft" onClick={revealReference}>显示原文</Button>}
+      {flipped ? <strong ref={revealedAnswer} tabIndex={-1} lang="en">{word.text}</strong> : <Button variant="soft" onClick={() => setFlipped(true)}>显示原文</Button>}
     </div> : <button type="button" onClick={() => setFlipped(value => !value)}
       className="grid min-h-[9rem] w-full place-items-center rounded-3xl bg-surface-2 px-6 py-8">
       {!flipped ? <span className="font-display text-2xl font-bold text-ink">{word.text}</span> : <div>
@@ -258,7 +320,7 @@ export function WordReviewDeck({ deck, mode, activity = "review", review, onDone
         {word.example && <p className="mt-2 text-sm text-muted">{word.example}</p>}
       </div>}
     </button>}
-    {(flipped || (!singleRating && !prompt)) && <>
+    {showRatings && <>
       <div className="flex items-center gap-3"><button type="button" onClick={() => speakText(word.text)}
         className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-ink">
         <Volume2 className="h-3.5 w-3.5" /> 朗读</button>

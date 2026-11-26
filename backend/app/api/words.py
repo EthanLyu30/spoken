@@ -8,7 +8,10 @@ from sqlalchemy.orm import Session
 from app.api.chat import get_client
 from app.core.deps import authenticated_user, get_client_id, get_optional_client_id, get_timezone
 from app.db import get_db
-from app.schemas.word import Word, WordCreate, WordReview, WordTopicChange, WordTranslation, WordTranslationGrade, WordUpdate
+from app.schemas.word import (
+    Word, WordCreate, WordReview, WordTopicChange, WordTranslation, WordTranslationGrade,
+    WordTranslationPrompt, WordTranslationPromptRequest, WordUpdate,
+)
 from app.schemas.word_retest import RetestRating, RetestRound, RetestState, StartRetest
 from app.services import words as repo
 from app.services import word_retest
@@ -110,17 +113,39 @@ async def check_translation(word_id: int, payload: WordTranslation, response: Re
     response.headers["Cache-Control"] = "private, no-store"
     if not owner:
         raise HTTPException(400, "A device identifier or login is required")
-    word = repo.get_word(db, owner, word_id)
+    word = repo.get_word(db, owner, word_id, created_at=payload.created_at)
     if word is None:
         raise HTTPException(404, "Word not found")
-    meaning, reference, answer = word.meaning.strip(), word.text, payload.answer.strip()
+    meaning, reference, answer = (word.review_translation or word.meaning).strip(), word.text, payload.answer.strip()
+    created_at = word.created_at.isoformat()
     db.rollback()  # Release the read transaction before waiting on DeepSeek.
     if not meaning or not answer:
         raise HTTPException(422, "缺少中文题面或英文作答。")
     try:
-        return await repo.grade_translation(meaning[:1200], reference, answer, client)
+        grade = await repo.grade_translation(meaning[:1200], reference, answer, client)
     except (DeepSeekError, ValidationError, JSONDecodeError) as exc:
         raise HTTPException(503, "暂时无法检查改写，可以查看参考后自行判断。") from exc
+    if repo.get_word(db, owner, word_id, created_at=created_at) is None:
+        raise HTTPException(404, "Word not found")
+    return grade
+
+
+@router.post("/words/{word_id}/translation-prompt", response_model=WordTranslationPrompt)
+async def prepare_translation(word_id: int, payload: WordTranslationPromptRequest, response: Response,
+                              db: Session = Depends(get_db), owner: str = Depends(get_optional_client_id),
+                              client: DeepSeekClient = Depends(get_client)) -> WordTranslationPrompt:
+    response.headers["Cache-Control"] = "private, no-store"
+    if not owner:
+        raise HTTPException(400, "A device identifier or login is required")
+    word = repo.get_word(db, owner, word_id, created_at=payload.created_at)
+    if word is None or word.review_translation is not None:
+        return WordTranslationPrompt(translation=word.review_translation if word is not None else None)
+    reference, saved_meaning = word.text, word.meaning
+    db.rollback()  # Release the read transaction before both provider calls.
+    translation = await repo.prepare_review_translation(reference, saved_meaning, client)
+    if translation is not None:
+        translation = repo.save_review_translation(db, owner, word_id, payload.created_at, reference, translation)
+    return WordTranslationPrompt(translation=translation)
 
 
 @router.post("/words/{word_id}/review", response_model=Word)

@@ -8,7 +8,7 @@ import { useWords } from "../store/words";
 import { speakText } from "../lib/speech";
 import { getScenario } from "../data/scenarios";
 import { getAuthGeneration, subscribeAuthGeneration } from "../lib/authToken";
-import { familiarityOf, reviewDueAt, reviewPrompt, type ReviewMode } from "../lib/wordReview";
+import { familiarityOf, reviewDueAt, reviewModeForWord, type ReviewMode } from "../lib/wordReview";
 import { SceneBookmarks } from "../components/SceneBookmarks";
 import { WordReviewDeck, ReviewDue } from "../components/WordReviewDeck";
 import { WordReviewContext } from "../components/WordReviewContext";
@@ -109,8 +109,8 @@ function WordBagContent() {
   const nextDue = learned.find(word => !word.mastered && dueTime(word) > now);
   const modeCandidates = newWords.length ? newWords : due.length ? due : learned;
   const mode = preferredMode ?? (["translate", "cloze"] as const).find(option =>
-    modeCandidates.some(word => reviewPrompt(word, option))) ?? "flip";
-  const recallCount = mode === "flip" ? 0 : eligible.filter(word => !reviewPrompt(word, mode)).length;
+    modeCandidates.some(word => reviewModeForWord(word, option) === option)) ?? "flip";
+  const recallCount = mode === "flip" ? 0 : eligible.filter(word => reviewModeForWord(word, mode) === "flip").length;
   const chooseEarly = due.length === 0 && learned.length > 0;
 
   function startRound(pool: Word[], kind: "learn" | "due" | "early") {

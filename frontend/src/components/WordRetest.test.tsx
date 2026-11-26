@@ -47,6 +47,9 @@ it("settles an offline review before the newer retest instead of replaying it ov
   render(<WordRetest onClose={vi.fn()} onFocus={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "继续重测" }));
   await user.click(screen.getByRole("button", { name: "查看参考" }));
+  expect(screen.queryByRole("button", { name: "遗忘（忘了）" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "关闭参考" }));
+  await user.type(screen.getByLabelText("输入英文"), "itinerary{Enter}");
   await user.click(screen.getByRole("button", { name: "遗忘（忘了）" }));
   const retry = await screen.findByRole("button", { name: "重试保存" });
   expect(applied).toEqual([]);
@@ -61,7 +64,8 @@ it("settles an offline review before the newer retest instead of replaying it ov
 
 it("previews the scope, retries one rating, and resumes with the next saved item", async () => {
   const first = { id: 3, text: "quotation", meaning: "报价", example: "", scenario_id: "", kind: "word", mastered: true, created_at: "" };
-  const second = { ...first, id: 4, text: "We can start today.", meaning: "我们可以今天开始。", kind: "sentence" };
+  const second = { ...first, id: 4, text: "We can start today.", meaning: "我们可以今天开始。",
+    review_translation: "我们可以今天开始。", kind: "sentence" };
   let round: WordRetestRound | null = null;
   const started = { id: "round-1", words: 1, sentences: 1, familiar: 0, uncertain: 0, forgot: 0, skipped: 0,
     next_item: { position: 0, word: first } };
@@ -78,7 +82,7 @@ it("previews the scope, retries one rating, and resumes with the next saved item
   await user.click(screen.getByRole("button", { name: "开始重测" }));
   expect(await screen.findByText("已测 0 / 2 条")).toBeVisible();
   expect(screen.queryByText("quotation")).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "查看参考" }));
+  await user.type(screen.getByLabelText("输入英文"), "quotation{Enter}");
   await user.click(screen.getByRole("button", { name: "遗忘（忘了）" }));
   await user.click(await screen.findByRole("button", { name: "重试保存" }));
   expect(await screen.findByText(second.meaning)).toBeVisible();
@@ -121,11 +125,11 @@ it("keeps motion paused across questions and focuses the completed result", asyn
   await user.click(await screen.findByRole("button", { name: "继续重测" }));
   await user.click(screen.getByRole("button", { name: "暂停场景动效" }));
   expect(screen.getByRole("button", { name: "播放场景动效" })).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "查看参考" }));
+  await user.type(screen.getByLabelText("输入英文"), "quotation{Enter}");
   await user.click(screen.getByRole("button", { name: "熟悉（记得）" }));
   expect(await screen.findByText(second.meaning)).toBeVisible();
   expect(screen.getByRole("button", { name: "播放场景动效" })).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "查看参考" }));
+  await user.type(screen.getByLabelText("输入英文"), "delivery{Enter}");
   screen.getByRole("button", { name: "熟悉（记得）" }).focus();
   await user.keyboard("{Enter}");
   expect(await screen.findByRole("heading", { name: "重测完成" })).toHaveFocus();

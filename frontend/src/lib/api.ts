@@ -1526,6 +1526,7 @@ export interface Word {
   id: number;
   text: string;
   meaning: string;
+  review_translation?: string | null;
   example: string;
   scenario_id: string;
   source?: WordSource | null;
@@ -1645,9 +1646,15 @@ export interface TranslationGrade {
   feedback: string;
 }
 
-export function checkWordTranslation(id: number, answer: string, signal: AbortSignal): Promise<TranslationGrade> {
+export function prepareWordTranslation(id: number, createdAt: string, signal: AbortSignal): Promise<{ translation: string | null }> {
+  return request(`/api/words/${id}/translation-prompt`, {
+    method: "POST", body: JSON.stringify({ created_at: createdAt }), signal,
+  }, 15_000);
+}
+
+export function checkWordTranslation(id: number, answer: string, signal: AbortSignal, createdAt?: string): Promise<TranslationGrade> {
   return request<TranslationGrade>(`/api/words/${id}/translation`, {
-    method: "POST", body: JSON.stringify({ answer }), signal,
+    method: "POST", body: JSON.stringify({ answer, created_at: createdAt }), signal,
   }, 15_000);
 }
 
