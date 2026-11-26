@@ -65,6 +65,7 @@ it("keeps the settings link and only browser and optional local voice engines on
   expect(
     screen.getByRole("heading", { name: "让声音，适合你的节奏。" }),
   ).toBeVisible();
+  expect(screen.getByRole("link", { name: "装扮商店" })).toHaveAttribute("href", "/me?tab=shop");
   expect(screen.queryByRole("button", { name: /云端语音/ })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: /浏览器语音/ })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("button", { name: /本地 AI 语音/ })).toBeVisible();

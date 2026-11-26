@@ -672,6 +672,8 @@
   color: var(--coral-deep);
   font-weight: 700;
 }
+.profile-navigation a { display: inline-flex; align-items: center; gap: 9px; }
+.profile-navigation svg { flex: none; }
 .profile-main {
   min-width: 0;
 }

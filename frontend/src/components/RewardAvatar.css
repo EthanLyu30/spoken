@@ -1,4 +1,2 @@
-.reward-avatar { display: inline-block; position: relative; flex: none; width: 40px; height: 40px; border-radius: 50%; background: #f3e5cb; overflow: hidden; }
-.reward-avatar img, .account-entry .reward-avatar img { position: absolute; inset: 4%; width: 92%; height: 92%; border-radius: 0; object-fit: contain; }
-.reward-avatar > span { position: absolute; inset: 70% 24% 19%; border-radius: 25% 35% 55% 40%; transform: rotate(-6deg); background: repeating-linear-gradient(98deg, #2b6b57 0 18%, #e5c879 19% 24%, #2b6b57 25% 41%); box-shadow: inset 0 1px rgb(255 254 224 / .5), 0 1px 1px #371e1459; }
-.reward-avatar > span::after { position: absolute; content: ""; width: 22%; height: 215%; top: 25%; right: 10%; transform: rotate(-19deg); background: linear-gradient(#367b64 55%, #e5c879 58% 70%, #367b64 74%); border-radius: 12% 30% 19% 16%; }
+.reward-avatar { display: inline-block; position: relative; flex: none; width: 40px; height: 40px; overflow: hidden; border-radius: 50%; background: var(--surface-2); }
+.reward-avatar img, .account-entry .reward-avatar img, .profile-identity .reward-avatar img { display: block; position: absolute; inset: 0; width: 100% !important; height: 100% !important; object-fit: cover; border-radius: inherit; }

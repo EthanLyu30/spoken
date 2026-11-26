@@ -38,12 +38,14 @@ import { tokens } from "../lib/tokens";
 import { cn } from "../lib/utils";
 import { useProfileData } from "../hooks/useProfileData";
 import AccountSettings from "../components/AccountSettings";
+import { ProfileNavigation } from "../components/ProfileNavigation";
 
 export default function Profile() {
   const [search] = useSearchParams();
+  const tab = search.get("tab");
   const [allBadges, setAllBadges] = useState(false);
-  const settings = search.get("tab") === "voice";
-  const accountSettings = search.get("tab") === "account";
+  const settings = tab === "voice";
+  const accountSettings = tab === "account";
   const words = useWords((s) => s.words);
   const wordsKnown = useWords((s) => s.fetchedOnce && !s.error);
   const ensureLoaded = useWords((s) => s.ensureLoaded);
@@ -184,18 +186,7 @@ export default function Profile() {
               xpNext={xpNext}
               statsKnown={stats !== null}
             />
-            <nav className="profile-tabs" aria-label="个人中心设置">
-              <Link to="/me" className={!settings && !accountSettings ? "active" : ""}>
-                资料与成就
-              </Link>
-              <Link to="/me?tab=voice" className={settings ? "active" : ""}>
-                语音设置
-              </Link>
-              {userId && <Link to="/me?tab=account" className={accountSettings ? "active" : ""}>账号与数据</Link>}
-              <Link to="/me#badges">成就徽章</Link>
-              <Link to="/me#practice-history">练习记录</Link>
-              <Link to="/feedback?from=profile">意见反馈</Link>
-            </nav>
+            <ProfileNavigation active={settings ? "voice" : accountSettings ? "account" : "profile"} signedIn={userId !== null} />
           </aside>
           <div className="profile-main">
             {settings ? (

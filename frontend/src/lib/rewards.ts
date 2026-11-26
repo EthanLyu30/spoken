@@ -5,6 +5,7 @@ import { getAuthGeneration, subscribeAuthGeneration } from "./authToken";
 
 export type RewardItem = "pip-scarf" | "cafe-chime" | "cafe-rain";
 export const rewardsPath = "/api/practice-rewards";
+export const shopHref = "/me?tab=shop";
 export const rewardDetails = {
   "pip-scarf": { name: "围巾 Pip", description: "用作个人中心的头像。" },
   "cafe-chime": { name: "咖啡馆门铃", description: "复习或结束场景对话时，响起两声轻铃。" },

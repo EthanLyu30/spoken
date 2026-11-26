@@ -22,6 +22,7 @@ const Report = lazy(() => import("./pages/Report"));
 const Progress = lazy(() => import("./pages/Progress"));
 const WordBag = lazy(() => import("./pages/WordBag"));
 const Profile = lazy(() => import("./pages/Profile"));
+const RewardShop = lazy(() => import("./pages/RewardShop"));
 const Daily = lazy(() => import("./pages/Daily"));
 const CustomScenePage = lazy(() => import("./pages/CustomScene"));
 const Interview = lazy(() => import("./pages/Interview"));
@@ -45,7 +46,8 @@ export default function App() {
   const hasRehearsalHeader = !search.has("review") && (prepId === "custom"
     ? customRehearsal && !search.has("lesson") : Boolean(prepId && getScenario(prepId)));
   const section = location.pathname.split("/")[1] || "home";
-  const hasSkipTarget = focused || section === "prepare" || section === "feedback" || ["/", "/scenes", "/custom", "/interview"].includes(location.pathname);
+  const shopping = section === "me" && search.get("tab") === "shop";
+  const hasSkipTarget = focused || shopping || section === "prepare" || section === "feedback" || ["/", "/scenes", "/custom", "/interview"].includes(location.pathname);
   // Account resolution must never hide the routes: Home, Scenes and practice
   // remain usable while `/auth/me` validates in the background. Only an
   // unresolved credential shows a non-blocking notice.
@@ -109,7 +111,7 @@ export default function App() {
             <Route path="/session/:id" element={<SessionView />} />
             <Route path="/progress" element={<Progress />} />
             <Route path="/words" element={<WordBag />} />
-            <Route path="/me" element={<Profile />} />
+            <Route path="/me" element={shopping ? <RewardShop /> : <Profile />} />
             <Route path="/daily" element={<Daily />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/account-action" element={<AccountAction />} />
